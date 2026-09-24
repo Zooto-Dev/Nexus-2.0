@@ -73,6 +73,13 @@ create policy "nx delete" on public.nx_docs for delete to authenticated
     and (collection not in ('users', 'roles', 'settings', 'processes') or public.nx_is_admin())
   );
 
+-- Data API exposure ("Automatically expose new tables" OFF hai, isliye explicit grant):
+-- sirf in do tables ko API roles dikhengi; RLS upar se access control karti hai.
+grant usage on schema public to anon, authenticated;
+grant select, insert, update, delete on public.nx_docs to authenticated;
+grant select on public.nx_profiles to authenticated;
+-- anon role ko koi table grant NAHI — bina login kuch nahi khulta.
+
 -- Live updates for every open screen.
 do $$ begin
   alter publication supabase_realtime add table public.nx_docs;
