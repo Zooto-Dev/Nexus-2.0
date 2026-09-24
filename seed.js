@@ -16,12 +16,12 @@ const DEFAULT_O2D_SPEC = {
   priority: { field: 'priority', urgent: ['Urgent'], hold: ['On Hold'], cancel: ['Cancelled'] },
   doerTables: {},
   steps: [
-    { id: 'order_verify', name: 'Order Verification', what: 'PO, qty, size, article aur expiry date check karo', doer: { type: 'fixed', name: 'SALES' }, trigger: { type: 'instanceStart' }, tat: { value: 2, unit: 'hours' } },
-    { id: 'planning', name: 'Production Planning', doer: { type: 'fixed', name: 'PPC' }, trigger: { type: 'afterStep', step: 'order_verify' }, tat: { value: 1, urgent: 0.5, unit: 'days' } },
+    { id: 'order_verify', name: 'Order Verification', what: 'PO, qty, size, article aur expiry date check karo', doer: { type: 'fixed', name: 'MERCHANT' }, trigger: { type: 'instanceStart' }, tat: { value: 2, unit: 'hours' } },
+    { id: 'planning', name: 'Production Planning', doer: { type: 'fixed', name: 'PRODUCTION' }, trigger: { type: 'afterStep', step: 'order_verify' }, tat: { value: 1, urgent: 0.5, unit: 'days' } },
     { id: 'material', name: 'Material Arrangement', what: 'BOM ke hisaab se material issue / purchase', doer: { type: 'fixed', name: 'STORE' }, trigger: { type: 'afterStep', step: 'planning' }, tat: { value: 2, urgent: 1, unit: 'days' } },
     { id: 'production', name: 'Production', doer: { type: 'fixed', name: 'PRODUCTION' }, trigger: { type: 'afterStep', step: 'material' }, tat: { value: 3, urgent: 2, unit: 'days' } },
     { id: 'qc', name: 'Quality Check', doer: { type: 'fixed', name: 'QC' }, trigger: { type: 'afterStep', step: 'production' }, tat: { value: 4, unit: 'hours' } },
-    { id: 'labels', name: 'Labels & Barcode Ready', what: 'PO expiry se 3 din pehle ready', doer: { type: 'fixed', name: 'SALES' }, trigger: { type: 'beforeDate', field: 'po_expiry_date' }, tat: { value: 3, unit: 'days' } },
+    { id: 'labels', name: 'Labels & Barcode Ready', what: 'PO expiry se 3 din pehle ready', doer: { type: 'fixed', name: 'MERCHANT' }, trigger: { type: 'beforeDate', field: 'po_expiry_date' }, tat: { value: 3, unit: 'days' } },
     { id: 'packing', name: 'Packing', what: 'Assortment / solid packing as per order', doer: { type: 'fixed', name: 'DISPATCH' }, trigger: { type: 'afterStep', step: 'qc' }, tat: { value: 4, unit: 'hours' } },
     { id: 'invoice', name: 'Invoice', doer: { type: 'fixed', name: 'ACCOUNTS' }, trigger: { type: 'afterStep', step: 'packing' }, tat: { value: 2, unit: 'hours' } },
     { id: 'dispatch', name: 'Dispatch', what: 'Dispatch screen se entry karo — poori qty jaane par step apne aap Done', doer: { type: 'fixed', name: 'DISPATCH' }, trigger: { type: 'afterStep', step: 'invoice' }, tat: { value: 4, unit: 'hours' }, status: { type: 'auto', source: 'Dispatch module', rule: 'Done when full order qty is dispatched' } }
@@ -42,26 +42,29 @@ function seedData(cloud) {
     },
     roles: [
       { id: 'r_admin', name: 'Admin', system: true, perms: ALL_EDIT() },
-      { id: 'r_manager', name: 'Manager', perms: rolePerms(['tasks', 'orders', 'dispatch', 'tracker', 'masters'], ['dashboard', 'builder', 'users', 'audit']) },
-      { id: 'r_sales', name: 'Sales', perms: rolePerms(['tasks', 'orders', 'masters'], WORK_VIEW) },
-      { id: 'r_accounts', name: 'Accounts', perms: rolePerms(['tasks'], WORK_VIEW.concat(['masters'])) },
-      { id: 'r_ppc', name: 'PPC', perms: rolePerms(['tasks'], WORK_VIEW) },
-      { id: 'r_store', name: 'Store', perms: rolePerms(['tasks'], WORK_VIEW) },
-      { id: 'r_production', name: 'Production', perms: rolePerms(['tasks'], WORK_VIEW) },
-      { id: 'r_qc', name: 'QC', perms: rolePerms(['tasks'], WORK_VIEW) },
-      { id: 'r_dispatch', name: 'Dispatch', perms: rolePerms(['tasks', 'dispatch'], ['dashboard', 'orders', 'tracker']) },
-      { id: 'r_viewer', name: 'Viewer', perms: rolePerms([], WORK_VIEW) }
+      { id: 'r_manager', name: 'Manager', perms: rolePerms(['tasks', 'orders', 'purchase', 'merchant', 'store', 'development', 'production', 'accounts', 'dispatch', 'tickets', 'checklist', 'tracker', 'masters'], ['dashboard', 'builder', 'users', 'audit']) },
+      { id: 'r_purchase', name: 'Purchase', perms: rolePerms(['tasks', 'purchase', 'tickets', 'checklist'], WORK_VIEW.concat(['store', 'masters'])) },
+      { id: 'r_merchant', name: 'Merchant', perms: rolePerms(['tasks', 'orders', 'merchant', 'masters', 'tickets', 'checklist'], WORK_VIEW.concat(['development'])) },
+      { id: 'r_store', name: 'Store', perms: rolePerms(['tasks', 'store', 'tickets', 'checklist'], WORK_VIEW.concat(['purchase', 'production', 'masters'])) },
+      { id: 'r_dev', name: 'Development', perms: rolePerms(['tasks', 'development', 'tickets', 'checklist'], WORK_VIEW.concat(['store', 'masters'])) },
+      { id: 'r_production', name: 'Production', perms: rolePerms(['tasks', 'production', 'tickets', 'checklist'], WORK_VIEW.concat(['store', 'development'])) },
+      { id: 'r_accounts', name: 'Accounts', perms: rolePerms(['tasks', 'accounts', 'tickets', 'checklist'], WORK_VIEW.concat(['masters'])) },
+      { id: 'r_qc', name: 'QC', perms: rolePerms(['tasks', 'tickets', 'checklist'], WORK_VIEW) },
+      { id: 'r_dispatch', name: 'Dispatch', perms: rolePerms(['tasks', 'dispatch', 'tickets', 'checklist'], ['dashboard', 'orders', 'tracker', 'accounts']) },
+      { id: 'r_viewer', name: 'Viewer', perms: rolePerms([], WORK_VIEW.concat(['tickets', 'checklist'])) }
     ],
-    users: [], customers: [], items: [], processes: [], orders: [], dispatches: [], audit: []
+    users: [], customers: [], items: [], materials: [], processes: [], orders: [], dispatches: [], purchase_orders: [], sourcing: [], grns: [], inwards: [], issues: [], rtvs: [], boms: [], job_cards: [], requisitions: [], tickets: [], checklist: [], audit: []
   };
   const U = (name, email, role_id, doer) => ({ id: 'u_' + doer.toLowerCase(), name, email, role_id, doer, active: true, pin_seed: '1234', seed: !!cloud });
   base.users = cloud ? [U('Admin', 'admin@nexus.local', 'r_admin', 'ADMIN')] : [
     U('Admin', 'admin@nexus.local', 'r_admin', 'ADMIN'),
-    U('Rahul (Sales)', 'sales@nexus.local', 'r_sales', 'SALES'),
-    U('Neha (Accounts)', 'accounts@nexus.local', 'r_accounts', 'ACCOUNTS'),
-    U('Amit (PPC)', 'ppc@nexus.local', 'r_ppc', 'PPC'),
+    U('Pankaj (Manager)', 'ops@nexus.local', 'r_manager', 'OPS'),
+    U('Ashish (Purchase)', 'purchase@nexus.local', 'r_purchase', 'PURCHASE'),
+    U('Pooja (Merchant)', 'merchant@nexus.local', 'r_merchant', 'MERCHANT'),
     U('Suresh (Store)', 'store@nexus.local', 'r_store', 'STORE'),
+    U('Manoj (Development)', 'development@nexus.local', 'r_dev', 'DEVELOPMENT'),
     U('Vikas (Production)', 'production@nexus.local', 'r_production', 'PRODUCTION'),
+    U('Neha (Accounts)', 'accounts@nexus.local', 'r_accounts', 'ACCOUNTS'),
     U('Kavita (QC)', 'qc@nexus.local', 'r_qc', 'QC'),
     U('Pintu (Dispatch)', 'dispatch@nexus.local', 'r_dispatch', 'DISPATCH')
   ];
@@ -123,6 +126,42 @@ function seedData(cloud) {
     }
     o.updated_at = created.toISOString();
   });
+  // --- department demo data ---
+  base.materials = [
+    ['EVA-10', 'EVA Sheet 10mm', 'Raw', 'SHEET'], ['EVA-06', 'EVA Sheet 6mm', 'Raw', 'SHEET'],
+    ['STRAP-P', 'PVC Strap Printed', 'Component', 'PAIR'], ['SOLE-TPR', 'TPR Outsole', 'Component', 'PAIR'],
+    ['BOX-K3', 'Kraft Box No.3', 'Packing', 'PCS'], ['LBL-BAR', 'Barcode Label Roll', 'Packing', 'ROLL']
+  ].map((r, i) => ({ id: 'm' + (i + 1), code: r[0], name: r[1], group: r[2], uom: r[3] }));
+  base.sourcing = [
+    { id: 'src1', material: 'EVA-10', vendor: 'Shree Polymers', rate: 420, moq: 50, lead_days: 7, remark: '' },
+    { id: 'src2', material: 'EVA-10', vendor: 'Jain Traders', rate: 445, moq: 20, lead_days: 4, remark: 'costly, fast' },
+    { id: 'src3', material: 'SOLE-TPR', vendor: 'Balaji Soles', rate: 38, moq: 500, lead_days: 10, remark: '' }
+  ];
+  base.purchase_orders = [
+    { id: 'po1', no: 'PO-' + now.getFullYear() + '-0001', date: ymdOf(hoursAgo(120)), vendor: 'Shree Polymers', expected: ymdOf(new Date(now.getTime() - 86400000)), remarks: '', created_by: 'Ashish (Purchase)', at: hoursAgo(120).toISOString(),
+      lines: [{ material: 'EVA-10', uom: 'SHEET', qty: 200, rate: 420, received: 120, rejected: 5 }], followups: [{ at: ymdOf(hoursAgo(24)), by: 'Ashish (Purchase)', note: 'Vendor bola kal tak bhej dega', next: todayYmd() }] },
+    { id: 'po2', no: 'PO-' + now.getFullYear() + '-0002', date: ymdOf(hoursAgo(48)), vendor: 'Balaji Soles', expected: ymdOf(new Date(now.getTime() + 5 * 86400000)), remarks: '', created_by: 'Ashish (Purchase)', at: hoursAgo(48).toISOString(),
+      lines: [{ material: 'SOLE-TPR', uom: 'PAIR', qty: 1000, rate: 38, received: 0, rejected: 0 }, { material: 'BOX-K3', uom: 'PCS', qty: 500, rate: 12, received: 0, rejected: 0 }], followups: [] }
+  ];
+  base.grns = [{ id: 'g1', no: 'GRN-' + now.getFullYear() + '-0001', date: ymdOf(hoursAgo(30)), po_id: 'po1', po_no: base.purchase_orders[0].no, vendor: 'Shree Polymers', invoice: 'SP/221', lines: [{ material: 'EVA-10', accepted: 115, rejected: 5 }], by: 'Suresh (Store)' }];
+  base.inwards = [{ id: 'in1', no: 'INW-' + now.getFullYear() + '-0001', date: ymdOf(hoursAgo(30)), vendor: 'Shree Polymers', po_no: base.purchase_orders[0].no, material: 'EVA-10', uom: 'SHEET', qty: 120, remark: '', swatch_match: '', by: 'Suresh (Store)' }];
+  base.issues = [{ id: 'is1', no: 'ISS-' + now.getFullYear() + '-0001', date: todayYmd(), material: 'EVA-10', qty: 40, to_jc: 'JC-' + now.getFullYear() + '-0001', to_dept: 'Production', by: 'Suresh (Store)', at: hoursAgo(5).toISOString() }];
+  base.boms = [{ id: 'b1', article: 'ZT-101', colour: '', version: 1, lines: [{ material: 'EVA-10', uom: 'SHEET', qty: 0.05 }, { material: 'SOLE-TPR', uom: 'PAIR', qty: 1 }, { material: 'BOX-K3', uom: 'PCS', qty: 0.5 }], status: 'Final', by: 'Manoj (Development)', at: hoursAgo(80).toISOString() },
+    { id: 'b2', article: 'ZT-201', colour: '', version: 1, lines: [{ material: 'EVA-06', uom: 'SHEET', qty: 0.04 }, { material: 'STRAP-P', uom: 'PAIR', qty: 1 }], status: 'Final', by: 'Manoj (Development)', at: hoursAgo(60).toISOString() }];
+  base.job_cards = [
+    { id: 'jc1', no: 'JC-' + now.getFullYear() + '-0001', order_no: 'ORD-' + now.getFullYear() + '-0001', brand: 'Max', article: 'ZT-101', colour: 'Black', qty: 600, swatch_status: 'Approved', swatch_note: '', status: 'Open', corrections: [], by: 'Pooja (Merchant)', at: hoursAgo(100).toISOString() },
+    { id: 'jc2', no: 'JC-' + now.getFullYear() + '-0002', order_no: 'ORD-' + now.getFullYear() + '-0004', brand: 'Campus', article: 'ZT-301', colour: 'Blue', qty: 200, swatch_status: 'Pending', status: 'Open', corrections: [{ at: hoursAgo(6).toISOString(), by: 'Vikas (Production)', note: 'Colour shade dark chahiye', resolved: false }], by: 'Pooja (Merchant)', at: hoursAgo(18).toISOString() }
+  ];
+  base.requisitions = [{ id: 'rq1', no: 'RQ-' + now.getFullYear() + '-0001', date: todayYmd(), jc_no: base.job_cards[0].no, dept: 'Production', lines: [{ material: 'SOLE-TPR', qty: 300 }], status: 'Pending', by: 'Vikas (Production)' }];
+  base.tickets = [
+    { id: 't1', no: 'TKT-' + now.getFullYear() + '-0001', at: hoursAgo(60).toISOString(), by: 'Vikas (Production)', dept: 'Store', priority: 'Critical', subject: 'EVA sheet shortage line 2 par', detail: 'Production ruk jayega agar aaj issue nahi hua', status: 'Open', comments: [{ at: hoursAgo(3).toISOString(), by: 'Suresh (Store)', note: 'GRN ho gaya, aaj issue karenge' }] },
+    { id: 't2', no: 'TKT-' + now.getFullYear() + '-0002', at: hoursAgo(8).toISOString(), by: 'Pooja (Merchant)', dept: 'IT', priority: 'Normal', subject: 'Printer chal nahi raha', detail: '', status: 'In Progress', comments: [] }
+  ];
+  base.checklist = [
+    { id: 'ck1', title: 'Stock register update karo', doer: 'STORE', freq: 'Daily', done: {}, active: true, by: 'Admin' },
+    { id: 'ck2', title: 'Pending PO followup calls', doer: 'PURCHASE', freq: 'Daily', done: {}, active: true, by: 'Admin' },
+    { id: 'ck3', title: 'Weekly production plan review', doer: 'PRODUCTION', freq: 'Weekly', wday: 1, done: {}, active: true, by: 'Admin' }
+  ];
   RES_CACHE.clear();
   base.audit.push({ id: uid(), at: now.toISOString(), user: 'system', action: 'seed', ref: '', detail: 'Demo data loaded' });
   return base;

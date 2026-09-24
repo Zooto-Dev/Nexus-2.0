@@ -5,21 +5,23 @@ The whole order journey runs in one place: order punch, verification, credit, pl
 Open `nexus/index.html`. It works straight away in **Local mode**, where data is saved in your browser.
 Demo login: `admin@nexus.local` / PIN `1234`. Other demo users: `sales@`, `accounts@`, `ppc@`, `store@`, `production@`, `qc@` and `dispatch@nexus.local`, all with PIN `1234`.
 
-## Screens
-| Screen | What it does |
+## Departments (top navigation)
+| Menu | Screens |
 |---|---|
-| Home | One row of counts (open orders, late steps, due today, ready to dispatch), my tasks, late steps by doer, open orders by stage |
-| My Tasks | The steps you need to do. **Done** is a single click, with an optional note. Shows planned time and running delay |
-| Punch Order | One screen with no popups. Fields: Order Date, Brand, Buyer PO No, PO Expiry Date, Tooling/Mould No, Category, Channel + article rows (Article, Style, Colour, Gender, Size, Qty, Packing Assortment/Solid, Asst/Solid Qty). Time stamp is automatic. Picking an article fills style/gender/category. Enter moves to the next box, Ctrl+S saves; the FMS starts on save |
-| Orders / Order | Filters, search and CSV export. The order page shows items (ordered, dispatched, pending), the FMS timeline, priority (Urgent / On Hold / Cancel) and print |
-| Dispatch | Ready (invoice done) → the dispatch form opens inside the row → part or full dispatch. On full dispatch the FMS step closes itself |
-| Tracker | The FMS grid, one row per order and one column per step, the same layout as the sheet |
-| FMS Builder | Steps, doer, conditions ("only when…"), start rules (after a step, before a date, a fallback), TAT (normal and urgent), live flow chart, validation, Simulate, versions (save as v2, then activate) |
-| Brands / Articles | Edit directly in the table, paste from Excel, CSV export |
-| Users | Email, role, **doer name** (links the user to FMS steps), active flag, PIN |
-| Roles & Access | Module × role matrix. Click a cell to cycle — / View / Edit |
-| Settings | Office timings, lunch, weekly off, holidays, half-day rule, backup and restore |
-| Audit Log | Who did what and when |
+| Home | Company dashboard: escalations, tickets, department snapshot, late by doer, stages |
+| Purchase | Purchase Dashboard · Purchase Order · Sourcing · Followup |
+| Merchant | Punch Order · Orders · Job Card · Swatch Approval · Job Card Correction · Brands · Articles |
+| Store | Inwarding · Swatch Matching · GRN · Issuance · Stock View · Rejection Stock · RTV · Materials |
+| Development | BOM · Created BOM |
+| Production | Requisition Slip · Production Tracker · MRS |
+| Accounts | Invoices (payment tracking) |
+| Operations | Raise Ticket · Manage Users · Roles & Access · Settings · Audit Log |
+| Dispatch | Ready to Dispatch · Upcoming · History |
+| Task | My Tasks · Checklist · FMS Builder · FMS trackers (per live flow) |
+
+How the chain works: PO → GRN (accept/reject) → Stock → Issuance (direct or against a Requisition) → Production; rejects go to Rejection Stock → RTV. BOM × order qty = MRS with shortfall vs stock. Tickets escalate automatically when Critical or open > 48h and show on Home.
+
+Demo logins (PIN 1234): admin@, ops@(Manager), purchase@, merchant@, store@, development@, production@, accounts@, qc@, dispatch@ — sab `nexus.local`.
 
 ## UI rules followed
 - One accent colour; colour is used only for status (red = late, amber = pending, green = done)

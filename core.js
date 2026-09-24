@@ -46,8 +46,8 @@ function flash(msg, type) {
 }
 
 /* ================= store ================= */
-const DB_KEY = 'nexus2_db_v2';
-const COLS = ['users', 'roles', 'customers', 'items', 'processes', 'orders', 'dispatches', 'audit'];
+const DB_KEY = 'nexus2_db_v3';
+const COLS = ['users', 'roles', 'customers', 'items', 'materials', 'processes', 'orders', 'dispatches', 'purchase_orders', 'sourcing', 'grns', 'inwards', 'issues', 'rtvs', 'boms', 'job_cards', 'requisitions', 'tickets', 'checklist', 'audit'];
 let DB = null;
 const CFG = window.NEXUS_CONFIG || {};
 const CLOUD = !!(CFG.SUPABASE_URL && CFG.SUPABASE_ANON_KEY && window.supabase);
@@ -137,10 +137,18 @@ const MODULES = [
   { key: 'dashboard', label: 'Home' },
   { key: 'tasks', label: 'My Tasks', note: 'Edit = mark own steps done' },
   { key: 'orders', label: 'Orders', note: 'Edit = punch, edit, priority' },
+  { key: 'purchase', label: 'Purchase', note: 'PO, sourcing, followup' },
+  { key: 'merchant', label: 'Merchant', note: 'Job cards, swatch' },
+  { key: 'store', label: 'Store', note: 'Inward, GRN, issuance, stock, RTV' },
+  { key: 'development', label: 'Development', note: 'BOM' },
+  { key: 'production', label: 'Production', note: 'Requisition, tracker, MRS' },
+  { key: 'accounts', label: 'Accounts', note: 'Invoices, payments' },
   { key: 'dispatch', label: 'Dispatch' },
+  { key: 'tickets', label: 'Tickets', note: 'Edit = raise & work tickets' },
+  { key: 'checklist', label: 'Checklist', note: 'Edit = add & mark tasks' },
   { key: 'tracker', label: 'FMS Tracker', note: 'Edit = mark anyone\'s step, undo' },
   { key: 'builder', label: 'FMS Builder', note: 'Edit = change & activate flows' },
-  { key: 'masters', label: 'Brands & Articles' },
+  { key: 'masters', label: 'Brands, Articles & Materials' },
   { key: 'users', label: 'Users' },
   { key: 'roles', label: 'Roles & Access' },
   { key: 'settings', label: 'Settings' },
@@ -293,32 +301,61 @@ const VIEWS = {};      // name -> { mod, render(param) }
 const ACTIONS = {};    // data-act handlers
 const NAV = [
   { v: 'home', l: 'Home', mod: 'dashboard' },
-  { v: 'tasks', l: 'My Tasks', mod: 'tasks', cnt: 'tasks' },
-  { menu: 'Sales', items: [
+  { menu: 'Purchase', items: [
+    { v: 'purchasedash', l: 'Purchase Dashboard', mod: 'purchase' },
+    { v: 'po', l: 'Purchase Order', mod: 'purchase' },
+    { v: 'sourcing', l: 'Sourcing', mod: 'purchase' },
+    { v: 'followup', l: 'Followup', mod: 'purchase' }] },
+  { menu: 'Merchant', items: [
     { v: 'punch', l: 'Punch Order', mod: 'orders', edit: true },
     { v: 'orders', l: 'Orders', mod: 'orders' },
+    { v: 'jobcards', l: 'Job Card', mod: 'merchant' },
+    { v: 'swatch', l: 'Swatch Approval', mod: 'merchant' },
+    { v: 'jccorrection', l: 'Job Card Correction', mod: 'merchant' },
     { v: 'customers', l: 'Brands', mod: 'masters' },
     { v: 'items', l: 'Articles', mod: 'masters' }] },
+  { menu: 'Store', items: [
+    { v: 'inward', l: 'Inwarding', mod: 'store' },
+    { v: 'swatchmatch', l: 'Swatch Matching', mod: 'store' },
+    { v: 'grn', l: 'GRN', mod: 'store' },
+    { v: 'issuance', l: 'Issuance', mod: 'store' },
+    { v: 'stock', l: 'Stock View', mod: 'store' },
+    { v: 'rejstock', l: 'Rejection Stock', mod: 'store' },
+    { v: 'rtv', l: 'RTV', mod: 'store' },
+    { v: 'materials', l: 'Materials', mod: 'masters' }] },
+  { menu: 'Development', items: [
+    { v: 'bom', l: 'BOM', mod: 'development' },
+    { v: 'boms', l: 'Created BOM', mod: 'development' }] },
+  { menu: 'Production', items: [
+    { v: 'requisition', l: 'Requisition Slip', mod: 'production' },
+    { v: 'prodtracker', l: 'Production Tracker', mod: 'production' },
+    { v: 'mrs', l: 'MRS', mod: 'production' }] },
+  { menu: 'Accounts', items: [
+    { v: 'invoices', l: 'Invoices', mod: 'accounts' }] },
+  { menu: 'Operations', items: [
+    { v: 'tickets', l: 'Raise Ticket', mod: 'tickets' },
+    { v: 'users', l: 'Manage Users', mod: 'users' },
+    { v: 'roles', l: 'Roles & Access', mod: 'roles' },
+    { v: 'settings', l: 'Settings', mod: 'settings' },
+    { v: 'audit', l: 'Audit Log', mod: 'audit' }] },
   { menu: 'Dispatch', cnt: 'dispatch', items: [
     { v: 'dispatch', l: 'Ready to Dispatch', mod: 'dispatch' },
     { v: 'dispatch', p: 'upcoming', l: 'Upcoming Orders', mod: 'dispatch' },
     { v: 'dispatch', p: 'history', l: 'Dispatch History', mod: 'dispatch' }] },
-  { menu: 'FMS', items: [
-    { v: 'tracker', l: 'Tracker', mod: 'tracker' },
-    { v: 'builder', l: 'FMS Builder', mod: 'builder' }] },
-  { menu: 'Admin', items: [
-    { v: 'users', l: 'Users', mod: 'users' },
-    { v: 'roles', l: 'Roles & Access', mod: 'roles' },
-    { v: 'settings', l: 'Settings', mod: 'settings' },
-    { v: 'audit', l: 'Audit Log', mod: 'audit' }] }
+  { menu: 'Task', cnt: 'tasks', items: [
+    { v: 'tasks', l: 'My Tasks', mod: 'tasks' },
+    { v: 'checklist', l: 'Checklist', mod: 'checklist' },
+    { v: 'builder', l: 'FMS Builder', mod: 'builder' },
+    { dyn: 'fms' }] }
 ];
 function curView() { const h = location.hash.replace(/^#\/?/, ''); const [v, ...rest] = h.split('/'); return { v: v || 'home', param: decodeURIComponent(rest.join('/')) }; }
 function go(v, param) { location.hash = '#/' + v + (param ? '/' + encodeURIComponent(param) : ''); }
 function navCounts() {
   const open = allOpenSteps();
   const mine = open.filter(x => isMyDoer(x.step.doer));
+  const chk = typeof myChecklistDue === 'function' ? myChecklistDue().length : 0;
   return {
-    tasks: { n: mine.length, late: mine.some(x => x.step.status === 'Late') },
+    tasks: { n: mine.length + chk, late: mine.some(x => x.step.status === 'Late') },
     dispatch: { n: readyForDispatch().length, late: false }
   };
 }
@@ -326,7 +363,7 @@ function renderNav() {
   const { v: cur, param: curP } = curView(); const c = navCounts();
   const cntHtml = k => k && k.n ? '<span class="cnt' + (k.late ? ' late' : '') + '">' + k.n + '</span>' : '';
   const itemOk = n => can(n.mod, n.edit ? 'edit' : 'view');
-  const itemOn = n => cur === n.v && (n.p || '') === (n.v === 'dispatch' ? (curP || '') : (n.p || ''));
+  const itemOn = n => cur === n.v && (n.v === 'dispatch' ? (n.p || '') === (curP || '') : true);
   let html = '<div class="brand">Nexus <b>2.0</b></div>';
   NAV.forEach(n => {
     if (!n.menu) {
@@ -334,7 +371,9 @@ function renderNav() {
       html += '<a href="#/' + n.v + '" class="' + (cur === n.v ? 'on' : '') + '">' + n.l + cntHtml(n.cnt && c[n.cnt]) + '</a>';
       return;
     }
-    const items = n.items.filter(itemOk);
+    const items = n.items.flatMap(i => i.dyn === 'fms'
+      ? Store.all('processes').filter(p => p.active).map(p => ({ v: 'tracker', p: p.code, l: 'FMS · ' + p.name, mod: 'tracker' }))
+      : [i]).filter(itemOk);
     if (!items.length) return;
     const on = items.some(i => cur === i.v);
     html += '<div class="menu"><a data-act="menu" class="mbtn ' + (on ? 'on' : '') + '">' + n.menu + cntHtml(n.cnt && c[n.cnt]) + '<span class="caret">▾</span></a><div class="mdrop">' +

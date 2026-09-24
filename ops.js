@@ -22,27 +22,56 @@ VIEWS.home = {
     const month = todayYmd().slice(0, 7);
     const dspQty = Store.all('dispatches').filter(d => !d.cancelled && (d.date || '').startsWith(month)).reduce((s, d) => s + d.lines.reduce((a, l) => a + num(l.qty), 0), 0);
     const openOrders = states.filter(x => x.st.open);
-    const pendQty = openOrders.reduce((s, x) => s + dispatchedQty(x.o).pending, 0);
-    let h = '<h1>Good ' + (new Date().getHours() < 12 ? 'morning' : 'day') + ', ' + esc(ME.name.split(' ')[0]) + '</h1>';
+    const tickets = Store.all('tickets'); const tOpen = tickets.filter(t => t.status !== 'Closed');
+    const escT = tOpen.filter(ticketEscalated);
+    const escSteps = late.filter(x => x.step.delayMinutes > 8 * 60);
+    const pos = openPOs(); const poOver = pos.filter(p => p.expected && p.expected < todayYmd());
+    const reqs = Store.all('requisitions').filter(r => r.status === 'Pending');
+    const swPend = Store.all('job_cards').filter(j => j.swatch_status === 'Pending' && j.status !== 'Closed');
+    const jcCorr = Store.all('job_cards').filter(j => (j.corrections || []).some(c => !c.resolved));
+    const smPend = Store.all('inwards').filter(i => !i.swatch_match);
+    const payPend = Store.all('dispatches').filter(d => !d.cancelled && d.payment !== 'Received');
+    const chkDue = myChecklistDue();
+
+    let h = '<div class="dash-head"><div><h1 style="margin:0">Good ' + (new Date().getHours() < 12 ? 'morning' : 'day') + ', ' + esc(ME.name.split(' ')[0]) + '</h1><div class="muted small">' + new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' }) + ' · ' + esc(settings().company || '') + '</div></div></div>';
     h += '<div class="kpis">' +
       '<a href="#/orders"><b>' + openOrders.length + '</b><span>Open orders</span></a>' +
-      '<a href="#/tasks"><b>' + mine.length + '</b><span>My open tasks</span></a>' +
       '<a href="#/orders/late"><b class="' + (late.length ? 'late-txt' : '') + '">' + late.length + '</b><span>Late steps</span></a>' +
-      '<div><b>' + open.filter(x => dueToday(x.step)).length + '</b><span>Due today</span></div>' +
+      '<a href="#/tasks"><b>' + mine.length + '</b><span>My tasks</span></a>' +
+      '<a href="#/checklist"><b>' + chkDue.length + '</b><span>Checklist due</span></a>' +
       '<a href="#/dispatch"><b>' + readyForDispatch().length + '</b><span>Ready to dispatch</span></a>' +
-      '<div><b>' + qtyFmt(dspQty) + '</b><span>Qty dispatched this month</span></div>' +
-      '<div><b>' + qtyFmt(pendQty) + '</b><span>Qty pending dispatch</span></div></div>';
+      '<a href="#/tickets"><b class="' + (escT.length ? 'late-txt' : '') + '">' + escT.length + '</b><span>Escalations</span></a>' +
+      '<a href="#/tickets"><b>' + tOpen.length + '</b><span>Open tickets</span></a>' +
+      '<div><b>' + qtyFmt(dspQty) + '</b><span>Dispatched this month</span></div></div>';
 
-    h += '<div class="grid2"><div><h2>My tasks</h2>' + taskTable(mine.slice(0, 8), true) +
-      (mine.length > 8 ? '<div class="small" style="margin-top:6px"><a href="#/tasks">All ' + mine.length + ' tasks →</a></div>' : '') + '</div>';
+    // Escalations & tickets
+    h += '<div class="grid2"><div><h2>Escalations</h2>';
+    if (!escT.length && !escSteps.length) h += '<div class="panel empty">Koi escalation nahi 🎉</div>';
+    else {
+      h += '<div class="tbl-wrap"><table><tr><th>What</th><th>Where</th><th>Owner</th><th class="num">Since</th></tr>' +
+        escT.map(t => '<tr class="click" data-act="go" data-v="tickets"><td><span class="late-txt">●</span> ' + esc(t.no) + ' · ' + esc(t.subject) + '</td><td>' + esc(t.dept) + '</td><td>' + esc(t.by) + '</td><td class="num">' + Math.floor((Date.now() - new Date(t.at)) / 3600000) + 'h</td></tr>').join('') +
+        escSteps.slice(0, 6).map(x => '<tr class="click" data-act="go" data-v="order" data-p="' + esc(x.order.id) + '"><td><span class="late-txt">●</span> ' + esc(x.step.name) + ' late</td><td>' + esc(x.order.no) + ' · ' + esc(x.order.customer_name) + '</td><td>' + esc(x.step.doer || '') + '</td><td class="num late-txt">' + fmtDelay(x.step.delayMinutes) + '</td></tr>').join('') + '</table></div>';
+    }
+    h += '<h2>My tasks</h2>' + taskTable(mine.slice(0, 6), true) + (mine.length > 6 ? '<div class="small" style="margin-top:6px"><a href="#/tasks">All ' + mine.length + ' →</a></div>' : '');
+    h += '</div><div>';
+    // Department snapshot
+    const dep = (name, view, items) => { const bad = items.some(i => i[2]); return '<tr class="click" data-act="go" data-v="' + view + '"><td>' + name + '</td><td>' + items.map(i => '<span class="' + (i[2] ? 'late-txt' : i[1] ? '' : 'muted') + '">' + i[1] + ' ' + i[0] + '</span>').join(' <span class="muted">·</span> ') + '</td></tr>'; };
+    h += '<h2>Departments</h2><div class="tbl-wrap"><table>' +
+      dep('Purchase', 'purchasedash', [['open PO', pos.length, false], ['overdue', poOver.length, poOver.length > 0]]) +
+      dep('Merchant', 'swatch', [['swatch pending', swPend.length, false], ['corrections', jcCorr.length, jcCorr.length > 0]]) +
+      dep('Store', 'issuance', [['req to issue', reqs.length, false], ['swatch match', smPend.length, false]]) +
+      dep('Production', 'prodtracker', [['orders in flow', openOrders.length, false], ['late steps', late.length, late.length > 0]]) +
+      dep('Accounts', 'invoices', [['payment pending', payPend.length, false]]) +
+      dep('Dispatch', 'dispatch', [['ready', readyForDispatch().length, false]]) + '</table></div>';
     const byDoer = {};
-    late.forEach(x => { const k = x.step.doer || '—'; const b = byDoer[k] || (byDoer[k] = { n: 0, d: 0, max: 0 }); b.n++; b.d += x.step.delayMinutes; b.max = Math.max(b.max, x.step.delayMinutes); });
-    const rows = Object.entries(byDoer).sort((a, b) => b[1].n - a[1].n);
-    h += '<div><h2>Late by doer</h2><div class="tbl-wrap"><table><tr><th>Doer</th><th class="num">Late</th><th class="num">Avg delay</th><th class="num">Worst</th></tr>' +
-      (rows.length ? rows.map(([k, b]) => '<tr><td>' + esc(k) + '</td><td class="num late-txt">' + b.n + '</td><td class="num">' + fmtDelay(Math.round(b.d / b.n)) + '</td><td class="num">' + fmtDelay(b.max) + '</td></tr>').join('') : '<tr><td colspan="4" class="empty">Nothing late</td></tr>') + '</table></div>';
+    late.forEach(x => { const k = x.step.doer || '—'; const b2 = byDoer[k] || (byDoer[k] = { n: 0, d: 0 }); b2.n++; b2.d += x.step.delayMinutes; });
+    const rows = Object.entries(byDoer).sort((a, b2) => b2[1].n - a[1].n);
+    h += '<h2>Late by doer</h2><div class="tbl-wrap"><table><tr><th>Doer</th><th class="num">Late</th><th class="num">Avg delay</th></tr>' +
+      (rows.length ? rows.map(([k, b2]) => '<tr><td>' + esc(k) + '</td><td class="num late-txt">' + b2.n + '</td><td class="num">' + fmtDelay(Math.round(b2.d / b2.n)) + '</td></tr>').join('') : '<tr><td colspan="3" class="empty">Nothing late</td></tr>') + '</table></div>';
     const stage = {}; openOrders.forEach(x => { stage[x.st.label] = (stage[x.st.label] || 0) + 1; });
     h += '<h2>Open orders by stage</h2><div class="tbl-wrap"><table><tr><th>Stage</th><th class="num">Orders</th></tr>' +
-      Object.entries(stage).sort((a, b) => b[1] - a[1]).map(([k, n]) => '<tr><td>' + esc(k) + '</td><td class="num">' + n + '</td></tr>').join('') + '</table></div></div></div>';
+      Object.entries(stage).sort((a, b2) => b2[1] - a[1]).map(([k, n]) => '<tr><td>' + esc(k) + '</td><td class="num">' + n + '</td></tr>').join('') + '</table></div>';
+    h += '</div></div>';
     setMain(h);
   }
 };
@@ -349,7 +378,8 @@ ACTIONS['dsp-csv'] = () => downloadCsv('dispatches-' + todayYmd() + '.csv', [['N
 /* ---------------- Tracker (FMS grid) ---------------- */
 const TRK_UI = { f: 'open', q: '', pid: null };
 VIEWS.tracker = {
-  mod: 'tracker', render() {
+  mod: 'tracker', render(param) {
+    if (param) { const pr = Store.all('processes').find(p => p.code === param && p.active); if (pr) TRK_UI.pid = pr.id; }
     const procs = Store.all('processes').filter(p => Store.all('orders').some(o => o.process_id === p.id) || p.active).sort((a, b) => b.version - a.version);
     if (!TRK_UI.pid || !procs.some(p => p.id === TRK_UI.pid)) TRK_UI.pid = (activeProcess() || procs[0] || {}).id;
     const proc = Store.get('processes', TRK_UI.pid); if (!proc) { setMain('<div class="panel empty">No flow yet.</div>'); return; }

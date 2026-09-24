@@ -1,0 +1,574 @@
+/* Nexus 2.0 — department modules: Purchase, Merchant, Store, Development, Production, Accounts, Tickets, Checklist. */
+'use strict';
+
+/* ---------- shared helpers ---------- */
+function matBy(code) { return Store.all('materials').find(m => norm(m.code) === norm(code) || norm(m.name) === norm(code)); }
+function dlMat(id) { return '<datalist id="' + id + '">' + Store.all('materials').map(m => '<option value="' + esc(m.code) + '">' + esc(m.name + ' · ' + m.uom) + '</option>').join('') + '</datalist>'; }
+function vendorNames() {
+  const set = new Set();
+  Store.all('purchase_orders').forEach(p => p.vendor && set.add(p.vendor));
+  Store.all('sourcing').forEach(sx => sx.vendor && set.add(sx.vendor));
+  Store.all('inwards').forEach(i => i.vendor && set.add(i.vendor));
+  return Array.from(set).sort();
+}
+function dlVendor() { return '<datalist id="dlVen">' + vendorNames().map(v => '<option value="' + esc(v) + '">').join('') + '</datalist>'; }
+function stockMaps() {
+  const stk = {}, rej = {};
+  const add = (m, k, q) => { const key = norm(k); m[key] = (m[key] || 0) + q; };
+  Store.all('grns').forEach(g => (g.lines || []).forEach(l => { add(stk, l.material, num(l.accepted)); add(rej, l.material, num(l.rejected)); }));
+  Store.all('issues').forEach(i => add(stk, i.material, -num(i.qty)));
+  Store.all('rtvs').forEach(r => add(rej, r.material, -num(r.qty)));
+  return { stk, rej };
+}
+function stockOf(code) { return stockMaps().stk[norm(code)] || 0; }
+function poPending(po) { return (po.lines || []).reduce((s, l) => s + Math.max(0, num(l.qty) - num(l.received)), 0); }
+function poStatus(po) {
+  if (po.cancelled) return 'Cancelled';
+  const p = poPending(po); const got = (po.lines || []).some(l => num(l.received) > 0);
+  return p <= 0 ? 'Received' : got ? 'Partial' : 'Open';
+}
+function openPOs() { return Store.all('purchase_orders').filter(p => !p.cancelled && poPending(p) > 0); }
+function newBtn(label, act) { return '<button class="btn primary" data-act="' + act + '">+ ' + label + '</button>'; }
+function subTitle(t, extra) { return '<h1>' + t + (extra ? ' <span class="muted small">' + extra + '</span>' : '') + '</h1>'; }
+
+/* ================= PURCHASE ================= */
+VIEWS.purchasedash = {
+  mod: 'purchase', render() {
+    const pos = Store.all('purchase_orders').filter(p => !p.cancelled);
+    const open = pos.filter(p => poPending(p) > 0);
+    const overdue = open.filter(p => p.expected && p.expected < todayYmd());
+    const fuDue = open.filter(p => { const f = (p.followups || [])[p.followups ? p.followups.length - 1 : -1]; return !f || !f.next || f.next <= todayYmd(); });
+    const month = todayYmd().slice(0, 7);
+    const grnMonth = Store.all('grns').filter(g => (g.date || '').startsWith(month)).reduce((s, g) => s + g.lines.reduce((a, l) => a + num(l.accepted), 0), 0);
+    let h = subTitle('Purchase Dashboard');
+    h += '<div class="kpis">' +
+      '<a href="#/po"><b>' + open.length + '</b><span>Open POs</span></a>' +
+      '<a href="#/po"><b class="' + (overdue.length ? 'late-txt' : '') + '">' + overdue.length + '</b><span>Overdue POs</span></a>' +
+      '<div><b>' + qtyFmt(open.reduce((s, p) => s + poPending(p), 0)) + '</b><span>Qty pending</span></div>' +
+      '<a href="#/followup"><b>' + fuDue.length + '</b><span>Followups due</span></a>' +
+      '<div><b>' + qtyFmt(grnMonth) + '</b><span>Qty received this month</span></div></div>';
+    h += '<h2>Open purchase orders</h2><div class="tbl-wrap"><table><tr><th>PO</th><th>Date</th><th>Vendor</th><th class="num">Ordered</th><th class="num">Received</th><th class="num">Pending</th><th>Expected</th><th>Status</th></tr>' +
+      (open.length ? open.map(p => { const oq = p.lines.reduce((s, l) => s + num(l.qty), 0), rq = p.lines.reduce((s, l) => s + num(l.received), 0); return '<tr class="click" data-act="go" data-v="po" data-p="' + esc(p.id) + '"><td><b>' + esc(p.no) + '</b></td><td>' + fmtD(p.date) + '</td><td>' + esc(p.vendor) + '</td><td class="num">' + qtyFmt(oq) + '</td><td class="num">' + qtyFmt(rq) + '</td><td class="num">' + qtyFmt(oq - rq) + '</td><td class="nowrap ' + (p.expected && p.expected < todayYmd() ? 'late-txt' : '') + '">' + fmtD(p.expected) + '</td><td>' + stHtml(poStatus(p)).replace('Partial', 'Partial').replace('st Partial', 'st Pending').replace('st Open', 'st Waiting').replace('st Received', 'st Done') + '</td></tr>'; }).join('') : '<tr><td colspan="8" class="empty">No open POs</td></tr>') + '</table></div>';
+    setMain(h);
+  }
+};
+
+const PO_UI = { f: 'open', form: false };
+VIEWS.po = {
+  mod: 'purchase', render(param) {
+    if (param) { const p = Store.get('purchase_orders', param); if (p) { PO_UI.f = 'all'; PO_UI.q = p.no; } }
+    const edit = can('purchase', 'edit');
+    const rows = Store.all('purchase_orders').slice().sort((a, b) => b.no < a.no ? -1 : 1).filter(p => {
+      if (PO_UI.q && !norm(p.no + ' ' + p.vendor + ' ' + p.lines.map(l => l.material).join(' ')).includes(norm(PO_UI.q))) return false;
+      const st = poStatus(p);
+      return PO_UI.f === 'all' || (PO_UI.f === 'open' ? (st === 'Open' || st === 'Partial') : st === (PO_UI.f === 'done' ? 'Received' : 'Cancelled'));
+    });
+    let h = subTitle('Purchase Orders') + '<div class="toolbar">' + seg('f', [{ v: 'open', l: 'Open' }, { v: 'done', l: 'Received' }, { v: 'cancel', l: 'Cancelled' }, { v: 'all', l: 'All' }], PO_UI.f) +
+      '<input id="poQ" placeholder="PO / vendor / material…" value="' + esc(PO_UI.q || '') + '"><span class="grow"></span>' + (edit ? newBtn('New PO', 'po-new') : '') + '</div>';
+    if (PO_UI.form && edit) h += poForm();
+    h += '<div class="tbl-wrap"><table><tr><th>PO</th><th>Date</th><th>Vendor</th><th>Materials</th><th class="num">Qty</th><th class="num">Received</th><th>Expected</th><th>Status</th><th></th></tr>' +
+      (rows.length ? rows.map(p => { const oq = p.lines.reduce((s, l) => s + num(l.qty), 0), rq = p.lines.reduce((s, l) => s + num(l.received), 0); const st = poStatus(p); return '<tr><td><b>' + esc(p.no) + '</b><div class="muted small">' + esc(p.created_by || '') + '</div></td><td class="nowrap">' + fmtD(p.date) + '</td><td>' + esc(p.vendor) + '</td><td class="small">' + p.lines.map(l => esc(l.material) + ' × ' + qtyFmt(l.qty)).join('<br>') + '</td><td class="num">' + qtyFmt(oq) + '</td><td class="num">' + qtyFmt(rq) + '</td><td class="nowrap">' + fmtD(p.expected) + '</td><td><span class="st ' + (st === 'Received' ? 'Done' : st === 'Partial' ? 'Pending' : st === 'Cancelled' ? 'Cancelled' : 'Waiting') + '">' + st + '</span></td><td class="right">' + (edit && st !== 'Received' && st !== 'Cancelled' ? '<button class="btn ghost sm danger" data-act="po-cancel" data-id="' + esc(p.id) + '" data-confirm="Cancel PO?">Cancel</button>' : '') + '</td></tr>'; }).join('') : '<tr><td colspan="9" class="empty">No purchase orders</td></tr>') + '</table></div>';
+    setMain(h);
+    onSeg(e => { PO_UI.f = e.detail; VIEWS.po.render(); });
+    $('#poQ').addEventListener('input', e => { PO_UI.q = e.target.value; clearTimeout(PO_UI.t); PO_UI.t = setTimeout(() => { VIEWS.po.render(); const i = $('#poQ'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }, 250); });
+  }
+};
+function poForm() {
+  return '<div class="panel" style="margin-bottom:12px">' + dlVendor() + dlMat('dlMatPo') +
+    '<div class="row"><label>Vendor *<input id="npVen" list="dlVen"></label><label>PO date<input id="npDate" type="date" value="' + todayYmd() + '"></label><label>Expected delivery *<input id="npExp" type="date"></label><label style="flex:1">Remarks<input id="npRem"></label></div>' +
+    '<table style="margin-top:8px"><tr><th style="width:200px">Material</th><th style="width:70px">UOM</th><th class="num" style="width:110px">Qty</th><th class="num" style="width:110px">Rate ₹</th><th style="width:30px"></th></tr>' +
+    '<tbody id="npLines"></tbody></table><a class="small" data-act="po-line">+ material</a>' +
+    '<div class="toolbar" style="margin-top:10px"><button class="btn primary" data-act="po-save">Save PO</button><button class="btn" data-act="po-new">Close</button><span id="npMsg" class="small"></span></div></div>';
+}
+function poLineRow() { return '<tr><td><input data-np="mat" list="dlMatPo"></td><td class="muted" data-uom></td><td><input data-np="qty" type="number" min="0" step="any" class="right"></td><td><input data-np="rate" type="number" min="0" step="any" class="right"></td><td><button class="btn ghost sm" data-act="po-line-del">×</button></td></tr>'; }
+ACTIONS['po-new'] = () => { PO_UI.form = !PO_UI.form; VIEWS.po.render(); if (PO_UI.form) { $('#npLines').innerHTML = poLineRow(); $('#npVen').focus(); } };
+ACTIONS['po-line'] = () => { $('#npLines').insertAdjacentHTML('beforeend', poLineRow()); };
+ACTIONS['po-line-del'] = el => el.closest('tr').remove();
+document.addEventListener('change', e => { if (e.target.dataset.np === 'mat') { const m = matBy(e.target.value); if (m) { e.target.value = m.code; $('[data-uom]', e.target.closest('tr')).textContent = m.uom; } } });
+ACTIONS['po-save'] = () => {
+  if (!requirePerm('purchase', 'edit')) return;
+  const ven = $('#npVen').value.trim(); const exp = $('#npExp').value;
+  const lines = $$('#npLines tr').map(tr => { const m = matBy($('[data-np="mat"]', tr).value); return { material: m ? m.code : $('[data-np="mat"]', tr).value.trim().toUpperCase(), uom: m ? m.uom : '', qty: num($('[data-np="qty"]', tr).value), rate: num($('[data-np="rate"]', tr).value), received: 0, rejected: 0 }; }).filter(l => l.material && l.qty > 0);
+  if (!ven || !exp || !lines.length) { $('#npMsg').innerHTML = '<span class="late-txt">Vendor, expected date aur kam se kam ek material line chahiye.</span>'; return; }
+  const bad = lines.find(l => !matBy(l.material)); if (bad) { $('#npMsg').innerHTML = '<span class="late-txt">Material "' + esc(bad.material) + '" master mein nahi hai — pehle Store → Materials mein add karo.</span>'; return; }
+  const po = Store.put('purchase_orders', { id: uid(), no: nextNo('purchase_orders', 'PO'), date: $('#npDate').value || todayYmd(), vendor: ven, expected: exp, remarks: $('#npRem').value.trim(), lines, followups: [], created_by: ME.name, at: nowIso() });
+  audit('po.create', po.no, ven + ' · ' + qtyFmt(lines.reduce((s, l) => s + l.qty, 0)) + ' qty');
+  PO_UI.form = false; flash(esc(po.no) + ' saved.'); VIEWS.po.render();
+};
+ACTIONS['po-cancel'] = el => { const p = Store.get('purchase_orders', el.dataset.id); p.cancelled = true; Store.put('purchase_orders', p); audit('po.cancel', p.no, ''); VIEWS.po.render(); };
+
+VIEWS.sourcing = {
+  mod: 'purchase', render() {
+    masterView({
+      col: 'sourcing', mod: 'purchase', title: 'Sourcing', view: VIEWS.sourcing, sort: 'material', paste: true,
+      cols: [{ k: 'material', l: 'Material', w: 140, upper: true }, { k: 'vendor', l: 'Vendor' }, { k: 'rate', l: 'Rate ₹', type: 'number', w: 90 }, { k: 'moq', l: 'MOQ', type: 'number', w: 80 }, { k: 'lead_days', l: 'Lead days', type: 'number', w: 80 }, { k: 'remark', l: 'Remark' }],
+      validate: d => !String(d.material || '').trim() ? 'Material is required.' : !String(d.vendor || '').trim() ? 'Vendor is required.' : (Store.all('sourcing').some(x => x.id !== d.id && norm(x.material) === norm(d.material) && norm(x.vendor) === norm(d.vendor)) ? 'This material+vendor already exists.' : '')
+    });
+    $('#main').insertAdjacentHTML('beforeend', '<div class="muted small" style="margin-top:8px">Ek material ke kai vendors ho sakte hain — PO banate waqt yahin se rate dekh lo.</div>');
+  }
+};
+
+VIEWS.followup = {
+  mod: 'purchase', render() {
+    const edit = can('purchase', 'edit');
+    const rows = openPOs().map(p => { const f = (p.followups || []).slice(-1)[0]; return { p, f }; })
+      .sort((a, b) => ((a.f && a.f.next) || '0') < ((b.f && b.f.next) || '0') ? -1 : 1);
+    let h = subTitle('PO Followup', 'sirf open POs') + '<div class="tbl-wrap"><table><tr><th>PO</th><th>Vendor</th><th class="num">Pending qty</th><th>Expected</th><th>Last followup</th><th>Next</th>' + (edit ? '<th style="min-width:260px">New followup</th>' : '') + '</tr>' +
+      (rows.length ? rows.map(x => '<tr' + (x.f && x.f.next && x.f.next <= todayYmd() ? '' : '') + '><td><b>' + esc(x.p.no) + '</b></td><td>' + esc(x.p.vendor) + '</td><td class="num">' + qtyFmt(poPending(x.p)) + '</td><td class="nowrap ' + (x.p.expected < todayYmd() ? 'late-txt' : '') + '">' + fmtD(x.p.expected) + '</td>' +
+        '<td class="small">' + (x.f ? esc(x.f.note) + '<div class="muted">' + esc(x.f.by) + ' · ' + fmtD(x.f.at) + '</div>' : '<span class="muted">—</span>') + '</td><td class="nowrap ' + (x.f && x.f.next && x.f.next <= todayYmd() ? 'late-txt' : '') + '">' + (x.f ? fmtD(x.f.next) : '') + '</td>' +
+        (edit ? '<td><div class="row" style="align-items:center"><input data-fu-note placeholder="baat kya hui" style="flex:1;min-width:120px"><input data-fu-next type="date" style="width:130px"><button class="btn sm" data-act="fu-save" data-id="' + esc(x.p.id) + '">Save</button></div></td>' : '') + '</tr>').join('') : '<tr><td colspan="7" class="empty">Koi open PO nahi</td></tr>') + '</table></div>';
+    setMain(h);
+  }
+};
+ACTIONS['fu-save'] = el => {
+  const tr = el.closest('tr'); const note = $('[data-fu-note]', tr).value.trim(); const next = $('[data-fu-next]', tr).value;
+  if (!note) { flash('Followup note likho.', 'err'); return; }
+  const p = Store.get('purchase_orders', el.dataset.id);
+  p.followups = p.followups || []; p.followups.push({ at: todayYmd(), by: ME.name, note, next });
+  Store.put('purchase_orders', p); audit('po.followup', p.no, note); flash('Followup saved.'); VIEWS.followup.render();
+};
+
+/* ================= MERCHANT: job cards ================= */
+const JC_UI = { f: 'open', form: false };
+VIEWS.jobcards = {
+  mod: 'merchant', render() {
+    const edit = can('merchant', 'edit');
+    const rows = Store.all('job_cards').slice().sort((a, b) => b.no < a.no ? -1 : 1).filter(j => JC_UI.f === 'all' || (JC_UI.f === 'open' ? j.status !== 'Closed' : j.status === 'Closed'));
+    let h = subTitle('Job Cards') + '<div class="toolbar">' + seg('f', [{ v: 'open', l: 'Open' }, { v: 'closed', l: 'Closed' }, { v: 'all', l: 'All' }], JC_UI.f) + '<span class="grow"></span>' + (edit ? newBtn('New job card', 'jc-new') : '') + '</div>';
+    if (JC_UI.form && edit) h += '<div class="panel" style="margin-bottom:12px"><datalist id="dlOrd">' + Store.all('orders').filter(o => orderState(o).open).map(o => '<option value="' + esc(o.no) + '">' + esc(o.customer_name) + '</option>').join('') + '</datalist>' +
+      '<div class="row"><label>Order (optional)<input id="njOrd" list="dlOrd"></label><label>Brand *<input id="njBrand" list="dlBrand2"></label><label>Article *<input id="njArt" list="dlArt2"></label><label>Colour<input id="njCol"></label><label>Qty *<input id="njQty" type="number" min="0" style="width:90px"></label><button class="btn primary" data-act="jc-save">Save</button><span id="njMsg" class="small"></span></div>' +
+      '<datalist id="dlBrand2">' + Store.all('customers').map(c => '<option value="' + esc(c.name) + '">').join('') + '</datalist><datalist id="dlArt2">' + Store.all('items').map(i => '<option value="' + esc(i.code) + '">').join('') + '</datalist></div>';
+    h += '<div class="tbl-wrap"><table><tr><th>JC No</th><th>Order</th><th>Brand</th><th>Article</th><th>Colour</th><th class="num">Qty</th><th>Swatch</th><th>Corrections</th><th>Status</th><th></th></tr>' +
+      (rows.length ? rows.map(j => { const oc = (j.corrections || []).filter(x => !x.resolved).length; return '<tr><td><b>' + esc(j.no) + '</b><div class="muted small">' + esc(j.by) + ' · ' + fmtD(j.at) + '</div></td><td>' + esc(j.order_no || '') + '</td><td>' + esc(j.brand) + '</td><td>' + esc(j.article) + '</td><td>' + esc(j.colour) + '</td><td class="num">' + qtyFmt(j.qty) + '</td>' +
+        '<td><span class="st ' + (j.swatch_status === 'Approved' ? 'Done' : j.swatch_status === 'Rejected' ? 'Late' : 'Pending') + '">' + esc(j.swatch_status) + '</span></td><td>' + (oc ? '<span class="late-txt">' + oc + ' open</span>' : (j.corrections || []).length ? 'resolved' : '—') + '</td><td>' + stHtml(j.status === 'Closed' ? 'Done' : 'Pending').replace('>Done<', '>Closed<').replace('>Pending<', '>Open<') + '</td>' +
+        '<td class="right">' + (edit && j.status !== 'Closed' ? '<button class="btn sm" data-act="jc-close" data-id="' + esc(j.id) + '" data-confirm="Close JC?">Close</button>' : '') + '</td></tr>'; }).join('') : '<tr><td colspan="10" class="empty">No job cards</td></tr>') + '</table></div>';
+    setMain(h);
+    onSeg(e => { JC_UI.f = e.detail; VIEWS.jobcards.render(); });
+    const ordIn = $('#njOrd'); if (ordIn) ordIn.addEventListener('change', e => {
+      const o = Store.all('orders').find(x => norm(x.no) === norm(e.target.value)); if (!o) return;
+      $('#njBrand').value = o.customer_name; const l = o.lines[0] || {}; $('#njArt').value = l.article || ''; $('#njCol').value = l.colour || ''; $('#njQty').value = orderTotals(o).qty;
+    });
+  }
+};
+ACTIONS['jc-new'] = () => { JC_UI.form = !JC_UI.form; VIEWS.jobcards.render(); };
+ACTIONS['jc-save'] = () => {
+  if (!requirePerm('merchant', 'edit')) return;
+  const brand = $('#njBrand').value.trim(), art = $('#njArt').value.trim().toUpperCase(), qty = num($('#njQty').value);
+  if (!brand || !art || qty <= 0) { $('#njMsg').innerHTML = '<span class="late-txt">Brand, article aur qty chahiye.</span>'; return; }
+  const j = Store.put('job_cards', { id: uid(), no: nextNo('job_cards', 'JC'), order_no: $('#njOrd').value.trim(), brand, article: art, colour: $('#njCol').value.trim(), qty, swatch_status: 'Pending', status: 'Open', corrections: [], by: ME.name, at: nowIso() });
+  audit('jc.create', j.no, brand + ' · ' + art + ' × ' + qty); JC_UI.form = false; flash(esc(j.no) + ' created — swatch approval pending.'); VIEWS.jobcards.render();
+};
+ACTIONS['jc-close'] = el => { const j = Store.get('job_cards', el.dataset.id); if ((j.corrections || []).some(c => !c.resolved)) { flash('Pehle open corrections resolve karo.', 'err'); return; } j.status = 'Closed'; Store.put('job_cards', j); audit('jc.close', j.no, ''); VIEWS.jobcards.render(); };
+
+VIEWS.swatch = {
+  mod: 'merchant', render() {
+    const edit = can('merchant', 'edit');
+    const rows = Store.all('job_cards').filter(j => j.swatch_status === 'Pending' || j.swatch_status === 'Rejected');
+    let h = subTitle('Swatch Approval', 'pending + rejected') + '<div class="tbl-wrap"><table><tr><th>JC No</th><th>Brand</th><th>Article</th><th>Colour</th><th class="num">Qty</th><th>Status</th><th>Note</th>' + (edit ? '<th></th>' : '') + '</tr>' +
+      (rows.length ? rows.map(j => '<tr><td><b>' + esc(j.no) + '</b></td><td>' + esc(j.brand) + '</td><td>' + esc(j.article) + '</td><td>' + esc(j.colour) + '</td><td class="num">' + qtyFmt(j.qty) + '</td><td><span class="st ' + (j.swatch_status === 'Rejected' ? 'Late' : 'Pending') + '">' + esc(j.swatch_status) + '</span></td>' +
+        '<td>' + (edit ? '<input data-sw-note placeholder="optional" value="' + esc(j.swatch_note || '') + '">' : esc(j.swatch_note || '')) + '</td>' +
+        (edit ? '<td class="right nowrap"><button class="btn sm primary" data-act="sw-set" data-id="' + esc(j.id) + '" data-s="Approved">Approve</button> <button class="btn sm danger" data-act="sw-set" data-id="' + esc(j.id) + '" data-s="Rejected">Reject</button></td>' : '') + '</tr>').join('') : '<tr><td colspan="8" class="empty">Sab swatch approve ho chuke 🎉</td></tr>') + '</table></div>';
+    h += '<h2>Approved (last 10)</h2><div class="tbl-wrap"><table><tr><th>JC</th><th>Brand</th><th>Article</th><th>Note</th></tr>' + Store.all('job_cards').filter(j => j.swatch_status === 'Approved').slice(-10).reverse().map(j => '<tr><td>' + esc(j.no) + '</td><td>' + esc(j.brand) + '</td><td>' + esc(j.article) + '</td><td class="small">' + esc(j.swatch_note || '') + '</td></tr>').join('') + '</table></div>';
+    setMain(h);
+  }
+};
+ACTIONS['sw-set'] = el => {
+  const j = Store.get('job_cards', el.dataset.id); const tr = el.closest('tr');
+  j.swatch_status = el.dataset.s; j.swatch_note = $('[data-sw-note]', tr).value.trim(); j.swatch_by = ME.name;
+  Store.put('job_cards', j); audit('jc.swatch', j.no, el.dataset.s + (j.swatch_note ? ' — ' + j.swatch_note : '')); flash(esc(j.no) + ' swatch ' + el.dataset.s.toLowerCase() + '.'); VIEWS.swatch.render();
+};
+
+VIEWS.jccorrection = {
+  mod: 'merchant', render() {
+    const edit = can('merchant', 'edit');
+    const rows = Store.all('job_cards').filter(j => j.status !== 'Closed');
+    let h = subTitle('Job Card Correction') + '<div class="tbl-wrap"><table><tr><th>JC No</th><th>Brand · Article</th><th>Open corrections</th>' + (edit ? '<th style="min-width:280px">Add correction</th>' : '') + '</tr>' +
+      (rows.length ? rows.map(j => '<tr><td><b>' + esc(j.no) + '</b></td><td>' + esc(j.brand + ' · ' + j.article + (j.colour ? ' · ' + j.colour : '')) + '</td>' +
+        '<td>' + ((j.corrections || []).length ? j.corrections.map((c, i) => '<div class="small' + (c.resolved ? ' muted' : '') + '">' + (c.resolved ? '✓ ' : '• ') + esc(c.note) + ' <span class="muted">' + esc(c.by) + '</span>' + (!c.resolved && edit ? ' <a data-act="jcc-resolve" data-id="' + esc(j.id) + '" data-i="' + i + '">resolve</a>' : '') + '</div>').join('') : '<span class="muted">—</span>') + '</td>' +
+        (edit ? '<td><div class="row"><input data-jcc-note placeholder="kya theek karna hai" style="flex:1"><button class="btn sm" data-act="jcc-add" data-id="' + esc(j.id) + '">Add</button></div></td>' : '') + '</tr>').join('') : '<tr><td colspan="4" class="empty">No open job cards</td></tr>') + '</table></div>';
+    setMain(h);
+  }
+};
+ACTIONS['jcc-add'] = el => {
+  const note = $('[data-jcc-note]', el.closest('tr')).value.trim(); if (!note) return;
+  const j = Store.get('job_cards', el.dataset.id); j.corrections = j.corrections || []; j.corrections.push({ at: nowIso(), by: ME.name, note, resolved: false });
+  Store.put('job_cards', j); audit('jc.correction', j.no, note); VIEWS.jccorrection.render();
+};
+ACTIONS['jcc-resolve'] = el => { const j = Store.get('job_cards', el.dataset.id); j.corrections[+el.dataset.i].resolved = true; Store.put('job_cards', j); audit('jc.correction.resolve', j.no, j.corrections[+el.dataset.i].note); VIEWS.jccorrection.render(); };
+
+/* ================= STORE ================= */
+const INW_UI = { form: false };
+VIEWS.inward = {
+  mod: 'store', render() {
+    const edit = can('store', 'edit');
+    const rows = Store.all('inwards').slice().sort((a, b) => b.no < a.no ? -1 : 1);
+    let h = subTitle('Inwarding', 'gate entry — GRN alag hota hai') + '<div class="toolbar"><span class="grow"></span>' + (edit ? newBtn('New inward', 'inw-new') : '') + '</div>';
+    if (INW_UI.form && edit) h += '<div class="panel" style="margin-bottom:12px">' + dlVendor() + dlMat('dlMatI') +
+      '<div class="row"><label>Date<input id="niDate" type="date" value="' + todayYmd() + '"></label><label>Vendor *<input id="niVen" list="dlVen"></label><label>PO no<input id="niPo" list="dlPoNo"></label><label>Material *<input id="niMat" list="dlMatI"></label><label>Qty *<input id="niQty" type="number" min="0" style="width:100px"></label><label style="flex:1">Remark<input id="niRem"></label><button class="btn primary" data-act="inw-save">Save</button><span id="niMsg" class="small"></span></div>' +
+      '<datalist id="dlPoNo">' + openPOs().map(p => '<option value="' + esc(p.no) + '">' + esc(p.vendor) + '</option>').join('') + '</datalist></div>';
+    h += '<div class="tbl-wrap"><table><tr><th>No</th><th>Date</th><th>Vendor</th><th>PO</th><th>Material</th><th class="num">Qty</th><th>Swatch match</th><th>Remark</th></tr>' +
+      (rows.length ? rows.map(i => '<tr><td><b>' + esc(i.no) + '</b></td><td class="nowrap">' + fmtD(i.date) + '</td><td>' + esc(i.vendor) + '</td><td>' + esc(i.po_no || '') + '</td><td>' + esc(i.material) + '</td><td class="num">' + qtyFmt(i.qty) + '</td><td><span class="st ' + (i.swatch_match === 'Pass' ? 'Done' : i.swatch_match === 'Fail' ? 'Late' : 'Pending') + '">' + (i.swatch_match || 'Pending') + '</span></td><td class="small">' + esc(i.remark || '') + '</td></tr>').join('') : '<tr><td colspan="8" class="empty">No inward entries</td></tr>') + '</table></div>';
+    setMain(h);
+  }
+};
+ACTIONS['inw-new'] = () => { INW_UI.form = !INW_UI.form; VIEWS.inward.render(); };
+ACTIONS['inw-save'] = () => {
+  if (!requirePerm('store', 'edit')) return;
+  const ven = $('#niVen').value.trim(); const m = matBy($('#niMat').value); const qty = num($('#niQty').value);
+  if (!ven || !m || qty <= 0) { $('#niMsg').innerHTML = '<span class="late-txt">Vendor, material (master wala) aur qty chahiye.</span>'; return; }
+  const i = Store.put('inwards', { id: uid(), no: nextNo('inwards', 'INW'), date: $('#niDate').value || todayYmd(), vendor: ven, po_no: $('#niPo').value.trim(), material: m.code, uom: m.uom, qty, remark: $('#niRem').value.trim(), swatch_match: '', by: ME.name });
+  audit('inward.create', i.no, ven + ' · ' + m.code + ' × ' + qty); INW_UI.form = false; flash(esc(i.no) + ' saved — swatch matching pending.'); VIEWS.inward.render();
+};
+
+VIEWS.swatchmatch = {
+  mod: 'store', render() {
+    const edit = can('store', 'edit');
+    const rows = Store.all('inwards').filter(i => !i.swatch_match);
+    let h = subTitle('Swatch Matching', 'inward material vs approved swatch') + '<div class="tbl-wrap"><table><tr><th>Inward</th><th>Date</th><th>Vendor</th><th>Material</th><th class="num">Qty</th><th>Note</th>' + (edit ? '<th></th>' : '') + '</tr>' +
+      (rows.length ? rows.map(i => '<tr><td><b>' + esc(i.no) + '</b></td><td class="nowrap">' + fmtD(i.date) + '</td><td>' + esc(i.vendor) + '</td><td>' + esc(i.material) + '</td><td class="num">' + qtyFmt(i.qty) + '</td>' +
+        '<td>' + (edit ? '<input data-sm-note placeholder="optional">' : '') + '</td>' +
+        (edit ? '<td class="right nowrap"><button class="btn sm primary" data-act="sm-set" data-id="' + esc(i.id) + '" data-s="Pass">Pass</button> <button class="btn sm danger" data-act="sm-set" data-id="' + esc(i.id) + '" data-s="Fail">Fail</button></td>' : '') + '</tr>').join('') : '<tr><td colspan="7" class="empty">Sab match ho chuka 🎉</td></tr>') + '</table></div>';
+    h += '<h2>Recent results</h2><div class="tbl-wrap"><table><tr><th>Inward</th><th>Material</th><th>Result</th><th>Note</th><th>By</th></tr>' + Store.all('inwards').filter(i => i.swatch_match).slice(-10).reverse().map(i => '<tr><td>' + esc(i.no) + '</td><td>' + esc(i.material) + '</td><td><span class="st ' + (i.swatch_match === 'Pass' ? 'Done' : 'Late') + '">' + i.swatch_match + '</span></td><td class="small">' + esc(i.swatch_note || '') + '</td><td>' + esc(i.swatch_by || '') + '</td></tr>').join('') + '</table></div>';
+    setMain(h);
+  }
+};
+ACTIONS['sm-set'] = el => {
+  const i = Store.get('inwards', el.dataset.id); i.swatch_match = el.dataset.s; i.swatch_note = ($('[data-sm-note]', el.closest('tr')) || { value: '' }).value.trim(); i.swatch_by = ME.name;
+  Store.put('inwards', i); audit('inward.swatch', i.no, el.dataset.s); flash(esc(i.no) + ': swatch ' + el.dataset.s + '.'); VIEWS.swatchmatch.render();
+};
+
+const GRN_UI = { open: null };
+VIEWS.grn = {
+  mod: 'store', render() {
+    const edit = can('store', 'edit');
+    const pos = openPOs();
+    let h = subTitle('GRN', 'PO ke against receiving') + '<div class="tbl-wrap"><table><tr><th>PO</th><th>Vendor</th><th>Expected</th><th class="num">Pending qty</th><th></th></tr>' +
+      (pos.length ? pos.map(p => {
+        let row = '<tr><td><b>' + esc(p.no) + '</b></td><td>' + esc(p.vendor) + '</td><td class="nowrap ' + (p.expected < todayYmd() ? 'late-txt' : '') + '">' + fmtD(p.expected) + '</td><td class="num">' + qtyFmt(poPending(p)) + '</td><td class="right">' + (edit ? '<button class="btn sm ' + (GRN_UI.open === p.id ? '' : 'primary') + '" data-act="grn-open" data-id="' + esc(p.id) + '">' + (GRN_UI.open === p.id ? 'Close' : 'Make GRN') + '</button>' : '') + '</td></tr>';
+        if (GRN_UI.open === p.id) row += '<tr class="inline-form"><td colspan="5"><table style="max-width:680px;margin:6px 0"><tr><th>Material</th><th class="num">Ordered</th><th class="num">Pending</th><th class="num">Accept</th><th class="num">Reject</th></tr>' +
+          p.lines.map((l, i) => { const pen = Math.max(0, num(l.qty) - num(l.received)); return '<tr><td>' + esc(l.material) + '</td><td class="num">' + qtyFmt(l.qty) + '</td><td class="num">' + qtyFmt(pen) + '</td><td><input class="qty" type="number" min="0" step="any" data-ga="' + i + '" value="' + pen + '"' + (pen ? '' : ' disabled') + '></td><td><input class="qty" type="number" min="0" step="any" data-gr="' + i + '" value="0"' + (pen ? '' : ' disabled') + '></td></tr>'; }).join('') +
+          '</table><div class="row"><label>Invoice / challan no<input id="grnInv"></label><label>Date<input id="grnDate" type="date" value="' + todayYmd() + '"></label><button class="btn primary" data-act="grn-save" data-id="' + esc(p.id) + '">Save GRN</button><span id="grnMsg" class="small"></span></div><div class="muted small" style="margin-top:4px">Accept = stock mein jayega · Reject = rejection stock mein (RTV se wapas)</div></td></tr>';
+        return row;
+      }).join('') : '<tr><td colspan="5" class="empty">Koi open PO nahi — pehle Purchase Order banao</td></tr>') + '</table></div>';
+    const gs = Store.all('grns').slice().sort((a, b) => b.no < a.no ? -1 : 1).slice(0, 15);
+    h += '<h2>Recent GRNs</h2><div class="tbl-wrap"><table><tr><th>GRN</th><th>Date</th><th>PO</th><th>Vendor</th><th class="num">Accepted</th><th class="num">Rejected</th><th>By</th></tr>' +
+      (gs.length ? gs.map(g => '<tr><td><b>' + esc(g.no) + '</b></td><td class="nowrap">' + fmtD(g.date) + '</td><td>' + esc(g.po_no) + '</td><td>' + esc(g.vendor) + '</td><td class="num">' + qtyFmt(g.lines.reduce((s, l) => s + num(l.accepted), 0)) + '</td><td class="num late-txt">' + qtyFmt(g.lines.reduce((s, l) => s + num(l.rejected), 0)) + '</td><td>' + esc(g.by) + '</td></tr>').join('') : '<tr><td colspan="7" class="empty">No GRNs yet</td></tr>') + '</table></div>';
+    setMain(h);
+  }
+};
+ACTIONS['grn-open'] = el => { GRN_UI.open = GRN_UI.open === el.dataset.id ? null : el.dataset.id; VIEWS.grn.render(); };
+ACTIONS['grn-save'] = el => {
+  if (!requirePerm('store', 'edit')) return;
+  const p = Store.get('purchase_orders', el.dataset.id);
+  const lines = p.lines.map((l, i) => ({ material: l.material, accepted: num(($('[data-ga="' + i + '"]') || {}).value), rejected: num(($('[data-gr="' + i + '"]') || {}).value) })).filter(l => l.accepted > 0 || l.rejected > 0);
+  if (!lines.length) { $('#grnMsg').innerHTML = '<span class="late-txt">Accept ya reject qty dalo.</span>'; return; }
+  const over = lines.find((l, ix) => { const pl = p.lines.find(x => x.material === l.material); return l.accepted + l.rejected > Math.max(0, num(pl.qty) - num(pl.received)) + 1e-9; });
+  if (over) { $('#grnMsg').innerHTML = '<span class="late-txt">' + esc(over.material) + ': qty pending se zyada hai.</span>'; return; }
+  lines.forEach(l => { const pl = p.lines.find(x => x.material === l.material); pl.received = num(pl.received) + l.accepted + l.rejected; pl.rejected = num(pl.rejected) + l.rejected; });
+  Store.put('purchase_orders', p);
+  const g = Store.put('grns', { id: uid(), no: nextNo('grns', 'GRN'), date: $('#grnDate').value || todayYmd(), po_id: p.id, po_no: p.no, vendor: p.vendor, invoice: $('#grnInv').value.trim(), lines, by: ME.name });
+  audit('grn.create', g.no, p.no + ' · acc ' + qtyFmt(lines.reduce((s, l) => s + l.accepted, 0)) + ' / rej ' + qtyFmt(lines.reduce((s, l) => s + l.rejected, 0)));
+  GRN_UI.open = null; flash(esc(g.no) + ' saved — stock update ho gaya.' + (poPending(p) <= 0 ? ' ' + esc(p.no) + ' fully received.' : '')); VIEWS.grn.render();
+};
+
+const ISS_UI = { form: false };
+VIEWS.issuance = {
+  mod: 'store', render() {
+    const edit = can('store', 'edit');
+    const reqs = Store.all('requisitions').filter(r => r.status === 'Pending');
+    const { stk } = stockMaps();
+    let h = subTitle('Issuance') + '<h2 style="margin-top:0">Pending requisitions</h2><div class="tbl-wrap"><table><tr><th>Req</th><th>Date</th><th>JC / Dept</th><th>Materials</th><th>Stock check</th>' + (edit ? '<th></th>' : '') + '</tr>' +
+      (reqs.length ? reqs.map(r => {
+        const short = r.lines.filter(l => (stk[norm(l.material)] || 0) < num(l.qty));
+        return '<tr><td><b>' + esc(r.no) + '</b><div class="muted small">' + esc(r.by) + '</div></td><td class="nowrap">' + fmtD(r.date) + '</td><td>' + esc(r.jc_no || r.dept) + '</td><td class="small">' + r.lines.map(l => esc(l.material) + ' × ' + qtyFmt(l.qty)).join('<br>') + '</td>' +
+          '<td>' + (short.length ? '<span class="late-txt small">Short: ' + short.map(l => esc(l.material)).join(', ') + '</span>' : '<span class="st Done">OK</span>') + '</td>' +
+          (edit ? '<td class="right nowrap"><button class="btn sm primary" data-act="iss-req" data-id="' + esc(r.id) + '"' + (short.length ? ' disabled title="stock short"' : '') + '>Issue</button> <button class="btn sm ghost danger" data-act="req-reject" data-id="' + esc(r.id) + '" data-confirm="Reject?">Reject</button></td>' : '') + '</tr>';
+      }).join('') : '<tr><td colspan="6" class="empty">Koi pending requisition nahi</td></tr>') + '</table></div>';
+    h += '<div class="toolbar" style="margin-top:14px"><h2 style="margin:0">Direct issue</h2>' + (edit ? '<button class="btn sm" data-act="iss-new">' + (ISS_UI.form ? 'Close' : '+ Issue material') + '</button>' : '') + '</div>';
+    if (ISS_UI.form && edit) h += '<div class="panel" style="margin-bottom:10px">' + dlMat('dlMatIs') + '<div class="row"><label>Material *<input id="isMat" list="dlMatIs"></label><label>Qty *<input id="isQty" type="number" min="0" style="width:100px"></label><label>To JC<input id="isJc"></label><label>To dept<input id="isDept" list="dlDept"><datalist id="dlDept">' + ['Production', 'Development', 'Merchant', 'Dispatch'].map(d => '<option>' + d + '</option>').join('') + '</datalist></label><button class="btn primary" data-act="iss-save">Issue</button><span id="isMsg" class="small"></span></div></div>';
+    const iss = Store.all('issues').slice().sort((a, b) => (b.at || '') < (a.at || '') ? -1 : 1).slice(0, 15);
+    h += '<div class="tbl-wrap"><table><tr><th>No</th><th>Date</th><th>Material</th><th class="num">Qty</th><th>To</th><th>Req</th><th>By</th></tr>' +
+      (iss.length ? iss.map(i => '<tr><td><b>' + esc(i.no) + '</b></td><td class="nowrap">' + fmtD(i.date) + '</td><td>' + esc(i.material) + '</td><td class="num">' + qtyFmt(i.qty) + '</td><td>' + esc(i.to_jc || i.to_dept || '') + '</td><td>' + esc(i.req_no || '') + '</td><td>' + esc(i.by) + '</td></tr>').join('') : '<tr><td colspan="7" class="empty">No issues yet</td></tr>') + '</table></div>';
+    setMain(h);
+  }
+};
+ACTIONS['iss-new'] = () => { ISS_UI.form = !ISS_UI.form; VIEWS.issuance.render(); };
+ACTIONS['iss-save'] = () => {
+  if (!requirePerm('store', 'edit')) return;
+  const m = matBy($('#isMat').value); const qty = num($('#isQty').value);
+  if (!m || qty <= 0) { $('#isMsg').innerHTML = '<span class="late-txt">Material aur qty chahiye.</span>'; return; }
+  if (stockOf(m.code) < qty) { $('#isMsg').innerHTML = '<span class="late-txt">Stock sirf ' + qtyFmt(stockOf(m.code)) + ' hai.</span>'; return; }
+  const i = Store.put('issues', { id: uid(), no: nextNo('issues', 'ISS'), date: todayYmd(), material: m.code, qty, to_jc: $('#isJc').value.trim(), to_dept: $('#isDept').value.trim(), by: ME.name, at: nowIso() });
+  audit('issue.create', i.no, m.code + ' × ' + qty); ISS_UI.form = false; flash(esc(i.no) + ' issued.'); VIEWS.issuance.render();
+};
+ACTIONS['iss-req'] = el => {
+  if (!requirePerm('store', 'edit')) return;
+  const r = Store.get('requisitions', el.dataset.id); const { stk } = stockMaps();
+  if (r.lines.some(l => (stk[norm(l.material)] || 0) < num(l.qty))) { flash('Stock short hai.', 'err'); return; }
+  r.lines.forEach(l => Store.put('issues', { id: uid(), no: nextNo('issues', 'ISS'), date: todayYmd(), material: l.material, qty: num(l.qty), to_jc: r.jc_no, to_dept: r.dept, req_no: r.no, by: ME.name, at: nowIso() }));
+  r.status = 'Issued'; r.issued_by = ME.name; Store.put('requisitions', r);
+  audit('req.issue', r.no, r.lines.map(l => l.material + '×' + l.qty).join(', ')); flash(esc(r.no) + ' issued.'); VIEWS.issuance.render();
+};
+ACTIONS['req-reject'] = el => { const r = Store.get('requisitions', el.dataset.id); r.status = 'Rejected'; Store.put('requisitions', r); audit('req.reject', r.no, ''); VIEWS.issuance.render(); };
+
+VIEWS.stock = {
+  mod: 'store', render() {
+    const { stk } = stockMaps();
+    const rows = Store.all('materials').map(m => ({ m, q: stk[norm(m.code)] || 0 })).sort((a, b) => a.m.code.localeCompare(b.m.code));
+    setMain(subTitle('Stock View', 'GRN accepted − issued') + '<div class="toolbar"><button class="btn" data-act="stock-csv">Export CSV</button></div>' +
+      '<div class="tbl-wrap"><table><tr><th>Material</th><th>Name</th><th>Group</th><th>UOM</th><th class="num">In stock</th></tr>' +
+      rows.map(x => '<tr' + (x.q <= 0 ? ' class="muted"' : '') + '><td><b>' + esc(x.m.code) + '</b></td><td>' + esc(x.m.name) + '</td><td>' + esc(x.m.group || '') + '</td><td>' + esc(x.m.uom) + '</td><td class="num">' + qtyFmt(x.q) + '</td></tr>').join('') + '</table></div>');
+    VIEWS.stock.rows = rows;
+  }
+};
+ACTIONS['stock-csv'] = () => downloadCsv('stock-' + todayYmd() + '.csv', [['Material', 'Name', 'Group', 'UOM', 'Stock']].concat((VIEWS.stock.rows || []).map(x => [x.m.code, x.m.name, x.m.group, x.m.uom, x.q])));
+
+VIEWS.rejstock = {
+  mod: 'store', render() {
+    const { rej } = stockMaps();
+    const rows = Object.entries(rej).filter(([, q]) => q > 0.0001).map(([k, q]) => ({ m: matBy(k) || { code: k.toUpperCase(), name: '', uom: '' }, q }));
+    setMain(subTitle('Rejection Stock', 'GRN rejected − RTV done') + '<div class="tbl-wrap"><table><tr><th>Material</th><th>Name</th><th class="num">Rejected qty</th><th></th></tr>' +
+      (rows.length ? rows.map(x => '<tr><td><b>' + esc(x.m.code) + '</b></td><td>' + esc(x.m.name) + '</td><td class="num late-txt">' + qtyFmt(x.q) + '</td><td class="right">' + (can('store', 'edit') ? '<a href="#/rtv">RTV karo →</a>' : '') + '</td></tr>').join('') : '<tr><td colspan="4" class="empty">Rejection stock khali hai 🎉</td></tr>') + '</table></div>');
+  }
+};
+
+const RTV_UI = { form: false };
+VIEWS.rtv = {
+  mod: 'store', render() {
+    const edit = can('store', 'edit');
+    const { rej } = stockMaps();
+    let h = subTitle('RTV', 'Return to Vendor — rejection stock se') + '<div class="toolbar"><span class="grow"></span>' + (edit ? newBtn('New RTV', 'rtv-new') : '') + '</div>';
+    if (RTV_UI.form && edit) h += '<div class="panel" style="margin-bottom:12px">' + dlVendor() + '<datalist id="dlRejM">' + Object.entries(rej).filter(([, q]) => q > 0).map(([k, q]) => '<option value="' + esc((matBy(k) || { code: k }).code) + '">' + qtyFmt(q) + ' available</option>').join('') + '</datalist>' +
+      '<div class="row"><label>Material *<input id="rvMat" list="dlRejM"></label><label>Qty *<input id="rvQty" type="number" min="0" style="width:100px"></label><label>Vendor *<input id="rvVen" list="dlVen"></label><label style="flex:1">Reason<input id="rvWhy"></label><button class="btn primary" data-act="rtv-save">Save</button><span id="rvMsg" class="small"></span></div></div>';
+    const rows = Store.all('rtvs').slice().sort((a, b) => b.no < a.no ? -1 : 1);
+    h += '<div class="tbl-wrap"><table><tr><th>No</th><th>Date</th><th>Vendor</th><th>Material</th><th class="num">Qty</th><th>Reason</th><th>By</th></tr>' +
+      (rows.length ? rows.map(r => '<tr><td><b>' + esc(r.no) + '</b></td><td class="nowrap">' + fmtD(r.date) + '</td><td>' + esc(r.vendor) + '</td><td>' + esc(r.material) + '</td><td class="num">' + qtyFmt(r.qty) + '</td><td class="small">' + esc(r.reason || '') + '</td><td>' + esc(r.by) + '</td></tr>').join('') : '<tr><td colspan="7" class="empty">No RTVs</td></tr>') + '</table></div>';
+    setMain(h);
+  }
+};
+ACTIONS['rtv-new'] = () => { RTV_UI.form = !RTV_UI.form; VIEWS.rtv.render(); };
+ACTIONS['rtv-save'] = () => {
+  if (!requirePerm('store', 'edit')) return;
+  const m = matBy($('#rvMat').value); const qty = num($('#rvQty').value); const ven = $('#rvVen').value.trim();
+  const avail = m ? (stockMaps().rej[norm(m.code)] || 0) : 0;
+  if (!m || qty <= 0 || !ven) { $('#rvMsg').innerHTML = '<span class="late-txt">Material, qty aur vendor chahiye.</span>'; return; }
+  if (qty > avail + 1e-9) { $('#rvMsg').innerHTML = '<span class="late-txt">Rejection stock sirf ' + qtyFmt(avail) + ' hai.</span>'; return; }
+  const r = Store.put('rtvs', { id: uid(), no: nextNo('rtvs', 'RTV'), date: todayYmd(), vendor: ven, material: m.code, qty, reason: $('#rvWhy').value.trim(), by: ME.name });
+  audit('rtv.create', r.no, m.code + ' × ' + qty + ' → ' + ven); RTV_UI.form = false; flash(esc(r.no) + ' saved.'); VIEWS.rtv.render();
+};
+
+VIEWS.materials = {
+  mod: 'masters', render() {
+    masterView({
+      col: 'materials', mod: 'masters', title: 'Materials', view: VIEWS.materials, sort: 'code', paste: true,
+      cols: [{ k: 'code', l: 'Code', w: 120, upper: true, ph: 'MAT-001' }, { k: 'name', l: 'Material name', ph: 'e.g. EVA Sheet 10mm' }, { k: 'group', l: 'Group', w: 130 }, { k: 'uom', l: 'UOM', w: 80, upper: true }],
+      defaults: { uom: 'PCS' },
+      validate: d => uniq('materials', 'code', 'Code')(d),
+      inUse: d => (Store.all('purchase_orders').some(p => p.lines.some(l => norm(l.material) === norm(d.code))) || Store.all('issues').some(i => norm(i.material) === norm(d.code))) ? 'Material use ho chuka hai — delete nahi hoga.' : ''
+    });
+  }
+};
+
+/* ================= DEVELOPMENT: BOM ================= */
+const BOM_UI = {};
+VIEWS.bom = {
+  mod: 'development', render() {
+    const edit = can('development', 'edit');
+    if (!edit) { go('boms'); return; }
+    let h = subTitle('Make BOM') + '<div class="panel">' + dlMat('dlMatB') + '<datalist id="dlArtB">' + Store.all('items').map(i => '<option value="' + esc(i.code) + '">' + esc(i.name) + '</option>').join('') + '</datalist>' +
+      '<div class="row"><label>Article *<input id="nbArt" list="dlArtB"></label><label>Colour<input id="nbCol" placeholder="blank = all colours"></label></div>' +
+      '<table style="margin-top:10px;max-width:640px"><tr><th>Material</th><th style="width:70px">UOM</th><th class="num" style="width:140px">Qty per pair</th><th style="width:30px"></th></tr><tbody id="nbLines"><tr><td><input data-nb="mat" list="dlMatB"></td><td class="muted" data-uom></td><td><input data-nb="qty" type="number" min="0" step="any" class="right"></td><td><button class="btn ghost sm" data-act="bom-line-del">×</button></td></tr></tbody></table><a class="small" data-act="bom-line">+ material</a>' +
+      '<div class="toolbar" style="margin-top:10px"><button class="btn primary" data-act="bom-save">Save as Final</button><span id="nbMsg" class="small"></span></div>' +
+      '<div class="muted small">Same article ka dobara BOM banaya toh naya version ban jaata hai; MRS hamesha latest final version uthata hai.</div></div>';
+    setMain(h);
+  }
+};
+ACTIONS['bom-line'] = () => $('#nbLines').insertAdjacentHTML('beforeend', '<tr><td><input data-nb="mat" list="dlMatB"></td><td class="muted" data-uom></td><td><input data-nb="qty" type="number" min="0" step="any" class="right"></td><td><button class="btn ghost sm" data-act="bom-line-del">×</button></td></tr>');
+ACTIONS['bom-line-del'] = el => el.closest('tr').remove();
+document.addEventListener('change', e => { if (e.target.dataset.nb === 'mat') { const m = matBy(e.target.value); if (m) { e.target.value = m.code; $('[data-uom]', e.target.closest('tr')).textContent = m.uom; } } });
+ACTIONS['bom-save'] = () => {
+  if (!requirePerm('development', 'edit')) return;
+  const art = $('#nbArt').value.trim().toUpperCase();
+  const lines = $$('#nbLines tr').map(tr => { const m = matBy($('[data-nb="mat"]', tr).value); return m ? { material: m.code, uom: m.uom, qty: num($('[data-nb="qty"]', tr).value) } : null; }).filter(l => l && l.qty > 0);
+  if (!art || !lines.length) { $('#nbMsg').innerHTML = '<span class="late-txt">Article aur kam se kam ek material line (master wala) chahiye.</span>'; return; }
+  const ver = Store.all('boms').filter(b => norm(b.article) === norm(art)).reduce((m, b) => Math.max(m, b.version), 0) + 1;
+  const b = Store.put('boms', { id: uid(), article: art, colour: $('#nbCol').value.trim(), version: ver, lines, status: 'Final', by: ME.name, at: nowIso() });
+  audit('bom.create', art + ' v' + ver, lines.length + ' materials'); flash('BOM saved: ' + esc(art) + ' v' + ver + '.'); go('boms');
+};
+VIEWS.boms = {
+  mod: 'development', render() {
+    const byArt = {};
+    Store.all('boms').forEach(b => { const k = norm(b.article); if (!byArt[k] || byArt[k].version < b.version) byArt[k] = b; });
+    const rows = Object.values(byArt).sort((a, b) => a.article.localeCompare(b.article));
+    setMain(subTitle('Created BOMs', 'latest version per article') + '<div class="toolbar"><span class="grow"></span>' + (can('development', 'edit') ? '<a class="btn primary" href="#/bom">+ Make BOM</a>' : '') + '</div>' +
+      '<div class="tbl-wrap"><table><tr><th>Article</th><th>Colour</th><th>Version</th><th>Materials (per pair)</th><th>By</th><th>Date</th></tr>' +
+      (rows.length ? rows.map(b => '<tr><td><b>' + esc(b.article) + '</b></td><td>' + esc(b.colour || 'All') + '</td><td>v' + b.version + '</td><td class="small">' + b.lines.map(l => esc(l.material) + ' × ' + l.qty + ' ' + esc(l.uom)).join('<br>') + '</td><td>' + esc(b.by) + '</td><td class="nowrap">' + fmtD(b.at) + '</td></tr>').join('') : '<tr><td colspan="6" class="empty">Koi BOM nahi bana</td></tr>') + '</table></div>');
+  }
+};
+
+/* ================= PRODUCTION ================= */
+const REQ_UI = { form: false };
+VIEWS.requisition = {
+  mod: 'production', render() {
+    const edit = can('production', 'edit');
+    let h = subTitle('Requisition Slip', 'store se material mangwane ke liye') + '<div class="toolbar"><span class="grow"></span>' + (edit ? newBtn('New requisition', 'req-new') : '') + '</div>';
+    if (REQ_UI.form && edit) h += '<div class="panel" style="margin-bottom:12px">' + dlMat('dlMatR') + '<datalist id="dlJc">' + Store.all('job_cards').filter(j => j.status !== 'Closed').map(j => '<option value="' + esc(j.no) + '">' + esc(j.article) + '</option>').join('') + '</datalist>' +
+      '<div class="row"><label>Job card<input id="nrJc" list="dlJc"></label><label>Dept<input id="nrDept" value="Production"></label></div>' +
+      '<table style="margin-top:8px;max-width:560px"><tr><th>Material</th><th class="num" style="width:120px">Qty</th><th style="width:30px"></th></tr><tbody id="nrLines"><tr><td><input data-nr="mat" list="dlMatR"></td><td><input data-nr="qty" type="number" min="0" step="any" class="right"></td><td><button class="btn ghost sm" data-act="req-line-del">×</button></td></tr></tbody></table><a class="small" data-act="req-line">+ material</a>' +
+      '<div class="toolbar" style="margin-top:10px"><button class="btn primary" data-act="req-save">Submit</button><span id="nrMsg" class="small"></span></div></div>';
+    const rows = Store.all('requisitions').slice().sort((a, b) => b.no < a.no ? -1 : 1);
+    h += '<div class="tbl-wrap"><table><tr><th>Req</th><th>Date</th><th>JC / Dept</th><th>Materials</th><th>Status</th><th>By</th></tr>' +
+      (rows.length ? rows.map(r => '<tr><td><b>' + esc(r.no) + '</b></td><td class="nowrap">' + fmtD(r.date) + '</td><td>' + esc(r.jc_no || r.dept) + '</td><td class="small">' + r.lines.map(l => esc(l.material) + ' × ' + qtyFmt(l.qty)).join('<br>') + '</td><td><span class="st ' + (r.status === 'Issued' ? 'Done' : r.status === 'Rejected' ? 'Late' : 'Pending') + '">' + r.status + '</span>' + (r.issued_by ? '<div class="muted small">' + esc(r.issued_by) + '</div>' : '') + '</td><td>' + esc(r.by) + '</td></tr>').join('') : '<tr><td colspan="6" class="empty">No requisitions</td></tr>') + '</table></div>';
+    setMain(h);
+  }
+};
+ACTIONS['req-new'] = () => { REQ_UI.form = !REQ_UI.form; VIEWS.requisition.render(); };
+ACTIONS['req-line'] = () => $('#nrLines').insertAdjacentHTML('beforeend', '<tr><td><input data-nr="mat" list="dlMatR"></td><td><input data-nr="qty" type="number" min="0" step="any" class="right"></td><td><button class="btn ghost sm" data-act="req-line-del">×</button></td></tr>');
+ACTIONS['req-line-del'] = el => el.closest('tr').remove();
+document.addEventListener('change', e => { if (e.target.dataset.nr === 'mat') { const m = matBy(e.target.value); if (m) e.target.value = m.code; } });
+ACTIONS['req-save'] = () => {
+  if (!requirePerm('production', 'edit')) return;
+  const lines = $$('#nrLines tr').map(tr => { const m = matBy($('[data-nr="mat"]', tr).value); return m ? { material: m.code, qty: num($('[data-nr="qty"]', tr).value) } : null; }).filter(l => l && l.qty > 0);
+  if (!lines.length) { $('#nrMsg').innerHTML = '<span class="late-txt">Kam se kam ek material line chahiye.</span>'; return; }
+  const r = Store.put('requisitions', { id: uid(), no: nextNo('requisitions', 'RQ'), date: todayYmd(), jc_no: $('#nrJc').value.trim(), dept: $('#nrDept').value.trim() || 'Production', lines, status: 'Pending', by: ME.name });
+  audit('req.create', r.no, lines.map(l => l.material + '×' + l.qty).join(', ')); REQ_UI.form = false; flash(esc(r.no) + ' submitted — Store issuance mein dikhega.'); VIEWS.requisition.render();
+};
+
+VIEWS.prodtracker = {
+  mod: 'production', render() {
+    const rows = Store.all('orders').map(o => ({ o, st: orderState(o), r: resolveOrder(o) })).filter(x => x.st.open && x.r);
+    setMain(subTitle('Production Tracker', 'har order production ke stages par') + '<div class="tbl-wrap"><table><tr><th>Order</th><th>Brand</th><th class="num">Qty</th><th>Material</th><th>Production</th><th>QC</th><th>Current step</th><th class="num">Delay</th></tr>' +
+      (rows.length ? rows.map(x => {
+        const cell = id => { const s = x.r.steps[id]; if (!s || s.status === 'N/A') return '<td class="muted">—</td>'; return '<td><span class="st ' + stCls(s.status) + '">' + s.status + '</span>' + (s.planned && s.status !== 'Done' ? '<div class="muted small">' + fmtDT(s.planned) + '</div>' : s.actual ? '<div class="muted small">' + fmtDT(s.actual) + '</div>' : '') + '</td>'; };
+        return '<tr class="click" data-act="go" data-v="order" data-p="' + esc(x.o.id) + '"><td><b>' + esc(x.o.no) + '</b></td><td>' + esc(x.o.customer_name) + '</td><td class="num">' + qtyFmt(orderTotals(x.o).qty) + '</td>' + cell('material') + cell('production') + cell('qc') + '<td>' + (x.st.cur ? esc(x.st.cur.name) : '') + '</td><td class="num late-txt">' + (x.st.cur ? fmtDelay(x.st.cur.delayMinutes) : '') + '</td></tr>';
+      }).join('') : '<tr><td colspan="8" class="empty">No open orders</td></tr>') + '</table></div>');
+  }
+};
+
+VIEWS.mrs = {
+  mod: 'production', render() {
+    const { stk } = stockMaps();
+    let h = subTitle('MRS', 'Material Requirement Sheet — order × BOM') + '<div class="panel" style="margin-bottom:12px"><div class="row"><label>Order *<input id="mrsOrd" list="dlOrdM" value="' + esc(VIEWS.mrs.sel || '') + '"><datalist id="dlOrdM">' + Store.all('orders').filter(o => orderState(o).open).map(o => '<option value="' + esc(o.no) + '">' + esc(o.customer_name) + '</option>').join('') + '</datalist></label><button class="btn primary" data-act="mrs-run">Calculate</button></div></div>';
+    const o = Store.all('orders').find(x => norm(x.no) === norm(VIEWS.mrs.sel || ''));
+    if (o) {
+      const need = {};
+      const noBom = [];
+      o.lines.forEach(l => {
+        const bs = Store.all('boms').filter(b => norm(b.article) === norm(l.article)).sort((a, b) => b.version - a.version);
+        const b = bs[0];
+        if (!b) { noBom.push(l.article); return; }
+        b.lines.forEach(bl => { const k = norm(bl.material); need[k] = need[k] || { material: bl.material, uom: bl.uom, qty: 0 }; need[k].qty += num(bl.qty) * num(l.qty); });
+      });
+      const rows = Object.values(need);
+      if (noBom.length) h += '<div class="panel" style="border-left:3px solid var(--late);margin-bottom:10px">BOM missing: <b>' + noBom.map(esc).join(', ') + '</b> — Development se banwao, tab tak MRS adhoora hai.</div>';
+      h += '<div class="toolbar"><span class="muted small">' + esc(o.no) + ' · ' + esc(o.customer_name) + ' · ' + qtyFmt(orderTotals(o).qty) + ' pairs</span><span class="grow"></span><button class="btn" data-act="mrs-csv">Export CSV</button></div>';
+      h += '<div class="tbl-wrap"><table><tr><th>Material</th><th>UOM</th><th class="num">Required</th><th class="num">In stock</th><th class="num">Shortfall</th></tr>' +
+        (rows.length ? rows.map(x => { const st = stk[norm(x.material)] || 0; const short = Math.max(0, x.qty - st); return '<tr><td><b>' + esc(x.material) + '</b></td><td>' + esc(x.uom) + '</td><td class="num">' + qtyFmt(x.qty) + '</td><td class="num">' + qtyFmt(st) + '</td><td class="num ' + (short ? 'late-txt' : '') + '">' + (short ? qtyFmt(short) : '—') + '</td></tr>'; }).join('') : '<tr><td colspan="5" class="empty">Is order ke articles ka koi BOM nahi mila</td></tr>') + '</table></div>';
+      VIEWS.mrs.rows = rows.map(x => [x.material, x.uom, x.qty, stk[norm(x.material)] || 0, Math.max(0, x.qty - (stk[norm(x.material)] || 0))]);
+    }
+    setMain(h);
+  }
+};
+ACTIONS['mrs-run'] = () => { VIEWS.mrs.sel = $('#mrsOrd').value.trim(); VIEWS.mrs.render(); };
+ACTIONS['mrs-csv'] = () => downloadCsv('mrs-' + (VIEWS.mrs.sel || '') + '.csv', [['Material', 'UOM', 'Required', 'In stock', 'Shortfall']].concat(VIEWS.mrs.rows || []));
+
+/* ================= ACCOUNTS ================= */
+VIEWS.invoices = {
+  mod: 'accounts', render() {
+    const edit = can('accounts', 'edit');
+    const rows = Store.all('dispatches').filter(d => !d.cancelled).sort((a, b) => (b.at || '') < (a.at || '') ? -1 : 1);
+    const pend = rows.filter(d => d.payment !== 'Received');
+    let h = subTitle('Invoices') + '<div class="kpis">' +
+      '<div><b>' + rows.length + '</b><span>Total invoices</span></div>' +
+      '<div><b class="' + (pend.length ? 'late-txt' : '') + '">' + pend.length + '</b><span>Payment pending</span></div>' +
+      '<div><b>' + rows.filter(d => (d.date || '').startsWith(todayYmd().slice(0, 7))).length + '</b><span>This month</span></div></div>';
+    h += '<div class="tbl-wrap"><table><tr><th>Invoice</th><th>Date</th><th>Dispatch</th><th>Order</th><th>Brand</th><th class="num">Qty</th><th>Payment</th>' + (edit ? '<th></th>' : '') + '</tr>' +
+      (rows.length ? rows.map(d => { const o = Store.get('orders', d.order_id) || {}; const paid = d.payment === 'Received'; return '<tr><td><b>' + esc(d.invoice_no) + '</b></td><td class="nowrap">' + fmtD(d.date) + '</td><td>' + esc(d.no) + '</td><td><a href="#/order/' + esc(d.order_id) + '">' + esc(o.no || '') + '</a></td><td>' + esc(o.customer_name || '') + '</td><td class="num">' + qtyFmt(d.lines.reduce((s, l) => s + num(l.qty), 0)) + '</td><td><span class="st ' + (paid ? 'Done' : 'Pending') + '">' + (paid ? 'Received' : 'Pending') + '</span></td>' +
+        (edit ? '<td class="right">' + (paid ? '' : '<button class="btn sm" data-act="pay-mark" data-id="' + esc(d.id) + '">Mark received</button>') + '</td>' : '') + '</tr>'; }).join('') : '<tr><td colspan="8" class="empty">No invoices yet — dispatch hone par invoice yahan aata hai</td></tr>') + '</table></div>';
+    setMain(h);
+  }
+};
+ACTIONS['pay-mark'] = el => { if (!requirePerm('accounts', 'edit')) return; const d = Store.get('dispatches', el.dataset.id); d.payment = 'Received'; d.payment_by = ME.name; d.payment_at = nowIso(); Store.put('dispatches', d); audit('invoice.paid', d.invoice_no, d.no); flash(esc(d.invoice_no) + ' payment received.'); VIEWS.invoices.render(); };
+
+/* ================= OPERATIONS: tickets ================= */
+function ticketEscalated(t) { return t.status !== 'Closed' && (t.priority === 'Critical' || (Date.now() - new Date(t.at)) > 48 * 3600000); }
+const TKT_UI = { f: 'open', form: false };
+VIEWS.tickets = {
+  mod: 'tickets', render() {
+    const edit = can('tickets', 'edit');
+    const rows = Store.all('tickets').slice().sort((a, b) => (b.at || '') < (a.at || '') ? -1 : 1).filter(t => TKT_UI.f === 'all' || (TKT_UI.f === 'open' ? t.status !== 'Closed' : TKT_UI.f === 'esc' ? ticketEscalated(t) : t.status === 'Closed'));
+    let h = subTitle('Tickets') + '<div class="toolbar">' + seg('f', [{ v: 'open', l: 'Open' }, { v: 'esc', l: 'Escalated' }, { v: 'closed', l: 'Closed' }, { v: 'all', l: 'All' }], TKT_UI.f) + '<span class="grow"></span>' + (edit ? newBtn('Raise ticket', 'tkt-new') : '') + '</div>';
+    if (TKT_UI.form && edit) h += '<div class="panel" style="margin-bottom:12px"><div class="row"><label style="flex:2">Subject *<input id="ntSub"></label><label>Department *' + seg('ntDept', ['Purchase', 'Merchant', 'Store', 'Development', 'Production', 'Accounts', 'Dispatch', 'IT'], '') + '</label></div>' +
+      '<div class="row" style="margin-top:8px"><label>Priority' + seg('ntPri', ['Low', 'Normal', 'High', 'Critical'], 'Normal') + '</label><label style="flex:1">Detail<input id="ntDet"></label><button class="btn primary" data-act="tkt-save">Raise</button><span id="ntMsg" class="small"></span></div></div>';
+    h += '<div class="tbl-wrap"><table><tr><th>Ticket</th><th>Subject</th><th>Dept</th><th>Priority</th><th>Raised by</th><th>Age</th><th>Status</th><th>Last comment</th>' + (edit ? '<th style="min-width:230px"></th>' : '') + '</tr>' +
+      (rows.length ? rows.map(t => {
+        const esc48 = ticketEscalated(t); const age = Math.floor((Date.now() - new Date(t.at)) / 3600000);
+        const last = (t.comments || []).slice(-1)[0];
+        return '<tr><td><b>' + esc(t.no) + '</b>' + (esc48 ? ' <span class="late-txt small">ESCALATED</span>' : '') + '</td><td>' + esc(t.subject) + (t.detail ? '<div class="muted small">' + esc(t.detail) + '</div>' : '') + '</td><td>' + esc(t.dept) + '</td><td class="' + (t.priority === 'Critical' ? 'late-txt' : t.priority === 'High' ? '' : 'muted') + '">' + esc(t.priority) + '</td><td>' + esc(t.by) + '</td><td class="nowrap">' + (age < 48 ? age + 'h' : Math.floor(age / 24) + 'd') + '</td>' +
+          '<td><span class="st ' + (t.status === 'Closed' ? 'Done' : t.status === 'In Progress' ? 'Pending' : 'Late') + '">' + t.status + '</span></td><td class="small">' + (last ? esc(last.note) + ' <span class="muted">· ' + esc(last.by) + '</span>' : '') + '</td>' +
+          (edit ? '<td class="right nowrap">' + (t.status !== 'Closed' ? '<input data-tk-note placeholder="comment" style="width:110px"> <button class="btn sm" data-act="tkt-comment" data-id="' + esc(t.id) + '">Add</button> ' + (t.status === 'Open' ? '<button class="btn sm" data-act="tkt-status" data-id="' + esc(t.id) + '" data-s="In Progress">Start</button> ' : '') + '<button class="btn sm primary" data-act="tkt-status" data-id="' + esc(t.id) + '" data-s="Closed">Close</button>' : '') + '</td>' : '') + '</tr>';
+      }).join('') : '<tr><td colspan="9" class="empty">No tickets</td></tr>') + '</table></div>';
+    setMain(h);
+    onSeg(e => { if (e.target.dataset.seg === 'f') { TKT_UI.f = e.detail; VIEWS.tickets.render(); } });
+  }
+};
+ACTIONS['tkt-new'] = () => { TKT_UI.form = !TKT_UI.form; VIEWS.tickets.render(); if (TKT_UI.form) $('#ntSub').focus(); };
+ACTIONS['tkt-save'] = () => {
+  if (!requirePerm('tickets', 'edit')) return;
+  const sub = $('#ntSub').value.trim(); const dept = segVal($('[data-seg="ntDept"]'));
+  if (!sub || !dept) { $('#ntMsg').innerHTML = '<span class="late-txt">Subject aur department chahiye.</span>'; return; }
+  const t = Store.put('tickets', { id: uid(), no: nextNo('tickets', 'TKT'), at: nowIso(), by: ME.name, dept, priority: segVal($('[data-seg="ntPri"]')) || 'Normal', subject: sub, detail: $('#ntDet').value.trim(), status: 'Open', comments: [] });
+  audit('ticket.create', t.no, dept + ' · ' + sub); TKT_UI.form = false; flash(esc(t.no) + ' raised.'); VIEWS.tickets.render();
+};
+ACTIONS['tkt-comment'] = el => { const note = $('[data-tk-note]', el.closest('tr')).value.trim(); if (!note) return; const t = Store.get('tickets', el.dataset.id); t.comments = t.comments || []; t.comments.push({ at: nowIso(), by: ME.name, note }); Store.put('tickets', t); VIEWS.tickets.render(); };
+ACTIONS['tkt-status'] = el => { const t = Store.get('tickets', el.dataset.id); t.status = el.dataset.s; if (el.dataset.s === 'Closed') { t.closed_by = ME.name; t.closed_at = nowIso(); } Store.put('tickets', t); audit('ticket.' + el.dataset.s.toLowerCase().replace(' ', ''), t.no, ''); VIEWS.tickets.render(); };
+
+/* ================= TASK: checklist ================= */
+function checklistDueToday(t) {
+  if (t.active === false) return false;
+  const d = new Date();
+  if (t.freq === 'Daily') return !(t.done || {})[todayYmd()];
+  if (t.freq === 'Weekly') return d.getDay() === num(t.wday) && !(t.done || {})[todayYmd()];
+  return !(t.done || {}).once && (!t.due || t.due <= todayYmd());
+}
+function myChecklistDue() { return Store.all('checklist').filter(t => isMyDoer(t.doer) && checklistDueToday(t)); }
+const CHK_UI = { who: 'mine', form: false };
+VIEWS.checklist = {
+  mod: 'checklist', render() {
+    const edit = can('checklist', 'edit');
+    const all = can('tracker', 'edit') || myRole().system;
+    if (!all) CHK_UI.who = 'mine';
+    let rows = Store.all('checklist').filter(t => t.active !== false);
+    if (CHK_UI.who === 'mine') rows = rows.filter(t => isMyDoer(t.doer));
+    rows = rows.slice().sort((a, b) => (checklistDueToday(b) ? 1 : 0) - (checklistDueToday(a) ? 1 : 0));
+    let h = subTitle('Checklist', 'roz / hafte ke fixed kaam') + '<div class="toolbar">' + (all ? seg('who', [{ v: 'mine', l: 'Mine' }, { v: 'all', l: 'Everyone' }], CHK_UI.who) : '') + '<span class="grow"></span>' + (edit ? newBtn('Add task', 'chk-new') : '') + '</div>';
+    if (CHK_UI.form && edit) h += '<div class="panel" style="margin-bottom:12px"><div class="row"><label style="flex:2">Task *<input id="ncTitle"></label><label>Doer *<input id="ncDoer" list="dlDoers2" value="' + esc(ME.doer || '') + '"><datalist id="dlDoers2">' + Array.from(new Set(Store.all('users').map(u => u.doer).filter(Boolean))).map(d => '<option>' + esc(d) + '</option>').join('') + '</datalist></label>' +
+      '<label>Repeat' + seg('ncFreq', ['Once', 'Daily', 'Weekly'], 'Daily') + '</label><label>Due / Weekday<input id="ncDue" placeholder="date ya 0-6"></label><button class="btn primary" data-act="chk-save">Add</button><span id="ncMsg" class="small"></span></div></div>';
+    h += '<div class="tbl-wrap"><table><tr><th>Task</th><th>Doer</th><th>Repeat</th><th>Today</th><th>Last done</th><th></th></tr>' +
+      (rows.length ? rows.map(t => {
+        const due = checklistDueToday(t); const doneKeys = Object.keys(t.done || {});
+        const lastK = doneKeys.sort().slice(-1)[0];
+        const canMark = due && (isMyDoer(t.doer) || can('tracker', 'edit'));
+        return '<tr><td>' + esc(t.title) + '</td><td>' + esc(t.doer) + '</td><td>' + esc(t.freq) + (t.freq === 'Weekly' ? ' (' + ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][num(t.wday)] + ')' : t.freq === 'Once' && t.due ? ' · ' + fmtD(t.due) : '') + '</td>' +
+          '<td>' + (due ? '<span class="st Pending">Due</span>' : '<span class="st Done">' + (t.freq === 'Once' && (t.done || {}).once ? 'Done' : 'OK') + '</span>') + '</td><td class="small muted">' + (lastK ? esc(lastK === 'once' ? (t.done.once || '') : lastK + ' · ' + t.done[lastK]) : '—') + '</td>' +
+          '<td class="right nowrap">' + (canMark ? '<button class="btn sm primary" data-act="chk-done" data-id="' + esc(t.id) + '">Done</button> ' : '') + (edit && (t.by === ME.name || myRole().system) ? '<button class="btn ghost sm danger" data-act="chk-del" data-id="' + esc(t.id) + '" data-confirm="Delete?">×</button>' : '') + '</td></tr>';
+      }).join('') : '<tr><td colspan="6" class="empty">Checklist khali hai</td></tr>') + '</table></div>';
+    setMain(h);
+    onSeg(e => { if (e.target.dataset.seg === 'who') { CHK_UI.who = e.detail; VIEWS.checklist.render(); } });
+  }
+};
+ACTIONS['chk-new'] = () => { CHK_UI.form = !CHK_UI.form; VIEWS.checklist.render(); };
+ACTIONS['chk-save'] = () => {
+  if (!requirePerm('checklist', 'edit')) return;
+  const title = $('#ncTitle').value.trim(); const doer = $('#ncDoer').value.trim().toUpperCase(); const freq = segVal($('[data-seg="ncFreq"]')) || 'Daily';
+  if (!title || !doer) { $('#ncMsg').innerHTML = '<span class="late-txt">Task aur doer chahiye.</span>'; return; }
+  const due = $('#ncDue').value.trim();
+  const t = Store.put('checklist', { id: uid(), title, doer, freq, due: freq === 'Once' ? due : '', wday: freq === 'Weekly' ? num(due) : null, done: {}, active: true, by: ME.name });
+  audit('checklist.create', title, doer + ' · ' + freq); CHK_UI.form = false; flash('Task added.'); VIEWS.checklist.render(); renderNav();
+};
+ACTIONS['chk-done'] = el => {
+  const t = Store.get('checklist', el.dataset.id); t.done = t.done || {};
+  if (t.freq === 'Once') t.done.once = ME.name + ' · ' + todayYmd(); else t.done[todayYmd()] = ME.name;
+  Store.put('checklist', t); audit('checklist.done', t.title, ''); VIEWS.checklist.render(); renderNav();
+};
+ACTIONS['chk-del'] = el => { const t = Store.get('checklist', el.dataset.id); Store.del('checklist', t.id); audit('checklist.delete', t.title, ''); VIEWS.checklist.render(); };
