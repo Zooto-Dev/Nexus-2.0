@@ -32,6 +32,7 @@ const ALL_EDIT = () => Object.fromEntries(MODULES.map(m => [m.key, 'edit']));
 function rolePerms(edit, view) { const p = {}; MODULES.forEach(m => p[m.key] = 'none'); view.forEach(k => p[k] = 'view'); edit.forEach(k => p[k] = 'edit'); return p; }
 const WORK_VIEW = ['dashboard', 'orders', 'tracker', 'dispatch'];
 
+function fyTag() { const d = new Date(); const y = d.getMonth() >= 3 ? d.getFullYear() : d.getFullYear() - 1; return y + '-' + String((y + 1) % 100).padStart(2, '0'); }
 function seedData(cloud) {
   const now = new Date();
   const base = {
@@ -53,7 +54,7 @@ function seedData(cloud) {
       { id: 'r_dispatch', name: 'Dispatch', perms: rolePerms(['tasks', 'dispatch', 'tickets', 'checklist'], ['dashboard', 'orders', 'tracker', 'accounts']) },
       { id: 'r_viewer', name: 'Viewer', perms: rolePerms([], WORK_VIEW.concat(['tickets', 'checklist'])) }
     ],
-    users: [], customers: [], items: [], materials: [], processes: [], orders: [], dispatches: [], purchase_orders: [], sourcing: [], grns: [], inwards: [], issues: [], rtvs: [], boms: [], job_cards: [], requisitions: [], tickets: [], checklist: [], audit: []
+    users: [], customers: [], items: [], materials: [], vendors: [], processes: [], orders: [], dispatches: [], purchase_orders: [], sourcing: [], grns: [], inwards: [], issues: [], rtvs: [], boms: [], job_cards: [], requisitions: [], tickets: [], checklist: [], audit: []
   };
   const U = (name, email, role_id, doer) => ({ id: 'u_' + doer.toLowerCase(), name, email, role_id, doer, active: true, pin_seed: '1234', seed: !!cloud });
   base.users = cloud ? [U('Admin', 'admin@nexus.local', 'r_admin', 'ADMIN')] : [
@@ -131,19 +132,24 @@ function seedData(cloud) {
     ['EVA-10', 'EVA Sheet 10mm', 'Raw', 'SHEET'], ['EVA-06', 'EVA Sheet 6mm', 'Raw', 'SHEET'],
     ['STRAP-P', 'PVC Strap Printed', 'Component', 'PAIR'], ['SOLE-TPR', 'TPR Outsole', 'Component', 'PAIR'],
     ['BOX-K3', 'Kraft Box No.3', 'Packing', 'PCS'], ['LBL-BAR', 'Barcode Label Roll', 'Packing', 'ROLL']
-  ].map((r, i) => ({ id: 'm' + (i + 1), code: r[0], name: r[1], group: r[2], uom: r[3] }));
+  ].map((r, i) => ({ id: 'm' + (i + 1), code: r[0], name: r[1], group: r[2], uom: r[3], min_level: [20, 20, 200, 300, 100, 5][i], rack: ['R1', 'R1', 'R2', 'R3', 'R4', 'R4'][i] }));
+  base.vendors = [
+    { id: 'v1', name: 'Shree Polymers', gstin: '08AABCS1111A1Z5', address: 'Jaipur, RJ', mobile: '9829011111', email: 'sales@shreepolymers.in' },
+    { id: 'v2', name: 'Jain Traders', gstin: '08AAFPJ2222B1Z2', address: 'Jaipur, RJ', mobile: '9829022222', email: 'jaintraders@gmail.com' },
+    { id: 'v3', name: 'Balaji Soles', gstin: '09AACCB3333C1Z8', address: 'Agra, UP', mobile: '9839033333', email: 'balajisoles@gmail.com' }
+  ];
   base.sourcing = [
     { id: 'src1', material: 'EVA-10', vendor: 'Shree Polymers', rate: 420, moq: 50, lead_days: 7, remark: '' },
     { id: 'src2', material: 'EVA-10', vendor: 'Jain Traders', rate: 445, moq: 20, lead_days: 4, remark: 'costly, fast' },
     { id: 'src3', material: 'SOLE-TPR', vendor: 'Balaji Soles', rate: 38, moq: 500, lead_days: 10, remark: '' }
   ];
   base.purchase_orders = [
-    { id: 'po1', no: 'PO-' + now.getFullYear() + '-0001', date: ymdOf(hoursAgo(120)), vendor: 'Shree Polymers', expected: ymdOf(new Date(now.getTime() - 86400000)), remarks: '', created_by: 'Ashish (Purchase)', at: hoursAgo(120).toISOString(),
+    { id: 'po1', no: 'ZF/PO/FY/001'.replace('FY', fyTag()), approval: 'Approved', approved_by: 'Pankaj (Manager)', date: ymdOf(hoursAgo(120)), vendor: 'Shree Polymers', expected: ymdOf(new Date(now.getTime() - 86400000)), remarks: '', created_by: 'Ashish (Purchase)', at: hoursAgo(120).toISOString(),
       lines: [{ material: 'EVA-10', uom: 'SHEET', qty: 200, rate: 420, received: 120, rejected: 5 }], followups: [{ at: ymdOf(hoursAgo(24)), by: 'Ashish (Purchase)', note: 'Vendor bola kal tak bhej dega', next: todayYmd() }] },
-    { id: 'po2', no: 'PO-' + now.getFullYear() + '-0002', date: ymdOf(hoursAgo(48)), vendor: 'Balaji Soles', expected: ymdOf(new Date(now.getTime() + 5 * 86400000)), remarks: '', created_by: 'Ashish (Purchase)', at: hoursAgo(48).toISOString(),
+    { id: 'po2', no: 'ZF/PO/FY/002'.replace('FY', fyTag()), approval: 'Approved', approved_by: 'Pankaj (Manager)', date: ymdOf(hoursAgo(48)), vendor: 'Balaji Soles', expected: ymdOf(new Date(now.getTime() + 5 * 86400000)), remarks: '', created_by: 'Ashish (Purchase)', at: hoursAgo(48).toISOString(),
       lines: [{ material: 'SOLE-TPR', uom: 'PAIR', qty: 1000, rate: 38, received: 0, rejected: 0 }, { material: 'BOX-K3', uom: 'PCS', qty: 500, rate: 12, received: 0, rejected: 0 }], followups: [] }
   ];
-  base.grns = [{ id: 'g1', no: 'GRN-' + now.getFullYear() + '-0001', date: ymdOf(hoursAgo(30)), po_id: 'po1', po_no: base.purchase_orders[0].no, vendor: 'Shree Polymers', invoice: 'SP/221', lines: [{ material: 'EVA-10', accepted: 115, rejected: 5 }], by: 'Suresh (Store)' }];
+  base.grns = [{ id: 'g1', no: 'ZF/GRN/FY/0001'.replace('FY', fyTag()), inv_qty: 120, date: ymdOf(hoursAgo(30)), po_id: 'po1', po_no: base.purchase_orders[0].no, vendor: 'Shree Polymers', invoice: 'SP/221', lines: [{ material: 'EVA-10', inv_qty: 120, accepted: 115, rejected: 5, short: 0, excess: 0 }], by: 'Suresh (Store)' }];
   base.inwards = [{ id: 'in1', no: 'INW-' + now.getFullYear() + '-0001', date: ymdOf(hoursAgo(30)), vendor: 'Shree Polymers', po_no: base.purchase_orders[0].no, material: 'EVA-10', uom: 'SHEET', qty: 120, remark: '', swatch_match: '', by: 'Suresh (Store)' }];
   base.issues = [{ id: 'is1', no: 'ISS-' + now.getFullYear() + '-0001', date: todayYmd(), material: 'EVA-10', qty: 40, to_jc: 'JC-' + now.getFullYear() + '-0001', to_dept: 'Production', by: 'Suresh (Store)', at: hoursAgo(5).toISOString() }];
   base.boms = [{ id: 'b1', article: 'ZT-101', colour: '', version: 1, lines: [{ material: 'EVA-10', uom: 'SHEET', qty: 0.05 }, { material: 'SOLE-TPR', uom: 'PAIR', qty: 1 }, { material: 'BOX-K3', uom: 'PCS', qty: 0.5 }], status: 'Final', by: 'Manoj (Development)', at: hoursAgo(80).toISOString() },

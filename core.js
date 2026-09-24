@@ -46,8 +46,8 @@ function flash(msg, type) {
 }
 
 /* ================= store ================= */
-const DB_KEY = 'nexus2_db_v3';
-const COLS = ['users', 'roles', 'customers', 'items', 'materials', 'processes', 'orders', 'dispatches', 'purchase_orders', 'sourcing', 'grns', 'inwards', 'issues', 'rtvs', 'boms', 'job_cards', 'requisitions', 'tickets', 'checklist', 'audit'];
+const DB_KEY = 'nexus2_db_v4';
+const COLS = ['users', 'roles', 'customers', 'items', 'materials', 'processes', 'orders', 'dispatches', 'purchase_orders', 'sourcing', 'grns', 'inwards', 'vendors', 'issues', 'rtvs', 'boms', 'job_cards', 'requisitions', 'tickets', 'checklist', 'audit'];
 let DB = null;
 const CFG = window.NEXUS_CONFIG || {};
 const CLOUD = !!(CFG.SUPABASE_URL && CFG.SUPABASE_ANON_KEY && window.supabase);
@@ -123,6 +123,16 @@ async function cloudLoad() {
 }
 
 /* ---- numbering ---- */
+// Financial-year numbering (Apr–Mar), e.g. ZF/PO/2026-27/001 — same style as the old Nexus IMS.
+function fyNo(col, tag, width) {
+  const co = (settings().company_code || 'ZF').toUpperCase();
+  const d = new Date(); const y = d.getMonth() >= 3 ? d.getFullYear() : d.getFullYear() - 1;
+  const head = co + '/' + tag + '/' + y + '-' + String((y + 1) % 100).padStart(2, '0') + '/';
+  const max = Store.all(col).reduce((m, x) => x.no && x.no.startsWith(head) ? Math.max(m, parseInt(x.no.slice(head.length), 10) || 0) : m, 0);
+  return head + String(max + 1).padStart(width || 3, '0');
+}
+// Approvals (PO approve/reject etc.) need Admin or Manager — plain edit access is not enough.
+function canApprove() { const r = myRole(); return !!r && (r.system || norm(r.name) === 'manager'); }
 function nextNo(col, prefix) {
   const yr = new Date().getFullYear(); const head = prefix + '-' + yr + '-';
   const max = Store.all(col).reduce((m, d) => d.no && d.no.startsWith(head) ? Math.max(m, parseInt(d.no.slice(head.length), 10) || 0) : m, 0);
@@ -305,7 +315,8 @@ const NAV = [
     { v: 'purchasedash', l: 'Purchase Dashboard', mod: 'purchase' },
     { v: 'po', l: 'Purchase Order', mod: 'purchase' },
     { v: 'sourcing', l: 'Sourcing', mod: 'purchase' },
-    { v: 'followup', l: 'Followup', mod: 'purchase' }] },
+    { v: 'followup', l: 'Followup', mod: 'purchase' },
+    { v: 'vendors', l: 'Vendors', mod: 'purchase' }] },
   { menu: 'Merchant', items: [
     { v: 'punch', l: 'Punch Order', mod: 'orders', edit: true },
     { v: 'orders', l: 'Orders', mod: 'orders' },

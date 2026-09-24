@@ -143,7 +143,7 @@ td input.qty { width: 80px; text-align: right; }
   .punch .lines input[data-f=item] { min-width: 150px; }
   .punch .lines { display: block; overflow-x: auto; }
 }
-@media print { #nav, #top, .noprint { display: none !important; } #main { padding: 0; } }
+@media print { #nav, #top, .noprint { display: none !important; } #main { padding: 0; } body.print-po #main > *:not(.tbl-wrap) { display: none; } body.print-po tr:not(.inline-form):not(:first-child) { display: none; } body.print-po .inline-form { display: table-row !important; } }
 h1 .small { font-weight: 400; }
 
 /* dashboard head */
