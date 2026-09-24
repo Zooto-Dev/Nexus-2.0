@@ -22,7 +22,7 @@ VIEWS.home = {
     const month = todayYmd().slice(0, 7);
     const dspQty = Store.all('dispatches').filter(d => !d.cancelled && (d.date || '').startsWith(month)).reduce((s, d) => s + d.lines.reduce((a, l) => a + num(l.qty), 0), 0);
     const openOrders = states.filter(x => x.st.open);
-    const openVal = openOrders.reduce((s, x) => s + orderTotals(x.o).value, 0);
+    const pendQty = openOrders.reduce((s, x) => s + dispatchedQty(x.o).pending, 0);
     let h = '<h1>Good ' + (new Date().getHours() < 12 ? 'morning' : 'day') + ', ' + esc(ME.name.split(' ')[0]) + '</h1>';
     h += '<div class="kpis">' +
       '<a href="#/orders"><b>' + openOrders.length + '</b><span>Open orders</span></a>' +
@@ -31,7 +31,7 @@ VIEWS.home = {
       '<div><b>' + open.filter(x => dueToday(x.step)).length + '</b><span>Due today</span></div>' +
       '<a href="#/dispatch"><b>' + readyForDispatch().length + '</b><span>Ready to dispatch</span></a>' +
       '<div><b>' + qtyFmt(dspQty) + '</b><span>Qty dispatched this month</span></div>' +
-      '<div><b>₹' + money(openVal) + '</b><span>Open order value</span></div></div>';
+      '<div><b>' + qtyFmt(pendQty) + '</b><span>Qty pending dispatch</span></div></div>';
 
     h += '<div class="grid2"><div><h2>My tasks</h2>' + taskTable(mine.slice(0, 8), true) +
       (mine.length > 8 ? '<div class="small" style="margin-top:6px"><a href="#/tasks">All ' + mine.length + ' tasks →</a></div>' : '') + '</div>';
@@ -75,14 +75,17 @@ VIEWS.tasks = {
 };
 
 /* ---------------- Punch order ---------------- */
-const CORE_FIELDS = ['created_at', 'order_no', 'customer', 'category', 'payment_terms', 'priority', 'delivery_date', 'qty', 'value'];
+const CORE_FIELDS = ['created_at', 'order_no', 'order_date', 'brand', 'buyer_po', 'po_expiry_date', 'tooling_no', 'channel', 'category', 'priority', 'qty'];
+const GENDERS = ['Gents', 'Ladies', 'Kids', 'Unisex'];
+const PACKS = ['Assortment', 'Solid'];
 let PUNCH = null;
-function blankLine() { return { item_code: '', item_name: '', uom: '', qty: '', rate: '' }; }
+function blankLine() { return { article: '', style: '', colour: '', gender: '', size: '', qty: '', pack: '', pack_qty: '' }; }
 function newPunch(order) {
-  PUNCH = order ? clone(order) : { id: null, order_date: todayYmd(), customer_name: '', customer_id: '', po_ref: '', category: '', payment_terms: '', priority: '', delivery_date: '', remarks: '', extra: {}, lines: [] };
-  if (!PUNCH.lines.length || PUNCH.lines[PUNCH.lines.length - 1].item_code) PUNCH.lines.push(blankLine());
+  PUNCH = order ? clone(order) : { id: null, order_date: todayYmd(), brand: '', customer_id: '', buyer_po: '', po_expiry_date: '', tooling_no: '', channel: '', category: '', priority: '', remarks: '', extra: {}, lines: [] };
+  if (!PUNCH.lines.length || PUNCH.lines[PUNCH.lines.length - 1].article) PUNCH.lines.push(blankLine());
 }
-function fieldOptions(key) { const p = activeProcess(); const f = p && p.spec.fields.find(x => x.key === key); return f && f.options ? f.options : []; }
+function fieldOptions(key) { const p = activeProcess(); const f = p && p.spec.fields.find(x => x.key === key); return f && f.options ? f.options.filter(o => o !== '') : []; }
+function lineSel(f, opts, val) { return '<select data-f="' + f + '"><option value=""></option>' + opts.map(o => '<option' + (o === val ? ' selected' : '') + '>' + esc(o) + '</option>').join('') + '</select>'; }
 VIEWS.punch = {
   mod: 'orders', edit: true, render(param) {
     if (param) { const o = Store.get('orders', param); if (!o) return go('orders'); if (dispatchedQty(o).total > 0) { flash('Dispatched orders cannot be edited.', 'err'); return go('order', o.id); } if (!PUNCH || PUNCH.id !== o.id) newPunch(o); }
@@ -91,77 +94,76 @@ VIEWS.punch = {
     if (!proc) { setMain('<div class="panel">No active FMS flow. Activate one in FMS Builder first.</div>'); return; }
     const extra = proc.spec.fields.filter(f => f.source === 'form' && !CORE_FIELDS.includes(f.key));
     const P = PUNCH;
-    let h = '<h1>' + (P.id ? 'Edit ' + esc(P.no) : 'Punch Order') + ' <span class="muted small">Enter = next row · <span class="kbd">Ctrl</span>+<span class="kbd">S</span> save</span></h1><div class="panel punch">';
-    h += '<datalist id="dlCust">' + Store.all('customers').map(c => '<option value="' + esc(c.name) + '">' + esc(c.code + ' · ' + (c.city || '')) + '</option>').join('') + '</datalist>';
-    h += '<datalist id="dlItem">' + Store.all('items').map(i => '<option value="' + esc(i.code + ' — ' + i.name) + '"></option>').join('') + '</datalist>';
+    let h = '<h1>' + (P.id ? 'Edit ' + esc(P.no) : 'Punch Order') + ' <span class="muted small">Time stamp auto lagta hai · Enter = next box · <span class="kbd">Ctrl</span>+<span class="kbd">S</span> save</span></h1><div class="panel punch">';
+    h += '<datalist id="dlBrand">' + Store.all('customers').map(c => '<option value="' + esc(c.name) + '">' + esc(c.merchandiser || '') + '</option>').join('') + '</datalist>';
+    h += '<datalist id="dlArt">' + Store.all('items').map(i => '<option value="' + esc(i.code) + '">' + esc(i.name + ' · ' + (i.group || '')) + '</option>').join('') + '</datalist>';
     h += '<div class="hdr">' +
-      '<label>Customer *<input id="pCust" list="dlCust" value="' + esc(P.customer_name) + '" autocomplete="off"></label>' +
-      '<label>Customer PO / Ref<input id="pRef" value="' + esc(P.po_ref) + '"></label>' +
       '<label>Order date<input id="pDate" type="date" value="' + esc(P.order_date) + '"></label>' +
-      '<label>Delivery date *<input id="pDel" type="date" value="' + esc(P.delivery_date) + '"></label>' +
-      '<label>Order type *' + seg('category', fieldOptions('category'), P.category) + '</label>' +
-      '<label>Payment terms *' + seg('payment_terms', fieldOptions('payment_terms'), P.payment_terms) + '</label>' +
+      '<label>Brand *<input id="pBrand" list="dlBrand" value="' + esc(P.brand || P.customer_name || '') + '" autocomplete="off"></label>' +
+      '<label>Buyer PO no *<input id="pPo" value="' + esc(P.buyer_po) + '"></label>' +
+      '<label>PO expiry date *<input id="pExp" type="date" value="' + esc(P.po_expiry_date) + '"></label>' +
+      '<label>Tooling / Mould no<input id="pTool" value="' + esc(P.tooling_no) + '"></label>' +
+      '<label>Category *' + seg('category', fieldOptions('category'), P.category) + '</label>' +
+      '<label>Channel *' + seg('channel', fieldOptions('channel'), P.channel) + '</label>' +
       '<label>Priority' + seg('priority', [{ v: '', l: 'Normal' }, { v: 'Urgent', l: 'Urgent' }], P.priority === 'Urgent' ? 'Urgent' : '') + '</label>' +
       '<label>Remarks<input id="pRem" value="' + esc(P.remarks) + '"></label>' +
       extra.map(f => '<label>' + esc(f.label) + (f.options && f.options.length <= 4 ? seg('x_' + f.key, f.options, (P.extra || {})[f.key]) :
         '<input data-extra="' + esc(f.key) + '" type="' + (f.type === 'number' ? 'number' : f.type === 'date' ? 'date' : 'text') + '" value="' + esc((P.extra || {})[f.key]) + '"' + (f.options ? ' list="dl_' + esc(f.key) + '"' : '') + '>' + (f.options ? '<datalist id="dl_' + esc(f.key) + '">' + f.options.map(o => '<option value="' + esc(o) + '">').join('') + '</datalist>' : '')) + '</label>').join('') +
       '</div>';
-    h += '<table class="lines"><tr><th style="width:28px">#</th><th>Item</th><th style="width:70px">UOM</th><th class="num" style="width:110px">Qty</th><th class="num" style="width:110px">Rate</th><th class="num" style="width:120px">Amount</th><th style="width:30px"></th></tr>' +
-      P.lines.map((l, i) => '<tr data-i="' + i + '"><td class="muted">' + (i + 1) + '</td><td><input data-f="item" list="dlItem" value="' + esc(l.item_code ? l.item_code + ' — ' + l.item_name : '') + '" autocomplete="off"></td>' +
-        '<td class="muted" data-uom>' + esc(l.uom) + '</td><td><input data-f="qty" type="number" min="0" step="any" class="right" value="' + esc(l.qty) + '"></td><td><input data-f="rate" type="number" min="0" step="any" class="right" value="' + esc(l.rate) + '"></td>' +
-        '<td class="num" data-amt>' + (l.qty && l.rate ? money(num(l.qty) * num(l.rate)) : '') + '</td><td><button class="btn ghost sm" data-act="punch-del" data-i="' + i + '" title="Remove">×</button></td></tr>').join('') +
-      '<tr><td></td><td colspan="2"><a data-act="punch-add">+ Add row</a></td><td class="num"><b id="pTq"></b></td><td></td><td class="num"><b id="pTv"></b></td><td></td></tr></table>';
+    h += '<table class="lines"><tr><th style="width:28px">#</th><th style="width:110px">Article</th><th>Style</th><th style="width:110px">Colour</th><th style="width:100px">Gender</th><th style="width:90px">Size</th><th class="num" style="width:90px">Qty</th><th style="width:120px">Packing</th><th class="num" style="width:110px">Asst/Solid qty</th><th style="width:30px"></th></tr>' +
+      P.lines.map((l, i) => '<tr data-i="' + i + '"><td class="muted">' + (i + 1) + '</td>' +
+        '<td><input data-f="article" list="dlArt" value="' + esc(l.article) + '" autocomplete="off"></td>' +
+        '<td><input data-f="style" value="' + esc(l.style) + '"></td>' +
+        '<td><input data-f="colour" value="' + esc(l.colour) + '"></td>' +
+        '<td>' + lineSel('gender', GENDERS, l.gender) + '</td>' +
+        '<td><input data-f="size" placeholder="6X10" value="' + esc(l.size) + '"></td>' +
+        '<td><input data-f="qty" type="number" min="0" step="any" class="right" value="' + esc(l.qty) + '"></td>' +
+        '<td>' + lineSel('pack', PACKS, l.pack) + '</td>' +
+        '<td><input data-f="pack_qty" type="number" min="0" step="any" class="right" value="' + esc(l.pack_qty) + '"></td>' +
+        '<td><button class="btn ghost sm" data-act="punch-del" data-i="' + i + '" title="Remove">×</button></td></tr>').join('') +
+      '<tr><td></td><td colspan="4"><a data-act="punch-add">+ Add row</a></td><td></td><td class="num"><b id="pTq"></b></td><td></td><td></td><td></td></tr></table>';
     h += '<div class="toolbar" style="margin:12px 0 0"><button class="btn primary" data-save data-act="punch-save">' + (P.id ? 'Save changes' : 'Save order') + '</button>' +
       (P.id ? '<a href="#/order/' + esc(P.id) + '" data-act="punch-cancel">Cancel</a>' : '<a data-act="punch-clear">Clear</a>') + '<span id="pMsg" class="small"></span></div></div>';
-    setMain(h);
+    const m = setMain(h);
     punchTotals();
-    const m = $('#main');
-    $('#pCust').addEventListener('change', e => {
-      const c = Store.all('customers').find(x => norm(x.name) === norm(e.target.value));
-      if (c && c.payment_terms) { const s = $('[data-seg="payment_terms"]'); $$('button', s).forEach(b => b.classList.toggle('on', b.dataset.v === c.payment_terms)); }
-    });
-    m.addEventListener('input', punchLineInput);
+    m.addEventListener('input', e => { if (e.target.dataset.f === 'qty') punchTotals(); });
     m.addEventListener('change', punchLineChange);
     m.addEventListener('keydown', e => {
       if (e.key !== 'Enter' || !e.target.dataset.f) return;
       e.preventDefault(); punchCollect();
-      const tr = e.target.closest('tr'); const i = +tr.dataset.i; const f = e.target.dataset.f;
-      if (f === 'item') return $('input[data-f="qty"]', tr).focus();
-      if (f === 'qty') return $('input[data-f="rate"]', tr).focus();
+      const tr = e.target.closest('tr'); const i = +tr.dataset.i;
+      const cells = $$('[data-f]', tr); const at = cells.indexOf(e.target);
+      if (at < cells.length - 1) return cells[at + 1].focus();
       if (i === PUNCH.lines.length - 1) { PUNCH.lines.push(blankLine()); VIEWS.punch.render(PUNCH.id); }
-      const next = $('tr[data-i="' + (i + 1) + '"] input[data-f="item"]'); if (next) next.focus();
+      const next = $('tr[data-i="' + (i + 1) + '"] [data-f="article"]'); if (next) next.focus();
     });
-    if (!P.customer_name) $('#pCust').focus();
+    if (!P.brand && !P.customer_name) $('#pBrand').focus();
   }
 };
-function punchLineInput(e) {
-  const tr = e.target.closest('tr[data-i]'); if (!tr || !e.target.dataset.f) return;
-  const q = num($('input[data-f="qty"]', tr).value), r = num($('input[data-f="rate"]', tr).value);
-  $('[data-amt]', tr).textContent = q && r ? money(q * r) : ''; punchTotals();
-}
 function punchLineChange(e) {
-  if (e.target.dataset.f !== 'item') return;
-  const tr = e.target.closest('tr[data-i]'); const code = e.target.value.split(' — ')[0].trim();
-  const it = Store.all('items').find(x => norm(x.code) === norm(code) || norm(x.name) === norm(e.target.value));
-  if (it) { e.target.value = it.code + ' — ' + it.name; $('[data-uom]', tr).textContent = it.uom; const r = $('input[data-f="rate"]', tr); if (!r.value) r.value = it.rate || ''; punchLineInput({ target: r }); }
+  if (e.target.dataset.f !== 'article') return;
+  const tr = e.target.closest('tr[data-i]'); const v = e.target.value.trim();
+  const it = Store.all('items').find(x => norm(x.code) === norm(v) || norm(x.name) === norm(v));
+  if (!it) return;
+  e.target.value = it.code;
+  const st = $('[data-f="style"]', tr); if (!st.value) st.value = it.name || '';
+  const g = $('[data-f="gender"]', tr); if (!g.value && it.gender) g.value = it.gender;
+  const cat = $('[data-seg="category"]');
+  if (cat && !segVal(cat) && it.group) $$('button', cat).forEach(b => b.classList.toggle('on', b.dataset.v === it.group));
 }
-function punchTotals() {
-  let q = 0, v = 0; $$('tr[data-i]').forEach(tr => { const a = num($('input[data-f="qty"]', tr).value), b = num($('input[data-f="rate"]', tr).value); q += a; v += a * b; });
-  if ($('#pTq')) { $('#pTq').textContent = qtyFmt(q); $('#pTv').textContent = '₹' + money(v); }
-}
+function punchTotals() { let q = 0; $$('tr[data-i]').forEach(tr => { q += num($('input[data-f="qty"]', tr).value); }); if ($('#pTq')) $('#pTq').textContent = qtyFmt(q); }
 function punchCollect() {
   const P = PUNCH;
-  P.customer_name = $('#pCust').value.trim(); P.po_ref = $('#pRef').value.trim(); P.order_date = $('#pDate').value;
-  P.delivery_date = $('#pDel').value; P.remarks = $('#pRem').value.trim();
-  P.category = segVal($('[data-seg="category"]')); P.payment_terms = segVal($('[data-seg="payment_terms"]'));
+  P.order_date = $('#pDate').value; P.brand = $('#pBrand').value.trim(); P.buyer_po = $('#pPo').value.trim();
+  P.po_expiry_date = $('#pExp').value; P.tooling_no = $('#pTool').value.trim(); P.remarks = $('#pRem').value.trim();
+  P.category = segVal($('[data-seg="category"]')); P.channel = segVal($('[data-seg="channel"]'));
   const pr = segVal($('[data-seg="priority"]')); if (!P.id || P.priority === '' || P.priority === 'Urgent') P.priority = pr;
   P.extra = P.extra || {};
   $$('[data-extra]').forEach(i => P.extra[i.dataset.extra] = i.value.trim());
-  $$('[data-seg^="x_"]').forEach(s => P.extra[s.dataset.seg.slice(2)] = segVal(s));
+  $$('[data-seg^="x_"]').forEach(sg => P.extra[sg.dataset.seg.slice(2)] = segVal(sg));
   P.lines = $$('tr[data-i]').map(tr => {
-    const raw = $('input[data-f="item"]', tr).value.trim(); const code = raw.split(' — ')[0].trim();
-    const it = Store.all('items').find(x => norm(x.code) === norm(code) || norm(x.name) === norm(raw));
-    return { item_code: it ? it.code : code, item_name: it ? it.name : raw, uom: it ? it.uom : '', qty: $('input[data-f="qty"]', tr).value, rate: $('input[data-f="rate"]', tr).value };
+    const g = f => { const el = $('[data-f="' + f + '"]', tr); return el ? el.value.trim() : ''; };
+    return { article: g('article').toUpperCase(), style: g('style'), colour: g('colour'), gender: g('gender'), size: g('size').toUpperCase(), qty: g('qty'), pack: g('pack'), pack_qty: g('pack_qty') };
   });
 }
 ACTIONS['punch-add'] = () => { punchCollect(); PUNCH.lines.push(blankLine()); VIEWS.punch.render(PUNCH.id); $('tr[data-i="' + (PUNCH.lines.length - 1) + '"] input').focus(); };
@@ -171,25 +173,29 @@ ACTIONS['punch-cancel'] = el => { PUNCH = null; go('order', el.getAttribute('hre
 ACTIONS['punch-save'] = () => {
   if (!requirePerm('orders', 'edit')) return;
   punchCollect(); const P = PUNCH; const errs = [];
-  const lines = P.lines.filter(l => l.item_code || num(l.qty));
-  if (!P.customer_name) errs.push('customer');
-  if (!P.delivery_date) errs.push('delivery date');
-  if (!P.category) errs.push('order type');
-  if (!P.payment_terms) errs.push('payment terms');
-  if (!lines.length) errs.push('at least one item');
-  lines.forEach((l, i) => { if (!Store.all('items').some(x => x.code === l.item_code)) errs.push('row ' + (i + 1) + ': unknown item'); if (num(l.qty) <= 0) errs.push('row ' + (i + 1) + ': qty'); });
-  const dup = lines.map(l => l.item_code).filter((c, i, a) => c && a.indexOf(c) !== i); if (dup.length) errs.push('duplicate item ' + dup[0]);
+  const lines = P.lines.filter(l => l.article || num(l.qty));
+  if (!P.brand) errs.push('brand');
+  if (!P.buyer_po) errs.push('buyer PO no');
+  if (!P.po_expiry_date) errs.push('PO expiry date');
+  if (!P.category) errs.push('category');
+  if (!P.channel) errs.push('channel');
+  if (!lines.length) errs.push('at least one article row');
+  lines.forEach((l, i) => { if (!l.article) errs.push('row ' + (i + 1) + ': article'); if (num(l.qty) <= 0) errs.push('row ' + (i + 1) + ': qty'); });
+  const key = l => norm(l.article + '|' + l.colour + '|' + l.size);
+  const dup = lines.map(key).filter((c, i, a) => a.indexOf(c) !== i);
+  if (dup.length) errs.push('duplicate article/colour/size row');
   if (errs.length) { $('#pMsg').innerHTML = '<span class="late-txt">Missing / wrong: ' + esc(errs.join(', ')) + '</span>'; return; }
-  let cu = Store.all('customers').find(c => norm(c.name) === norm(P.customer_name));
+  let cu = Store.all('customers').find(c => norm(c.name) === norm(P.brand));
   if (!cu) {
-    const code = 'C' + String(Store.all('customers').length + 1).padStart(3, '0');
-    cu = Store.put('customers', { id: uid(), code, name: P.customer_name, city: '', gstin: '', phone: '', payment_terms: P.payment_terms });
+    const code = 'B' + String(Store.all('customers').length + 1).padStart(3, '0');
+    cu = Store.put('customers', { id: uid(), code, name: P.brand, merchandiser: '', phone: '' });
     audit('customer.create', code, cu.name + ' (from order punch)');
   }
+  lines.forEach(l => { if (l.article && !Store.all('items').some(x => norm(x.code) === norm(l.article))) Store.put('items', { id: uid(), code: l.article, name: l.style, group: P.category, gender: l.gender }); });
   const o = P.id ? Store.get('orders', P.id) : { id: uid(), no: nextNo('orders', 'ORD'), process_id: activeProcess().id, actuals: {}, done_by: {}, created_at: nowIso(), created_by: ME.name };
-  Object.assign(o, { order_date: P.order_date, customer_id: cu.id, customer_name: cu.name, po_ref: P.po_ref, category: P.category, payment_terms: P.payment_terms, priority: P.priority, delivery_date: P.delivery_date, remarks: P.remarks, extra: P.extra, lines: lines.map(l => ({ item_code: l.item_code, item_name: l.item_name, uom: l.uom, qty: num(l.qty), rate: num(l.rate) })) });
+  Object.assign(o, { order_date: P.order_date, customer_id: cu.id, customer_name: cu.name, brand: cu.name, buyer_po: P.buyer_po, po_expiry_date: P.po_expiry_date, tooling_no: P.tooling_no, channel: P.channel, category: P.category, priority: P.priority, remarks: P.remarks, extra: P.extra, lines: lines.map(l => ({ article: l.article, style: l.style, colour: l.colour, gender: l.gender, size: l.size, qty: num(l.qty), pack: l.pack, pack_qty: num(l.pack_qty) })) });
   Store.put('orders', o);
-  audit(P.id ? 'order.edit' : 'order.create', o.no, cu.name + ' · ' + qtyFmt(orderTotals(o).qty) + ' qty · ₹' + money(orderTotals(o).value));
+  audit(P.id ? 'order.edit' : 'order.create', o.no, cu.name + ' · PO ' + P.buyer_po + ' · ' + qtyFmt(orderTotals(o).qty) + ' qty');
   if (P.id) { PUNCH = null; flash('Saved ' + esc(o.no) + '.'); go('order', o.id); return; }
   newPunch(); VIEWS.punch.render();
   flash('Saved <b>' + esc(o.no) + '</b> — FMS started. <a href="#/order/' + esc(o.id) + '">Open</a> · punch the next order below.');
@@ -202,18 +208,18 @@ VIEWS.orders = {
     if (param === 'late') ORD_UI.f = 'late'; else if (param) { ORD_UI.q = param; ORD_UI.f = 'all'; }
     const q = norm(ORD_UI.q);
     const rows = Store.all('orders').slice().sort((a, b) => b.created_at < a.created_at ? -1 : 1).map(o => ({ o, st: orderState(o), t: orderTotals(o), d: dispatchedQty(o) })).filter(x => {
-      if (q && !norm(x.o.no + ' ' + x.o.customer_name + ' ' + x.o.po_ref + ' ' + x.o.lines.map(l => l.item_code + ' ' + l.item_name).join(' ')).includes(q)) return false;
+      if (q && !norm(x.o.no + ' ' + x.o.customer_name + ' ' + x.o.buyer_po + ' ' + x.o.tooling_no + ' ' + (x.o.lines || []).map(l => l.article + ' ' + l.style + ' ' + l.colour).join(' ')).includes(q)) return false;
       switch (ORD_UI.f) {
         case 'open': return x.st.open; case 'late': return x.st.open && x.st.late > 0; case 'hold': return x.o.priority === 'On Hold';
         case 'done': return x.st.label === 'Dispatched'; case 'cancel': return x.o.priority === 'Cancelled'; default: return true;
       }
     });
     let h = '<h1>Orders</h1><div class="toolbar">' + seg('f', [{ v: 'open', l: 'Open' }, { v: 'late', l: 'Late' }, { v: 'hold', l: 'On hold' }, { v: 'done', l: 'Dispatched' }, { v: 'cancel', l: 'Cancelled' }, { v: 'all', l: 'All' }], ORD_UI.f) +
-      '<input id="ordQ" placeholder="Order no / customer / item…" value="' + esc(ORD_UI.q) + '"><span class="muted small">' + rows.length + ' order(s)</span><span class="grow"></span>' +
+      '<input id="ordQ" placeholder="Order no / brand / PO / article…" value="' + esc(ORD_UI.q) + '"><span class="muted small">' + rows.length + ' order(s)</span><span class="grow"></span>' +
       '<button class="btn" data-act="orders-csv">Export CSV</button>' + (can('orders', 'edit') ? '<a class="btn primary" href="#/punch">+ Punch order</a>' : '') + '</div>';
-    h += '<div class="tbl-wrap"><table><tr><th>Order</th><th>Date</th><th>Customer</th><th>Type</th><th class="num">Qty</th><th class="num">Dispatched</th><th class="num">Value ₹</th><th>Delivery</th><th>Current step</th></tr>' +
-      (rows.length ? rows.map(x => '<tr class="click" data-act="go" data-v="order" data-p="' + esc(x.o.id) + '"><td class="nowrap"><b>' + esc(x.o.no) + '</b>' + (x.o.priority === 'Urgent' ? ' <span class="late-txt small">URGENT</span>' : '') + '</td><td class="nowrap">' + fmtD(x.o.order_date) + '</td><td>' + esc(x.o.customer_name) + '</td><td>' + esc(x.o.category) + '</td>' +
-        '<td class="num">' + qtyFmt(x.t.qty) + '</td><td class="num">' + (x.d.total ? qtyFmt(x.d.total) : '') + '</td><td class="num">' + money(x.t.value) + '</td><td class="nowrap">' + fmtD(x.o.delivery_date) + '</td><td>' + stHtml(x.st.label).replace('class="st ' + stCls(x.st.label), 'class="st ' + x.st.cls) + (x.st.late > 1 ? ' <span class="muted small">+' + (x.st.late - 1) + ' more late</span>' : '') + '</td></tr>').join('') : '<tr><td colspan="9" class="empty">No orders</td></tr>') + '</table></div>';
+    h += '<div class="tbl-wrap"><table><tr><th>Order</th><th>Date</th><th>Brand</th><th>Buyer PO</th><th>Category</th><th>Channel</th><th class="num">Qty</th><th class="num">Dispatched</th><th>PO expiry</th><th>Current step</th></tr>' +
+      (rows.length ? rows.map(x => '<tr class="click" data-act="go" data-v="order" data-p="' + esc(x.o.id) + '"><td class="nowrap"><b>' + esc(x.o.no) + '</b>' + (x.o.priority === 'Urgent' ? ' <span class="late-txt small">URGENT</span>' : '') + '</td><td class="nowrap">' + fmtD(x.o.order_date) + '</td><td>' + esc(x.o.customer_name) + '</td><td>' + esc(x.o.buyer_po) + '</td><td>' + esc(x.o.category) + '</td><td>' + esc(x.o.channel) + '</td>' +
+        '<td class="num">' + qtyFmt(x.t.qty) + '</td><td class="num">' + (x.d.total ? qtyFmt(x.d.total) : '') + '</td><td class="nowrap">' + fmtD(x.o.po_expiry_date) + '</td><td>' + stHtml(x.st.label).replace('class="st ' + stCls(x.st.label), 'class="st ' + x.st.cls) + (x.st.late > 1 ? ' <span class="muted small">+' + (x.st.late - 1) + ' more late</span>' : '') + '</td></tr>').join('') : '<tr><td colspan="10" class="empty">No orders</td></tr>') + '</table></div>';
     setMain(h); VIEWS.orders.rows = rows;
     onSeg(e => { ORD_UI.f = e.detail; VIEWS.orders.render(); });
     $('#ordQ').addEventListener('input', e => { ORD_UI.q = e.target.value; clearTimeout(ORD_UI.t); ORD_UI.t = setTimeout(() => { VIEWS.orders.render(); const i = $('#ordQ'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }, 250); });
@@ -223,8 +229,9 @@ function downloadCsv(name, rows) {
   const csv = rows.map(r => r.map(v => { const s = String(v == null ? '' : v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }).join(',')).join('\n');
   const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv' })); a.download = name; a.click();
 }
-ACTIONS['orders-csv'] = () => downloadCsv('orders-' + todayYmd() + '.csv', [['Order No', 'Date', 'Customer', 'PO Ref', 'Type', 'Terms', 'Priority', 'Qty', 'Dispatched', 'Value', 'Delivery', 'Current step']]
-  .concat((VIEWS.orders.rows || []).map(x => [x.o.no, x.o.order_date, x.o.customer_name, x.o.po_ref, x.o.category, x.o.payment_terms, x.o.priority, x.t.qty, x.d.total, x.t.value, x.o.delivery_date, x.st.label])));
+ACTIONS['orders-csv'] = () => downloadCsv('orders-' + todayYmd() + '.csv',
+  [['Order No', 'Time Stamp', 'Order Date', 'Tooling/Mould No', 'Buyer PO No', 'PO Expiry Date', 'Brand', 'Article', 'Style', 'Colour', 'Gender', 'Qty', 'Channel', 'Size', 'Category', 'Packing', 'Asst/Solid Qty', 'Dispatched', 'Current step']]
+  .concat((VIEWS.orders.rows || []).flatMap(x => (x.o.lines || []).map(l => [x.o.no, fmtDT(x.o.created_at), x.o.order_date, x.o.tooling_no, x.o.buyer_po, x.o.po_expiry_date, x.o.customer_name, l.article, l.style, l.colour, l.gender, l.qty, x.o.channel, l.size, x.o.category, l.pack, l.pack_qty, x.d.total, x.st.label]))));
 
 /* ---------------- Order page ---------------- */
 VIEWS.order = {
@@ -236,12 +243,12 @@ VIEWS.order = {
       (can('orders', 'edit') && !d.total ? '<a class="btn" href="#/punch/' + esc(o.id) + '">Edit</a>' : '') + '<button class="btn" data-act="print">Print</button></div>';
     if (can('orders', 'edit') && st.label !== 'Dispatched') h += '<div class="toolbar noprint"><span class="muted small">Priority</span>' + seg('opri', [{ v: '', l: 'Normal' }, { v: 'Urgent', l: 'Urgent' }, { v: 'On Hold', l: 'On Hold' }, { v: 'Cancelled', l: 'Cancel order' }], o.priority || '') + '</div>';
     h += '<div class="grid2"><div>';
-    h += '<div class="panel"><table class="kv">' + [['Order date', fmtD(o.order_date)], ['Customer PO', o.po_ref], ['Order type', o.category], ['Payment terms', o.payment_terms], ['Delivery date', fmtD(o.delivery_date)], ['Priority', o.priority || 'Normal'], ['Remarks', o.remarks], ['Punched by', o.created_by + ' · ' + fmtDT(o.created_at)], ['FMS flow', proc ? proc.name + ' v' + proc.version : '—']]
+    h += '<div class="panel"><table class="kv">' + [['Time stamp', fmtDT(o.created_at)], ['Order date', fmtD(o.order_date)], ['Buyer PO no', o.buyer_po], ['PO expiry date', fmtD(o.po_expiry_date)], ['Tooling / Mould no', o.tooling_no], ['Category', o.category], ['Channel', o.channel], ['Priority', o.priority || 'Normal'], ['Remarks', o.remarks], ['Punched by', o.created_by], ['FMS flow', proc ? proc.name + ' v' + proc.version : '—']]
       .concat(Object.entries(o.extra || {}).filter(e => e[1]).map(([k, v]) => { const f = proc && proc.spec.fields.find(x => x.key === k); return [f ? f.label : k, v]; }))
-      .map(([k, v]) => '<tr><td class="muted" style="width:130px">' + esc(k) + '</td><td>' + esc(v) + '</td></tr>').join('') + '</table></div>';
-    h += '<h2>Items</h2><div class="tbl-wrap"><table><tr><th>Item</th><th class="num">Ordered</th><th class="num">Dispatched</th><th class="num">Pending</th><th class="num">Rate</th><th class="num">Amount</th></tr>' +
-      o.lines.map((l, i) => '<tr><td>' + esc(l.item_code) + ' <span class="muted">' + esc(l.item_name) + '</span></td><td class="num">' + qtyFmt(l.qty) + ' ' + esc(l.uom) + '</td><td class="num">' + qtyFmt(d.per[i]) + '</td><td class="num">' + qtyFmt(Math.max(0, l.qty - d.per[i])) + '</td><td class="num">' + money(l.rate) + '</td><td class="num">' + money(l.qty * l.rate) + '</td></tr>').join('') +
-      '<tr><td><b>Total</b></td><td class="num"><b>' + qtyFmt(t.qty) + '</b></td><td class="num">' + qtyFmt(d.total) + '</td><td class="num">' + qtyFmt(d.pending) + '</td><td></td><td class="num"><b>' + money(t.value) + '</b></td></tr></table></div>';
+      .map(([k, v]) => '<tr><td class="muted" style="width:140px">' + esc(k) + '</td><td>' + esc(v) + '</td></tr>').join('') + '</table></div>';
+    h += '<h2>Articles</h2><div class="tbl-wrap"><table><tr><th>Article</th><th>Style</th><th>Colour</th><th>Gender</th><th>Size</th><th>Packing</th><th class="num">Ordered</th><th class="num">Dispatched</th><th class="num">Pending</th></tr>' +
+      o.lines.map((l, i) => '<tr><td><b>' + esc(l.article) + '</b></td><td>' + esc(l.style) + '</td><td>' + esc(l.colour) + '</td><td>' + esc(l.gender) + '</td><td>' + esc(l.size) + '</td><td>' + esc(l.pack) + (l.pack_qty ? ' · ' + qtyFmt(l.pack_qty) : '') + '</td><td class="num">' + qtyFmt(l.qty) + '</td><td class="num">' + qtyFmt(d.per[i]) + '</td><td class="num">' + qtyFmt(Math.max(0, l.qty - d.per[i])) + '</td></tr>').join('') +
+      '<tr><td><b>Total</b></td><td colspan="5"></td><td class="num"><b>' + qtyFmt(t.qty) + '</b></td><td class="num">' + qtyFmt(d.total) + '</td><td class="num">' + qtyFmt(d.pending) + '</td></tr></table></div>';
     const dsp = Store.all('dispatches').filter(x => x.order_id === o.id);
     if (dsp.length) h += '<h2>Dispatches</h2><div class="tbl-wrap"><table><tr><th>No</th><th>Date</th><th class="num">Qty</th><th>Invoice</th><th>Vehicle</th><th>Transporter / LR</th></tr>' +
       dsp.map(x => '<tr' + (x.cancelled ? ' class="muted" style="text-decoration:line-through"' : '') + '><td>' + esc(x.no) + '</td><td>' + fmtD(x.date) + '</td><td class="num">' + qtyFmt(x.lines.reduce((s, l) => s + num(l.qty), 0)) + '</td><td>' + esc(x.invoice_no) + '</td><td>' + esc(x.vehicle) + '</td><td>' + esc(x.transporter) + ' ' + esc(x.lr_no) + '</td></tr>').join('') + '</table></div>';
@@ -284,17 +291,17 @@ VIEWS.dispatch = {
     let h = '<h1>Dispatch</h1><div class="tabs">' + [['ready', 'Ready (' + readyForDispatch().length + ')'], ['upcoming', 'Upcoming'], ['history', 'History']].map(([k, l]) => '<a data-act="dsp-tab" data-t="' + k + '" class="' + (DSP_UI.tab === k ? 'on' : '') + '">' + l + '</a>').join('') + '</div>';
     if (DSP_UI.tab === 'ready') {
       const list = readyForDispatch().sort((a, b) => resolveOrder(a).steps[resolveOrder(a).spec.process.endStep].planned - resolveOrder(b).steps[resolveOrder(b).spec.process.endStep].planned);
-      h += '<div class="tbl-wrap"><table><tr><th>Order</th><th>Customer</th><th>Delivery</th><th class="num">Pending qty</th><th>Dispatch due</th><th>Status</th><th></th></tr>' +
+      h += '<div class="tbl-wrap"><table><tr><th>Order</th><th>Customer</th><th>PO expiry</th><th class="num">Pending qty</th><th>Dispatch due</th><th>Status</th><th></th></tr>' +
         (list.length ? list.map(o => {
           const r = resolveOrder(o); const s = r.steps[r.spec.process.endStep]; const d = dispatchedQty(o);
-          let row = '<tr><td><a href="#/order/' + esc(o.id) + '">' + esc(o.no) + '</a></td><td>' + esc(o.customer_name) + '</td><td>' + fmtD(o.delivery_date) + '</td><td class="num">' + qtyFmt(d.pending) + (d.total ? ' <span class="muted small">(part sent)</span>' : '') + '</td><td>' + fmtDT(s.planned) + '</td><td>' + stHtml(s.status) + ' <span class="late-txt small">' + fmtDelay(s.delayMinutes) + '</span></td><td class="right">' + (edit ? '<button class="btn sm ' + (DSP_UI.open === o.id ? '' : 'primary') + '" data-act="dsp-open" data-o="' + esc(o.id) + '">' + (DSP_UI.open === o.id ? 'Close' : 'Dispatch') + '</button>' : '') + '</td></tr>';
+          let row = '<tr><td><a href="#/order/' + esc(o.id) + '">' + esc(o.no) + '</a></td><td>' + esc(o.customer_name) + '</td><td>' + fmtD(o.po_expiry_date) + '</td><td class="num">' + qtyFmt(d.pending) + (d.total ? ' <span class="muted small">(part sent)</span>' : '') + '</td><td>' + fmtDT(s.planned) + '</td><td>' + stHtml(s.status) + ' <span class="late-txt small">' + fmtDelay(s.delayMinutes) + '</span></td><td class="right">' + (edit ? '<button class="btn sm ' + (DSP_UI.open === o.id ? '' : 'primary') + '" data-act="dsp-open" data-o="' + esc(o.id) + '">' + (DSP_UI.open === o.id ? 'Close' : 'Dispatch') + '</button>' : '') + '</td></tr>';
           if (DSP_UI.open === o.id) row += '<tr class="inline-form"><td colspan="7">' + dispatchForm(o, d) + '</td></tr>';
           return row;
         }).join('') : '<tr><td colspan="7" class="empty">Nothing ready. Orders appear here once Invoice is done.</td></tr>') + '</table></div>';
     } else if (DSP_UI.tab === 'upcoming') {
       const list = Store.all('orders').map(o => ({ o, st: orderState(o) })).filter(x => x.st.open && !readyForDispatch().includes(x.o) && x.o.priority !== 'Cancelled');
-      h += '<div class="tbl-wrap"><table><tr><th>Order</th><th>Customer</th><th>Delivery</th><th class="num">Qty</th><th>Now at</th></tr>' +
-        (list.length ? list.map(x => '<tr class="click" data-act="go" data-v="order" data-p="' + esc(x.o.id) + '"><td>' + esc(x.o.no) + '</td><td>' + esc(x.o.customer_name) + '</td><td>' + fmtD(x.o.delivery_date) + '</td><td class="num">' + qtyFmt(orderTotals(x.o).qty) + '</td><td><span class="st ' + x.st.cls + '">' + esc(x.st.label) + '</span></td></tr>').join('') : '<tr><td colspan="5" class="empty">No upcoming orders</td></tr>') + '</table></div>';
+      h += '<div class="tbl-wrap"><table><tr><th>Order</th><th>Customer</th><th>PO expiry</th><th class="num">Qty</th><th>Now at</th></tr>' +
+        (list.length ? list.map(x => '<tr class="click" data-act="go" data-v="order" data-p="' + esc(x.o.id) + '"><td>' + esc(x.o.no) + '</td><td>' + esc(x.o.customer_name) + '</td><td>' + fmtD(x.o.po_expiry_date) + '</td><td class="num">' + qtyFmt(orderTotals(x.o).qty) + '</td><td><span class="st ' + x.st.cls + '">' + esc(x.st.label) + '</span></td></tr>').join('') : '<tr><td colspan="5" class="empty">No upcoming orders</td></tr>') + '</table></div>';
     } else {
       const list = Store.all('dispatches').slice().sort((a, b) => (b.at || '') < (a.at || '') ? -1 : 1);
       h += '<div class="toolbar"><button class="btn" data-act="dsp-csv">Export CSV</button></div><div class="tbl-wrap"><table><tr><th>No</th><th>Date</th><th>Order</th><th>Customer</th><th class="num">Qty</th><th>Invoice</th><th>Vehicle</th><th>Transporter</th><th>LR</th><th>By</th><th></th></tr>' +
@@ -306,7 +313,7 @@ VIEWS.dispatch = {
 };
 function dispatchForm(o, d) {
   return '<div style="padding:6px 4px"><table style="max-width:640px;margin-bottom:8px"><tr><th>Item</th><th class="num">Pending</th><th class="num">Dispatch now</th></tr>' +
-    o.lines.map((l, i) => { const p = Math.max(0, l.qty - d.per[i]); return '<tr><td>' + esc(l.item_code) + ' <span class="muted">' + esc(l.item_name) + '</span></td><td class="num">' + qtyFmt(p) + '</td><td class="num"><input class="qty" type="number" min="0" max="' + p + '" step="any" data-dq="' + i + '" value="' + p + '"' + (p ? '' : ' disabled') + '></td></tr>'; }).join('') + '</table>' +
+    o.lines.map((l, i) => { const p = Math.max(0, l.qty - d.per[i]); return '<tr><td>' + esc(l.article) + ' <span class="muted">' + esc([l.style, l.colour, l.size].filter(Boolean).join(' · ')) + '</span></td><td class="num">' + qtyFmt(p) + '</td><td class="num"><input class="qty" type="number" min="0" max="' + p + '" step="any" data-dq="' + i + '" value="' + p + '"' + (p ? '' : ' disabled') + '></td></tr>'; }).join('') + '</table>' +
     '<div class="row"><label>Invoice no *<input id="dInv"></label><label>Vehicle no<input id="dVeh"></label><label>Transporter<input id="dTr" list="dlTr"></label><label>LR / Docket no<input id="dLr"></label><label>Date<input id="dDate" type="date" value="' + todayYmd() + '"></label>' +
     '<datalist id="dlTr">' + Array.from(new Set(Store.all('dispatches').map(x => x.transporter).filter(Boolean))).map(t => '<option value="' + esc(t) + '">').join('') + '</datalist>' +
     '<button class="btn primary" data-save data-act="dsp-save" data-o="' + esc(o.id) + '">Save dispatch</button><span id="dMsg" class="small"></span></div></div>';
@@ -319,7 +326,7 @@ ACTIONS['dsp-save'] = el => {
   const lines = $$('[data-dq]').map(i => ({ idx: +i.dataset.dq, qty: num(i.value) })).filter(l => l.qty > 0);
   const inv = $('#dInv').value.trim();
   const over = lines.find(l => l.qty > o.lines[l.idx].qty - d.per[l.idx] + 1e-9);
-  const err = !inv ? 'Invoice no is required.' : !lines.length ? 'Enter qty to dispatch.' : over ? 'Qty more than pending for ' + o.lines[over.idx].item_code + '.' : '';
+  const err = !inv ? 'Invoice no is required.' : !lines.length ? 'Enter qty to dispatch.' : over ? 'Qty more than pending for ' + o.lines[over.idx].article + '.' : '';
   if (err) { $('#dMsg').innerHTML = '<span class="late-txt">' + esc(err) + '</span>'; return; }
   const rec = Store.put('dispatches', { id: uid(), no: nextNo('dispatches', 'DSP'), order_id: o.id, date: $('#dDate').value || todayYmd(), lines, invoice_no: inv, vehicle: $('#dVeh').value.trim(), transporter: $('#dTr').value.trim(), lr_no: $('#dLr').value.trim(), by: ME.name, at: nowIso() });
   const after = dispatchedQty(o); const r = resolveOrder(o); const end = r.spec.process.endStep;

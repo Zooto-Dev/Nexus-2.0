@@ -46,7 +46,7 @@ function flash(msg, type) {
 }
 
 /* ================= store ================= */
-const DB_KEY = 'nexus2_db';
+const DB_KEY = 'nexus2_db_v2';
 const COLS = ['users', 'roles', 'customers', 'items', 'processes', 'orders', 'dispatches', 'audit'];
 let DB = null;
 const CFG = window.NEXUS_CONFIG || {};
@@ -140,7 +140,7 @@ const MODULES = [
   { key: 'dispatch', label: 'Dispatch' },
   { key: 'tracker', label: 'FMS Tracker', note: 'Edit = mark anyone\'s step, undo' },
   { key: 'builder', label: 'FMS Builder', note: 'Edit = change & activate flows' },
-  { key: 'masters', label: 'Customers & Items' },
+  { key: 'masters', label: 'Brands & Articles' },
   { key: 'users', label: 'Users' },
   { key: 'roles', label: 'Roles & Access' },
   { key: 'settings', label: 'Settings' },
@@ -169,8 +169,7 @@ function activeProcess(code) { return Store.all('processes').find(p => p.code ==
 function specOf(proc) { return proc ? Object.assign({}, proc.spec, { calendar: calendar() }) : null; }
 function orderTotals(o) {
   const qty = (o.lines || []).reduce((s, l) => s + num(l.qty), 0);
-  const value = (o.lines || []).reduce((s, l) => s + num(l.qty) * num(l.rate), 0);
-  return { qty, value };
+  return { qty };
 }
 function dispatchedQty(o) {
   const per = (o.lines || []).map(() => 0);
@@ -181,9 +180,9 @@ function dispatchedQty(o) {
 function orderFields(o) {
   const t = orderTotals(o);
   return Object.assign({}, o.extra || {}, {
-    created_at: o.created_at, order_no: o.no, customer: o.customer_name, category: o.category,
-    payment_terms: o.payment_terms, priority: o.priority || '', delivery_date: o.delivery_date,
-    qty: t.qty, value: t.value
+    created_at: o.created_at, order_no: o.no, brand: o.customer_name, category: o.category,
+    channel: o.channel, priority: o.priority || '', po_expiry_date: o.po_expiry_date,
+    order_date: o.order_date, qty: t.qty
   });
 }
 function resolveOrder(o) {
@@ -297,7 +296,7 @@ const NAV = [
   { v: 'punch', l: 'Punch Order', mod: 'orders', edit: true }, { v: 'orders', l: 'Orders', mod: 'orders' },
   { v: 'dispatch', l: 'Dispatch', mod: 'dispatch', cnt: 'dispatch' },
   { grp: 'FMS' }, { v: 'tracker', l: 'Tracker', mod: 'tracker' }, { v: 'builder', l: 'FMS Builder', mod: 'builder' },
-  { grp: 'Masters' }, { v: 'customers', l: 'Customers', mod: 'masters' }, { v: 'items', l: 'Items', mod: 'masters' },
+  { grp: 'Masters' }, { v: 'customers', l: 'Brands', mod: 'masters' }, { v: 'items', l: 'Articles', mod: 'masters' },
   { grp: 'Admin' }, { v: 'users', l: 'Users', mod: 'users' }, { v: 'roles', l: 'Roles & Access', mod: 'roles' },
   { v: 'settings', l: 'Settings', mod: 'settings' }, { v: 'audit', l: 'Audit Log', mod: 'audit' }
 ];
@@ -313,13 +312,14 @@ function navCounts() {
 }
 function renderNav() {
   const cur = curView().v; const c = navCounts();
-  let html = '<div class="brand">Nexus <b>2.0</b></div>'; let pendingGrp = null;
+  let html = '<div class="brand">Nexus <b>2.0</b></div>'; let pendingGrp = false, first = true;
   NAV.forEach(n => {
-    if (n.grp) { pendingGrp = n.grp; return; }
+    if (n.grp) { pendingGrp = true; return; }
     if (!can(n.mod, n.edit ? 'edit' : 'view')) return;
-    if (pendingGrp) { html += '<div class="grp">' + pendingGrp + '</div>'; pendingGrp = null; }
+    const cls = (cur === n.v ? 'on ' : '') + (pendingGrp && !first ? 'sep' : '');
+    pendingGrp = false; first = false;
     const k = n.cnt && c[n.cnt];
-    html += '<a href="#/' + n.v + '" class="' + (cur === n.v ? 'on' : '') + '">' + n.l + (k && k.n ? '<span class="cnt' + (k.late ? ' late' : '') + '">' + k.n + '</span>' : '') + '</a>';
+    html += '<a href="#/' + n.v + '" class="' + cls.trim() + '">' + n.l + (k && k.n ? '<span class="cnt' + (k.late ? ' late' : '') + '">' + k.n + '</span>' : '') + '</a>';
   });
   $('#nav').innerHTML = html;
 }

@@ -69,23 +69,22 @@ function uniq(col, key, label) { return (d, old) => { if (!String(d[key] || '').
 VIEWS.customers = {
   mod: 'masters', render() {
     masterView({
-      col: 'customers', mod: 'masters', title: 'Customers', view: VIEWS.customers, sort: 'code', paste: true,
-      cols: [{ k: 'code', l: 'Code', w: 80, upper: true, ph: 'C006' }, { k: 'name', l: 'Name', ph: 'Customer name' }, { k: 'city', l: 'City', w: 120 }, { k: 'gstin', l: 'GSTIN', w: 160, upper: true }, { k: 'phone', l: 'Phone', w: 120 },
-        { k: 'payment_terms', l: 'Terms', opts: () => ['Advance', 'Credit'].map(v => ({ v, l: v })) }],
-      defaults: { payment_terms: 'Advance' },
-      validate: (d, old) => uniq('customers', 'code', 'Code')(d) || uniq('customers', 'name', 'Name')(d),
-      inUse: d => Store.all('orders').some(o => o.customer_id === d.id) ? 'Customer has orders — cannot delete.' : ''
+      col: 'customers', mod: 'masters', title: 'Brands', view: VIEWS.customers, sort: 'name', paste: true,
+      cols: [{ k: 'code', l: 'Code', w: 80, upper: true, ph: 'B006' }, { k: 'name', l: 'Brand', ph: 'Brand name' }, { k: 'merchandiser', l: 'Merchandiser', w: 140, upper: true }, { k: 'phone', l: 'Phone', w: 120 }],
+      validate: (d, old) => uniq('customers', 'code', 'Code')(d) || uniq('customers', 'name', 'Brand')(d),
+      inUse: d => Store.all('orders').some(o => o.customer_id === d.id) ? 'Brand has orders — cannot delete.' : ''
     });
   }
 };
 VIEWS.items = {
   mod: 'masters', render() {
     masterView({
-      col: 'items', mod: 'masters', title: 'Items', view: VIEWS.items, sort: 'code', paste: true,
-      cols: [{ k: 'code', l: 'Item code', w: 110, upper: true, ph: 'FG-601' }, { k: 'name', l: 'Item name', ph: 'Item name' }, { k: 'group', l: 'Group', w: 120 }, { k: 'uom', l: 'UOM', w: 70, upper: true }, { k: 'rate', l: 'Rate ₹', type: 'number', w: 100 }],
-      defaults: { uom: 'PCS' },
-      validate: (d, old) => uniq('items', 'code', 'Item code')(d) || uniq('items', 'name', 'Item name')(d),
-      inUse: d => Store.all('orders').some(o => o.lines.some(l => l.item_code === d.code)) ? 'Item is used in orders — cannot delete.' : ''
+      col: 'items', mod: 'masters', title: 'Articles', view: VIEWS.items, sort: 'code', paste: true,
+      cols: [{ k: 'code', l: 'Article', w: 110, upper: true, ph: 'ZT-601' }, { k: 'name', l: 'Style name', ph: 'Style name' },
+        { k: 'group', l: 'Category', opts: () => (fieldOptions('category').length ? fieldOptions('category') : ['Shoes', 'Slider', 'Clogs', 'V Shape', 'Eva Slider']).map(v => ({ v, l: v })) },
+        { k: 'gender', l: 'Gender', opts: () => [''].concat(GENDERS).map(v => ({ v, l: v || '—' })) }],
+      validate: (d, old) => uniq('items', 'code', 'Article')(d),
+      inUse: d => Store.all('orders').some(o => (o.lines || []).some(l => norm(l.article) === norm(d.code))) ? 'Article is used in orders — cannot delete.' : ''
     });
   }
 };

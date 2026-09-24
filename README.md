@@ -10,12 +10,12 @@ Demo login: `admin@nexus.local` / PIN `1234`. Other demo users: `sales@`, `accou
 |---|---|
 | Home | One row of counts (open orders, late steps, due today, ready to dispatch), my tasks, late steps by doer, open orders by stage |
 | My Tasks | The steps you need to do. **Done** is a single click, with an optional note. Shows planned time and running delay |
-| Punch Order | One screen with no popups: pick the customer (payment terms fill in automatically), type items, Enter moves to the next row, Ctrl+S saves. The FMS starts on save |
+| Punch Order | One screen with no popups. Fields: Order Date, Brand, Buyer PO No, PO Expiry Date, Tooling/Mould No, Category, Channel + article rows (Article, Style, Colour, Gender, Size, Qty, Packing Assortment/Solid, Asst/Solid Qty). Time stamp is automatic. Picking an article fills style/gender/category. Enter moves to the next box, Ctrl+S saves; the FMS starts on save |
 | Orders / Order | Filters, search and CSV export. The order page shows items (ordered, dispatched, pending), the FMS timeline, priority (Urgent / On Hold / Cancel) and print |
 | Dispatch | Ready (invoice done) → the dispatch form opens inside the row → part or full dispatch. On full dispatch the FMS step closes itself |
 | Tracker | The FMS grid, one row per order and one column per step, the same layout as the sheet |
 | FMS Builder | Steps, doer, conditions ("only when…"), start rules (after a step, before a date, a fallback), TAT (normal and urgent), live flow chart, validation, Simulate, versions (save as v2, then activate) |
-| Customers / Items | Edit directly in the table, paste from Excel, CSV export |
+| Brands / Articles | Edit directly in the table, paste from Excel, CSV export |
 | Users | Email, role, **doer name** (links the user to FMS steps), active flag, PIN |
 | Roles & Access | Module × role matrix. Click a cell to cycle — / View / Edit |
 | Settings | Office timings, lunch, weekly off, holidays, half-day rule, backup and restore |

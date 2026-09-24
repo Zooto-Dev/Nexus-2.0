@@ -3,29 +3,26 @@
 const DEFAULT_O2D_SPEC = {
   process: { id: 'o2d', name: 'Order to Dispatch', instanceLabel: 'Order', keyField: 'order_no', startEvent: 'Order punched', endStep: 'dispatch' },
   fields: [
-    { key: 'created_at', label: 'Order punch time', type: 'datetime', source: 'system' },
+    { key: 'created_at', label: 'Time Stamp', type: 'datetime', source: 'system' },
     { key: 'order_no', label: 'Order No', type: 'text', source: 'system' },
-    { key: 'customer', label: 'Customer', type: 'text', source: 'form' },
-    { key: 'category', label: 'Order Type', type: 'select', options: ['Ready Stock', 'Make to Order'], source: 'form' },
-    { key: 'payment_terms', label: 'Payment Terms', type: 'select', options: ['Advance', 'Credit'], source: 'form' },
+    { key: 'order_date', label: 'Order Date', type: 'date', source: 'form' },
+    { key: 'brand', label: 'Brand', type: 'text', source: 'form' },
+    { key: 'category', label: 'Category', type: 'select', options: ['Shoes', 'Slider', 'Clogs', 'V Shape', 'Eva Slider'], source: 'form' },
+    { key: 'channel', label: 'Channel', type: 'select', options: ['Online', 'Offline', 'Export'], source: 'form' },
     { key: 'priority', label: 'Priority', type: 'select', options: ['', 'Urgent', 'On Hold', 'Cancelled'], source: 'form' },
-    { key: 'delivery_date', label: 'Delivery Date', type: 'date', source: 'form' },
-    { key: 'qty', label: 'Total Qty', type: 'number', source: 'system' },
-    { key: 'value', label: 'Order Value', type: 'number', source: 'system' }
+    { key: 'po_expiry_date', label: 'PO Expiry Date', type: 'date', source: 'form' },
+    { key: 'qty', label: 'Total Qty', type: 'number', source: 'system' }
   ],
   priority: { field: 'priority', urgent: ['Urgent'], hold: ['On Hold'], cancel: ['Cancelled'] },
   doerTables: {},
   steps: [
-    { id: 'order_verify', name: 'Order Verification', what: 'Rate, qty, delivery date aur customer details check karo', doer: { type: 'fixed', name: 'SALES' }, trigger: { type: 'instanceStart' }, tat: { value: 2, unit: 'hours' } },
-    { id: 'credit_check', name: 'Credit / Payment Approval', what: 'Credit limit aur outstanding check karke approve karo', applies: { field: 'payment_terms', in: ['Credit'] }, doer: { type: 'fixed', name: 'ACCOUNTS' }, trigger: { type: 'afterStep', step: 'order_verify' }, tat: { value: 4, urgent: 2, unit: 'hours' } },
-    { id: 'planning', name: 'Production Planning', applies: { field: 'category', in: ['Make to Order'] }, doer: { type: 'fixed', name: 'PPC' },
-      trigger: [{ type: 'afterStep', step: 'credit_check', when: { field: 'payment_terms', in: ['Credit'] } }, { type: 'afterStep', step: 'order_verify' }], tat: { value: 1, urgent: 0.5, unit: 'days' } },
-    { id: 'material', name: 'Material Arrangement', what: 'BOM ke hisaab se material issue / purchase', applies: { field: 'category', in: ['Make to Order'] }, doer: { type: 'fixed', name: 'STORE' }, trigger: { type: 'afterStep', step: 'planning' }, tat: { value: 2, urgent: 1, unit: 'days' } },
-    { id: 'production', name: 'Production', applies: { field: 'category', in: ['Make to Order'] }, doer: { type: 'fixed', name: 'PRODUCTION' }, trigger: { type: 'afterStep', step: 'material' }, tat: { value: 3, urgent: 2, unit: 'days' } },
-    { id: 'qc', name: 'Quality Check', doer: { type: 'fixed', name: 'QC' },
-      trigger: [{ type: 'afterStep', step: 'production', when: { field: 'category', in: ['Make to Order'] } }, { type: 'afterStep', step: 'credit_check', when: { field: 'payment_terms', in: ['Credit'] } }, { type: 'afterStep', step: 'order_verify' }], tat: { value: 4, unit: 'hours' } },
-    { id: 'packing', name: 'Packing', doer: { type: 'fixed', name: 'DISPATCH' }, trigger: { type: 'afterStep', step: 'qc' }, tat: { value: 4, unit: 'hours' } },
-    { id: 'labels', name: 'Labels & Packing List Ready', what: 'Delivery date se 2 din pehle ready', doer: { type: 'fixed', name: 'SALES' }, trigger: { type: 'beforeDate', field: 'delivery_date' }, tat: { value: 2, unit: 'days' } },
+    { id: 'order_verify', name: 'Order Verification', what: 'PO, qty, size, article aur expiry date check karo', doer: { type: 'fixed', name: 'SALES' }, trigger: { type: 'instanceStart' }, tat: { value: 2, unit: 'hours' } },
+    { id: 'planning', name: 'Production Planning', doer: { type: 'fixed', name: 'PPC' }, trigger: { type: 'afterStep', step: 'order_verify' }, tat: { value: 1, urgent: 0.5, unit: 'days' } },
+    { id: 'material', name: 'Material Arrangement', what: 'BOM ke hisaab se material issue / purchase', doer: { type: 'fixed', name: 'STORE' }, trigger: { type: 'afterStep', step: 'planning' }, tat: { value: 2, urgent: 1, unit: 'days' } },
+    { id: 'production', name: 'Production', doer: { type: 'fixed', name: 'PRODUCTION' }, trigger: { type: 'afterStep', step: 'material' }, tat: { value: 3, urgent: 2, unit: 'days' } },
+    { id: 'qc', name: 'Quality Check', doer: { type: 'fixed', name: 'QC' }, trigger: { type: 'afterStep', step: 'production' }, tat: { value: 4, unit: 'hours' } },
+    { id: 'labels', name: 'Labels & Barcode Ready', what: 'PO expiry se 3 din pehle ready', doer: { type: 'fixed', name: 'SALES' }, trigger: { type: 'beforeDate', field: 'po_expiry_date' }, tat: { value: 3, unit: 'days' } },
+    { id: 'packing', name: 'Packing', what: 'Assortment / solid packing as per order', doer: { type: 'fixed', name: 'DISPATCH' }, trigger: { type: 'afterStep', step: 'qc' }, tat: { value: 4, unit: 'hours' } },
     { id: 'invoice', name: 'Invoice', doer: { type: 'fixed', name: 'ACCOUNTS' }, trigger: { type: 'afterStep', step: 'packing' }, tat: { value: 2, unit: 'hours' } },
     { id: 'dispatch', name: 'Dispatch', what: 'Dispatch screen se entry karo — poori qty jaane par step apne aap Done', doer: { type: 'fixed', name: 'DISPATCH' }, trigger: { type: 'afterStep', step: 'invoice' }, tat: { value: 4, unit: 'hours' }, status: { type: 'auto', source: 'Dispatch module', rule: 'Done when full order qty is dispatched' } }
   ]
@@ -72,39 +69,40 @@ function seedData(cloud) {
   if (cloud) return base;
 
   base.customers = [
-    { id: 'c1', code: 'C001', name: 'Metro Retail Pvt Ltd', city: 'Mumbai', gstin: '27AABCM1234F1Z5', phone: '9820000001', payment_terms: 'Credit' },
-    { id: 'c2', code: 'C002', name: 'Sharma Footwear', city: 'Delhi', gstin: '07AAFPS5678K1Z2', phone: '9810000002', payment_terms: 'Advance' },
-    { id: 'c3', code: 'C003', name: 'Style Hub', city: 'Jaipur', gstin: '08AAGCS9012L1Z8', phone: '9829000003', payment_terms: 'Credit' },
-    { id: 'c4', code: 'C004', name: 'Walkwell Distributors', city: 'Lucknow', gstin: '09AABFW3456M1Z1', phone: '9839000004', payment_terms: 'Advance' },
-    { id: 'c5', code: 'C005', name: 'Urban Steps', city: 'Pune', gstin: '27AACCU7890N1Z4', phone: '9890000005', payment_terms: 'Credit' }
+    { id: 'c1', code: 'B001', name: 'Max', merchandiser: 'POOJA', phone: '9820000001' },
+    { id: 'c2', code: 'B002', name: 'Kappa', merchandiser: 'POOJA', phone: '9810000002' },
+    { id: 'c3', code: 'B003', name: 'Pepe Jeans', merchandiser: 'TANUJ', phone: '9829000003' },
+    { id: 'c4', code: 'B004', name: 'Campus', merchandiser: 'RASHMI', phone: '9839000004' },
+    { id: 'c5', code: 'B005', name: 'Gas', merchandiser: 'RASHMI', phone: '9890000005' }
   ];
   base.items = [
-    ['FG-101', 'Men Casual Sneaker Black', 'PAIR', 'Shoes', 899], ['FG-102', 'Men Casual Sneaker White', 'PAIR', 'Shoes', 899],
-    ['FG-201', 'Women Slider Pink', 'PAIR', 'Slider', 349], ['FG-202', 'Women Slider Black', 'PAIR', 'Slider', 349],
-    ['FG-301', 'Kids Clog Blue', 'PAIR', 'Clogs', 299], ['FG-302', 'Kids Clog Yellow', 'PAIR', 'Clogs', 299],
-    ['FG-401', 'Men Sports Shoe Grey', 'PAIR', 'Shoes', 1199], ['FG-501', 'EVA Flip Flop Navy', 'PAIR', 'Slider', 199]
-  ].map((r, i) => ({ id: 'i' + (i + 1), code: r[0], name: r[1], uom: r[2], group: r[3], rate: r[4] }));
+    ['ZT-101', 'Ranger Runner', 'Shoes', 'Gents'], ['ZT-102', 'City Walk', 'Shoes', 'Ladies'],
+    ['ZT-201', 'Cloud Slide', 'Slider', 'Gents'], ['ZT-202', 'Bliss Slide', 'Slider', 'Ladies'],
+    ['ZT-301', 'Bubble Clog', 'Clogs', 'Kids'], ['ZT-302', 'Garden Clog', 'Clogs', 'Unisex'],
+    ['ZT-401', 'Wave V', 'V Shape', 'Gents'], ['ZT-501', 'Feather Eva', 'Eva Slider', 'Ladies']
+  ].map((r, i) => ({ id: 'i' + (i + 1), code: r[0], name: r[1], group: r[2], gender: r[3] }));
 
   // Demo orders at different stages, built with the real engine so planned/actual are consistent.
   DB = base;
   const hoursAgo = h => new Date(now.getTime() - h * 3600000);
+  const L = (art, colour, size, qty, pack, pq) => { const it = base.items.find(i => i.code === art); return { article: art, style: it.name, colour, gender: it.gender, size, qty, pack, pack_qty: pq }; };
   const plan = [
-    { c: 'c1', cat: 'Make to Order', ago: 190, done: 5, lines: [['FG-101', 600], ['FG-102', 400]], dd: 6 },
-    { c: 'c2', cat: 'Ready Stock', ago: 30, done: 4, lines: [['FG-201', 300]], dd: 2, dispatched: true },
-    { c: 'c3', cat: 'Make to Order', ago: 96, done: 2, lines: [['FG-401', 250], ['FG-501', 500]], dd: 9, late: 1 },
-    { c: 'c4', cat: 'Ready Stock', ago: 20, done: 1, lines: [['FG-301', 200], ['FG-302', 200]], dd: 3 },
-    { c: 'c5', cat: 'Make to Order', ago: 50, done: 1, lines: [['FG-202', 800]], dd: 12, pri: 'Urgent' },
-    { c: 'c1', cat: 'Ready Stock', ago: 3, done: 0, lines: [['FG-102', 120]], dd: 4 },
-    { c: 'c3', cat: 'Ready Stock', ago: 40, done: 4, lines: [['FG-501', 1000]], dd: 1 }
+    { c: 'c1', cat: 'Shoes', ch: 'Offline', ago: 190, done: 5, lines: [L('ZT-101', 'Black', '6X10', 600, 'Assortment', 50), L('ZT-102', 'White', '4X8', 400, 'Assortment', 40)], dd: 8 },
+    { c: 'c2', cat: 'Slider', ch: 'Online', ago: 30, done: 4, lines: [L('ZT-201', 'Navy', '6X10', 300, 'Solid', 300)], dd: 4, dispatched: true },
+    { c: 'c3', cat: 'Shoes', ch: 'Export', ago: 96, done: 2, lines: [L('ZT-101', 'Grey', '7X11', 250, 'Assortment', 25), L('ZT-501', 'Pink', '4X8', 500, 'Solid', 500)], dd: 12, late: 1 },
+    { c: 'c4', cat: 'Clogs', ch: 'Online', ago: 20, done: 1, lines: [L('ZT-301', 'Blue', '10X13', 200, 'Assortment', 20), L('ZT-302', 'Yellow', '6X9', 200, 'Assortment', 20)], dd: 6 },
+    { c: 'c5', cat: 'Slider', ch: 'Offline', ago: 50, done: 1, lines: [L('ZT-202', 'Black', '4X8', 800, 'Solid', 800)], dd: 15, pri: 'Urgent' },
+    { c: 'c1', cat: 'Shoes', ch: 'Online', ago: 3, done: 0, lines: [L('ZT-102', 'Beige', '4X8', 120, 'Solid', 120)], dd: 10 },
+    { c: 'c3', cat: 'Eva Slider', ch: 'Online', ago: 40, done: 4, lines: [L('ZT-501', 'Lilac', '4X8', 1000, 'Assortment', 100)], dd: 5 }
   ];
   plan.forEach((p, n) => {
     const cu = base.customers.find(c => c.id === p.c);
     const created = hoursAgo(p.ago);
     const o = {
       id: 'o' + (n + 1), no: 'ORD-' + now.getFullYear() + '-' + String(n + 1).padStart(4, '0'), order_date: ymdOf(created),
-      customer_id: cu.id, customer_name: cu.name, po_ref: 'PO/' + (4400 + n), category: p.cat, payment_terms: cu.payment_terms,
-      priority: p.pri || '', delivery_date: ymdOf(new Date(now.getTime() + p.dd * 86400000)), remarks: '',
-      lines: p.lines.map(([code, qty]) => { const it = base.items.find(i => i.code === code); return { item_code: code, item_name: it.name, uom: it.uom, qty, rate: it.rate }; }),
+      customer_id: cu.id, customer_name: cu.name, brand: cu.name, buyer_po: 'PO/' + (4400 + n), tooling_no: 'TM-' + (110 + n),
+      po_expiry_date: ymdOf(new Date(now.getTime() + p.dd * 86400000)), channel: p.ch, category: p.cat,
+      priority: p.pri || '', remarks: '', lines: p.lines,
       process_id: 'p_o2d_1', actuals: {}, done_by: {}, created_at: created.toISOString(), created_by: 'Rahul (Sales)', updated_at: created.toISOString()
     };
     DB.orders.push(o);
