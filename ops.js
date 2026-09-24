@@ -286,7 +286,8 @@ function readyForDispatch() {
 }
 const DSP_UI = { tab: 'ready', open: null };
 VIEWS.dispatch = {
-  mod: 'dispatch', render() {
+  mod: 'dispatch', render(param) {
+    if (['ready', 'upcoming', 'history'].includes(param)) { DSP_UI.tab = param; DSP_UI.open = null; }
     const edit = can('dispatch', 'edit');
     let h = '<h1>Dispatch</h1><div class="tabs">' + [['ready', 'Ready (' + readyForDispatch().length + ')'], ['upcoming', 'Upcoming'], ['history', 'History']].map(([k, l]) => '<a data-act="dsp-tab" data-t="' + k + '" class="' + (DSP_UI.tab === k ? 'on' : '') + '">' + l + '</a>').join('') + '</div>';
     if (DSP_UI.tab === 'ready') {

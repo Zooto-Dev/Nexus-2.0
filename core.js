@@ -292,13 +292,25 @@ function validateSpec(spec) {
 const VIEWS = {};      // name -> { mod, render(param) }
 const ACTIONS = {};    // data-act handlers
 const NAV = [
-  { grp: 'Work' }, { v: 'home', l: 'Home', mod: 'dashboard' }, { v: 'tasks', l: 'My Tasks', mod: 'tasks', cnt: 'tasks' },
-  { v: 'punch', l: 'Punch Order', mod: 'orders', edit: true }, { v: 'orders', l: 'Orders', mod: 'orders' },
-  { v: 'dispatch', l: 'Dispatch', mod: 'dispatch', cnt: 'dispatch' },
-  { grp: 'FMS' }, { v: 'tracker', l: 'Tracker', mod: 'tracker' }, { v: 'builder', l: 'FMS Builder', mod: 'builder' },
-  { grp: 'Masters' }, { v: 'customers', l: 'Brands', mod: 'masters' }, { v: 'items', l: 'Articles', mod: 'masters' },
-  { grp: 'Admin' }, { v: 'users', l: 'Users', mod: 'users' }, { v: 'roles', l: 'Roles & Access', mod: 'roles' },
-  { v: 'settings', l: 'Settings', mod: 'settings' }, { v: 'audit', l: 'Audit Log', mod: 'audit' }
+  { v: 'home', l: 'Home', mod: 'dashboard' },
+  { v: 'tasks', l: 'My Tasks', mod: 'tasks', cnt: 'tasks' },
+  { menu: 'Sales', items: [
+    { v: 'punch', l: 'Punch Order', mod: 'orders', edit: true },
+    { v: 'orders', l: 'Orders', mod: 'orders' },
+    { v: 'customers', l: 'Brands', mod: 'masters' },
+    { v: 'items', l: 'Articles', mod: 'masters' }] },
+  { menu: 'Dispatch', cnt: 'dispatch', items: [
+    { v: 'dispatch', l: 'Ready to Dispatch', mod: 'dispatch' },
+    { v: 'dispatch', p: 'upcoming', l: 'Upcoming Orders', mod: 'dispatch' },
+    { v: 'dispatch', p: 'history', l: 'Dispatch History', mod: 'dispatch' }] },
+  { menu: 'FMS', items: [
+    { v: 'tracker', l: 'Tracker', mod: 'tracker' },
+    { v: 'builder', l: 'FMS Builder', mod: 'builder' }] },
+  { menu: 'Admin', items: [
+    { v: 'users', l: 'Users', mod: 'users' },
+    { v: 'roles', l: 'Roles & Access', mod: 'roles' },
+    { v: 'settings', l: 'Settings', mod: 'settings' },
+    { v: 'audit', l: 'Audit Log', mod: 'audit' }] }
 ];
 function curView() { const h = location.hash.replace(/^#\/?/, ''); const [v, ...rest] = h.split('/'); return { v: v || 'home', param: decodeURIComponent(rest.join('/')) }; }
 function go(v, param) { location.hash = '#/' + v + (param ? '/' + encodeURIComponent(param) : ''); }
@@ -311,18 +323,26 @@ function navCounts() {
   };
 }
 function renderNav() {
-  const cur = curView().v; const c = navCounts();
-  let html = '<div class="brand">Nexus <b>2.0</b></div>'; let pendingGrp = false, first = true;
+  const { v: cur, param: curP } = curView(); const c = navCounts();
+  const cntHtml = k => k && k.n ? '<span class="cnt' + (k.late ? ' late' : '') + '">' + k.n + '</span>' : '';
+  const itemOk = n => can(n.mod, n.edit ? 'edit' : 'view');
+  const itemOn = n => cur === n.v && (n.p || '') === (n.v === 'dispatch' ? (curP || '') : (n.p || ''));
+  let html = '<div class="brand">Nexus <b>2.0</b></div>';
   NAV.forEach(n => {
-    if (n.grp) { pendingGrp = true; return; }
-    if (!can(n.mod, n.edit ? 'edit' : 'view')) return;
-    const cls = (cur === n.v ? 'on ' : '') + (pendingGrp && !first ? 'sep' : '');
-    pendingGrp = false; first = false;
-    const k = n.cnt && c[n.cnt];
-    html += '<a href="#/' + n.v + '" class="' + cls.trim() + '">' + n.l + (k && k.n ? '<span class="cnt' + (k.late ? ' late' : '') + '">' + k.n + '</span>' : '') + '</a>';
+    if (!n.menu) {
+      if (!itemOk(n)) return;
+      html += '<a href="#/' + n.v + '" class="' + (cur === n.v ? 'on' : '') + '">' + n.l + cntHtml(n.cnt && c[n.cnt]) + '</a>';
+      return;
+    }
+    const items = n.items.filter(itemOk);
+    if (!items.length) return;
+    const on = items.some(i => cur === i.v);
+    html += '<div class="menu"><a data-act="menu" class="mbtn ' + (on ? 'on' : '') + '">' + n.menu + cntHtml(n.cnt && c[n.cnt]) + '<span class="caret">▾</span></a><div class="mdrop">' +
+      items.map(i => '<a href="#/' + i.v + (i.p ? '/' + i.p : '') + '" class="' + (itemOn(i) ? 'on' : '') + '">' + i.l + '</a>').join('') + '</div></div>';
   });
   $('#nav').innerHTML = html;
 }
+
 function route() {
   if (!ME) return;
   const { v, param } = curView(); const view = VIEWS[v];
@@ -349,6 +369,8 @@ document.addEventListener('click', ev => {
   const fn = ACTIONS[el.dataset.act]; if (fn) { ev.preventDefault(); fn(el, ev); }
 });
 ACTIONS['toggle-nav'] = () => $('#nav').classList.toggle('open');
+ACTIONS['menu'] = el => { const m = el.parentElement; const was = m.classList.contains('open'); $$('#nav .menu.open').forEach(x => x.classList.remove('open')); if (!was) m.classList.add('open'); };
+document.addEventListener('click', ev => { if (!ev.target.closest('.menu')) $$('#nav .menu.open').forEach(x => x.classList.remove('open')); }, true);
 ACTIONS['go'] = el => go(el.dataset.v, el.dataset.p);
 ACTIONS['undo-step'] = el => undoStep(el.dataset.o, el.dataset.s);
 ACTIONS['logout'] = async () => { localStorage.removeItem('nexus2_me'); if (SB) await SB.auth.signOut(); location.reload(); };

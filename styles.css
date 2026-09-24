@@ -16,13 +16,21 @@ h2 { font-size: 13px; margin: 18px 0 8px; font-weight: 600; text-transform: uppe
 
 /* layout: top navigation bar */
 #app { display: block; min-height: 100vh; }
-#nav { display: flex; align-items: center; background: var(--panel); border-bottom: 1px solid var(--line); padding: 0 14px; position: sticky; top: 0; z-index: 10; overflow-x: auto; white-space: nowrap; }
+#nav { display: flex; align-items: center; flex-wrap: wrap; background: var(--panel); border-bottom: 1px solid var(--line); padding: 0 14px; position: sticky; top: 0; z-index: 10; white-space: nowrap; }
 #nav .brand { padding: 0 16px 0 0; flex: none; }
 #nav .grp { display: none; }
 #nav a { display: inline-flex; align-items: center; gap: 5px; padding: 10px 9px; color: var(--text); border-bottom: 2px solid transparent; }
 #nav a:hover { color: var(--accent); text-decoration: none; }
 #nav a.on { color: var(--accent); font-weight: 600; border-bottom-color: var(--accent); }
-#nav a.sep { margin-left: 12px; border-left: 1px solid var(--line2); padding-left: 14px; }
+#nav .menu { position: relative; }
+#nav .mbtn { cursor: pointer; user-select: none; }
+#nav .caret { font-size: 9px; color: var(--muted); margin-left: 2px; }
+#nav .menu.open .mbtn { color: var(--accent); }
+.mdrop { display: none; position: absolute; left: 0; top: 100%; background: var(--panel); border: 1px solid var(--line); border-radius: 0 0 4px 4px; box-shadow: 0 5px 12px rgba(0,0,0,.07); min-width: 175px; z-index: 30; padding: 4px 0; }
+#nav .menu.open .mdrop { display: block; }
+#nav .mdrop a { display: block; padding: 6px 14px; border-bottom: 0; }
+#nav .mdrop a:hover { background: var(--line2); color: var(--text); }
+#nav .mdrop a.on { color: var(--accent); font-weight: 600; background: var(--accent-bg); }
 #nav .cnt { color: var(--muted); font-size: 11px; }
 #nav .cnt.late { color: var(--late); font-weight: 600; }
 .brand { font-size: 15px; letter-spacing: .02em; } .brand b { color: var(--accent); }
