@@ -88,7 +88,7 @@ VIEWS.customers = {
         const oc = Store.all('orders').filter(o => o.customer_id === c.id).length;
         return '<tr' + (CDB_UI.edit === c.id ? ' style="background:var(--accent-bg)"' : '') + '><td><b>' + esc(c.name) + '</b></td><td>' + esc(c.contact_person || '') + '</td><td>' + esc(c.merchandiser || '') + '</td><td>' + esc(c.phone || '') + '</td><td class="num">' + (oc || '—') + '</td>' +
           (edit ? '<td class="right nowrap"><button class="btn sm" data-act="cdb-edit" data-id="' + esc(c.id) + '">Edit</button> ' + (oc ? '' : '<button class="btn sm ghost danger" data-act="cdb-del" data-id="' + esc(c.id) + '" data-confirm="Delete?">×</button>') + '</td>' : '') + '</tr>';
-      }).join('') : '<tr><td colspan="6" class="empty">Koi brand nahi — upar form se add karo</td></tr>') + '</table></div>';
+      }).join('') : '<tr><td colspan="6" class="empty">No brands yet — add one above</td></tr>') + '</table></div>';
     setMain(h);
     if (edit && !ed) { const n = $('#cdbName'); if (n && !rows.length) n.focus(); }
   }
@@ -98,8 +98,8 @@ ACTIONS['cdb-cancel'] = () => { CDB_UI.edit = null; VIEWS.customers.render(); };
 ACTIONS['cdb-save'] = () => {
   if (!requirePerm('masters', 'edit')) return;
   const name = $('#cdbName').value.trim();
-  if (!name) { $('#cdbMsg').innerHTML = '<span class="late-txt">Brand Name zaroori hai.</span>'; return; }
-  if (Store.all('customers').some(c => c.id !== CDB_UI.edit && norm(c.name) === norm(name))) { $('#cdbMsg').innerHTML = '<span class="late-txt">Ye brand pehle se hai.</span>'; return; }
+  if (!name) { $('#cdbMsg').innerHTML = '<span class="late-txt">Brand Name is required.</span>'; return; }
+  if (Store.all('customers').some(c => c.id !== CDB_UI.edit && norm(c.name) === norm(name))) { $('#cdbMsg').innerHTML = '<span class="late-txt">This brand already exists.</span>'; return; }
   const d = CDB_UI.edit ? Store.get('customers', CDB_UI.edit) : { id: uid(), code: 'B' + String(Store.all('customers').length + 1).padStart(3, '0') };
   const oldName = d.name;
   d.name = name; d.contact_person = $('#cdbPerson').value.trim(); d.merchandiser = $('#cdbMerch').value.trim().toUpperCase(); d.phone = $('#cdbPhone').value.trim();
@@ -112,7 +112,7 @@ ACTIONS['cdb-save'] = () => {
 };
 ACTIONS['cdb-del'] = el => {
   const c = Store.get('customers', el.dataset.id);
-  if (Store.all('orders').some(o => o.customer_id === c.id)) { flash('Brand ke orders hain — delete nahi hoga.', 'err'); return; }
+  if (Store.all('orders').some(o => o.customer_id === c.id)) { flash('Brand has orders — cannot delete.', 'err'); return; }
   Store.del('customers', c.id); audit('cdb.delete', c.name, ''); VIEWS.customers.render();
 };
 VIEWS.items = {
@@ -195,7 +195,7 @@ VIEWS.settings = {
       '<div style="margin-top:10px"><span class="muted small">Weekly off</span><div class="row" style="margin-top:4px">' + days.map((d, i) => '<label style="flex-direction:row;align-items:center;gap:4px;min-width:0"><input type="checkbox" data-off="' + i + '"' + ((c.weeklyOff || []).includes(i) ? ' checked' : '') + dis + '>' + d + '</label>').join('') + '</div></div>' +
       '<div style="margin-top:10px"><span class="muted small">Half-day TAT (1.5 days)</span><div style="margin-top:4px">' + seg('halfDays', [{ v: 'exact', l: 'Exact — 1.5 days = 1.5 × office hours' }, { v: 'truncate', l: 'Sheet style — 1.5 → 1 day' }], c.halfDays, edit ? '' : 'data-locked') + '</div></div></div>';
     const OPT_KEYS = [['category', 'Category'], ['channel', 'Channel'], ['gender', 'Gender'], ['packing', 'Packing']];
-    h += '<div class="panel" style="margin-top:12px"><h2 style="margin-top:0">Dropdown Options</h2><div class="muted small" style="margin-bottom:8px">Order punch, Job Card, Articles — sab jagah ke dropdowns yahin se chalte hain. Comma se alag karke likho. Brand list Merchant → Brands se aati hai.</div>' +
+    h += '<div class="panel" style="margin-top:12px"><h2 style="margin-top:0">Dropdown Options</h2><div class="muted small" style="margin-bottom:8px">These options drive the dropdowns in Order Punch, Job Card and Articles. Separate values with commas. The brand list comes from Merchant → Brands.</div>' +
       OPT_KEYS.map(([k, l]) => '<label style="margin-bottom:8px">' + l + '<input data-opt="' + k + '" value="' + esc(optList(k).join(', ')) + '"' + (edit ? '' : ' disabled') + '></label>').join('') + '</div>';
     h += '<div class="panel" style="margin-top:12px"><h2 style="margin-top:0">Data</h2><div class="toolbar"><button class="btn" data-act="backup">Download full backup (JSON)</button>' +
       (edit ? '<label class="btn" style="flex-direction:row;color:var(--text)">Restore backup<input type="file" id="restoreFile" accept=".json,application/json" class="hidden"></label>' : '') +
@@ -213,9 +213,9 @@ VIEWS.settings = {
       else if (t.dataset.off != null) { st.calendar.weeklyOff = $$('[data-off]').filter(x => x.checked).map(x => +x.dataset.off); if (st.calendar.weeklyOff.length > 5) { flash('At least 2 working days needed.', 'err'); return VIEWS.settings.render(); } }
       else if (t.dataset.opt) {
         const list = t.value.split(',').map(x => x.trim()).filter(Boolean);
-        if (!list.length) { flash('Kam se kam ek option chahiye.', 'err'); return VIEWS.settings.render(); }
+        if (!list.length) { flash('At least one option is required.', 'err'); return VIEWS.settings.render(); }
         st.options = st.options || {}; st.options[t.dataset.opt] = list;
-        Store.setSettings(st); audit('settings.options', t.dataset.opt, list.join(', ')); flash('Options saved — sab dropdowns update.'); return;
+        Store.setSettings(st); audit('settings.options', t.dataset.opt, list.join(', ')); flash('Options saved — all dropdowns updated.'); return;
       }
       else if (t.id === 'restoreFile') return restoreBackup(t.files[0]);
       else return;

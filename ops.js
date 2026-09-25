@@ -46,7 +46,7 @@ VIEWS.home = {
 
     // Escalations & tickets
     h += '<div class="grid2"><div><h2>Escalations</h2>';
-    if (!escT.length && !escSteps.length) h += '<div class="panel empty">Koi escalation nahi 🎉</div>';
+    if (!escT.length && !escSteps.length) h += '<div class="panel empty">No escalations</div>';
     else {
       h += '<div class="tbl-wrap"><table><tr><th>What</th><th>Where</th><th>Owner</th><th class="num">Since</th></tr>' +
         escT.map(t => '<tr class="click" data-act="go" data-v="tickets"><td><span class="late-txt">●</span> ' + esc(t.no) + ' · ' + esc(t.subject) + '</td><td>' + esc(t.dept) + '</td><td>' + esc(t.by) + '</td><td class="num">' + Math.floor((Date.now() - new Date(t.at)) / 3600000) + 'h</td></tr>').join('') +
@@ -79,7 +79,7 @@ VIEWS.home = {
 /* ---------------- My Tasks ---------------- */
 const TASK_UI = { who: 'mine', when: 'open', q: '' };
 function taskTable(list, compact) {
-  if (!list.length) return '<div class="tbl-wrap"><div class="empty">No open tasks 🎉</div></div>';
+  if (!list.length) return '<div class="tbl-wrap"><div class="empty">No open tasks</div></div>';
   return '<div class="tbl-wrap"><table><tr><th>Order</th><th>Customer</th><th>Step</th>' + (compact ? '' : '<th>Doer</th>') + '<th>Planned</th><th>Status</th><th class="num">Delay</th>' + (compact ? '' : '<th>Note</th>') + '<th></th></tr>' +
     list.map(x => '<tr><td class="nowrap"><a href="#/order/' + esc(x.order.id) + '">' + esc(x.order.no) + '</a>' + (x.order.priority === 'Urgent' ? ' <span class="late-txt small">URGENT</span>' : '') + '</td><td>' + esc(x.order.customer_name) + '</td>' +
       '<td>' + esc(x.step.name) + (x.def && x.def.what && !compact ? '<div class="muted small">' + esc(x.def.what) + '</div>' : '') + '</td>' + (compact ? '' : '<td>' + esc(x.step.doer || '') + '</td>') +
@@ -141,7 +141,7 @@ VIEWS.punch = {
     if (!proc) { setMain('<div class="panel">No active FMS flow. Activate one in FMS Builder first.</div>'); return; }
     const extra = proc.spec.fields.filter(f => f.source === 'form' && !CORE_FIELDS.includes(f.key));
     const P = PUNCH;
-    let h = '<h1>' + (P.id ? 'Edit ' + esc(P.no) : 'Punch Order') + ' <span class="muted small">Time stamp auto lagta hai · Enter = next box · <span class="kbd">Ctrl</span>+<span class="kbd">S</span> save</span></h1><div class="panel punch">';
+    let h = '<h1>' + (P.id ? 'Edit ' + esc(P.no) : 'Punch Order') + ' <span class="muted small">Enter = next field · <span class="kbd">Ctrl</span>+<span class="kbd">S</span> save</span></h1><div class="panel punch">';
 
     h += '<datalist id="dlArt">' + Store.all('items').map(i => '<option value="' + esc(i.code) + '">' + esc(i.name + ' · ' + (i.group || '')) + '</option>').join('') + '</datalist>';
     h += '<div class="hdr">' +
@@ -164,16 +164,16 @@ VIEWS.punch = {
           '<td><input data-f="style" value="' + esc(l.style) + '"></td>' +
           '<td><input data-f="colour" value="' + esc(l.colour) + '"></td>' +
           '<td>' + lineSel('gender', GENDERS_(), l.gender) + '</td>' +
-          '<td><input data-f="size_run" placeholder="6-10" value="' + esc(l.size_run || l.size || '') + '" title="Size run likho (6-10 ya 6X10) — har size ka qty box neeche aayega"></td>' +
+          '<td><input data-f="size_run" placeholder="6-10" value="' + esc(l.size_run || l.size || '') + '" title="Enter size run (6-10 or 6X10)"></td>' +
           '<td class="num"><b data-lq>' + (lineQty(l) ? qtyFmt(lineQty(l)) : '') + '</b></td>' +
           '<td>' + lineSel('pack', PACKS_(), l.pack) + '</td>' +
           '<td class="small muted" data-lsum>' + esc(sizeSummary(l)) + '</td>' +
           '<td><button class="btn ghost sm" data-act="punch-del" data-i="' + i + '" title="Remove">×</button></td></tr>';
         row += '<tr class="szrow" data-sz-for="' + i + '"><td></td><td colspan="9">' +
           ((l.sizes && l.sizes.length) ? '<div class="szgrid"><span class="muted small" style="align-self:center">Asst/Solid Qty \u2014 size-wise:</span>' +
-            l.sizes.map((sz, k) => '<span class="szbox"><input data-szl data-i="' + i + '" data-k="' + k + '" value="' + esc(sz.size) + '" title="Size"><input type="number" min="0" data-szq data-i="' + i + '" data-k="' + k + '" value="' + (sz.qty || '') + '" placeholder="qty" title="Size ' + esc(sz.size) + ' ka qty"></span>').join('') +
+            l.sizes.map((sz, k) => '<span class="szbox"><input data-szl data-i="' + i + '" data-k="' + k + '" value="' + esc(sz.size) + '" title="Size"><input type="number" min="0" data-szq data-i="' + i + '" data-k="' + k + '" value="' + (sz.qty || '') + '" placeholder="qty" title="Qty for size ' + esc(sz.size) + '"></span>').join('') +
             '<a data-act="punch-size-add" data-i="' + i + '" class="small">+ size</a></div>'
-            : '<span class="muted small">Size Run likho (jaise <b>6-10</b>) — har size ka qty box yahan aa jayega</span>') + '</td></tr>';
+            : '<span class="muted small">Enter a Size Run (e.g. <b>6-10</b>) for size-wise qty boxes</span>') + '</td></tr>';
         return row;
       }).join('') +
       '<tr><td></td><td colspan="4"><a data-act="punch-add">+ Add article</a></td><td></td><td class="num"><b id="pTq"></b></td><td></td><td></td><td></td></tr></table>';
@@ -191,7 +191,7 @@ VIEWS.punch = {
         punchCollect();
         const i = +e.target.closest('tr').dataset.i; const l = PUNCH.lines[i];
         const run = parseSizeRun(e.target.value);
-        if (l.sizes && l.sizes.length === run.length && run.every((szn, k) => norm(l.sizes[k].size) === norm(szn))) return; // same run dobara fire — re-render mat karo
+        if (l.sizes && l.sizes.length === run.length && run.every((szn, k) => norm(l.sizes[k].size) === norm(szn))) return; // same run fired again — skip re-render
         l.size_run = e.target.value.trim().toUpperCase();
         l.sizes = run.map(szn => { const ex = (l.sizes || []).find(x => norm(x.size) === norm(szn)); return { size: szn, qty: ex ? ex.qty : '' }; });
         VIEWS.punch.render(PUNCH.id);
@@ -268,11 +268,11 @@ ACTIONS['punch-save'] = () => {
   if (!lines.length) errs.push('at least one article row');
   lines.forEach((l, i) => {
     if (!l.article) errs.push('row ' + (i + 1) + ': article');
-    if (!(l.sizes && l.sizes.some(x => num(x.qty) > 0))) errs.push('row ' + (i + 1) + ': size-wise qty dalo (Size Run likho, jaise 6-10)');
+    if (!(l.sizes && l.sizes.some(x => num(x.qty) > 0))) errs.push('row ' + (i + 1) + ': enter size-wise qty (Size Run, e.g. 6-10)');
     const dupSz = (l.sizes || []).map(x => norm(x.size)).filter((c, k, a) => c && a.indexOf(c) !== k);
-    if (dupSz.length) errs.push('row ' + (i + 1) + ': size "' + dupSz[0] + '" do baar hai');
+    if (dupSz.length) errs.push('row ' + (i + 1) + ': duplicate size "' + dupSz[0] + '"');
   });
-  // Same article+colour+packing rows merge: size-wise qty jod di jaati hai
+  // Merge rows with the same article+colour+packing; size-wise qty is summed
   const key = l => norm(l.article + '|' + l.colour + '|' + l.pack);
   const merged = [];
   let mergedNote = false;
@@ -285,17 +285,17 @@ ACTIONS['punch-save'] = () => {
   lines.length = 0; merged.forEach(l => { l.qty = lineQty(l); lines.push(l); });
   if (errs.length) { $('#pMsg').innerHTML = '<span class="late-txt">Missing / wrong: ' + esc(errs.join(', ')) + '</span>'; return; }
   const cu = Store.all('customers').find(c => norm(c.name) === norm(P.brand));
-  if (!cu) { $('#pMsg').innerHTML = '<span class="late-txt">Brand list mein nahi hai — Merchant → Brands mein pehle add karo.</span>'; return; }
+  if (!cu) { $('#pMsg').innerHTML = '<span class="late-txt">Brand is not in the list — add it in Merchant → Brands first.</span>'; return; }
   lines.forEach(l => { if (l.article && !Store.all('items').some(x => norm(x.code) === norm(l.article))) Store.put('items', { id: uid(), code: l.article, name: l.style, group: P.category, gender: l.gender }); });
   const o = P.id ? Store.get('orders', P.id) : { id: uid(), no: nextNo('orders', 'ORD'), process_id: activeProcess().id, actuals: {}, done_by: {}, created_at: nowIso(), created_by: ME.name };
   Object.assign(o, { order_date: P.order_date, customer_id: cu.id, customer_name: cu.name, brand: cu.name, buyer_po: P.buyer_po, po_expiry_date: P.po_expiry_date, tooling_no: P.tooling_no, channel: P.channel, category: P.category, priority: P.priority, remarks: P.remarks, extra: P.extra, lines: lines.map(l => ({ article: l.article, style: l.style, colour: l.colour, gender: l.gender, size_run: l.size_run, size: l.size_run, sizes: (l.sizes || []).filter(x => num(x.qty) > 0).map(x => ({ size: x.size, qty: num(x.qty) })), qty: lineQty(l), pack: l.pack, jc_no: l.jc_no || '' })) });
-  // Har article line ko Job Card No auto-assign (ZF-xxxx) — agar pehle se nahi hai
+  // Auto-assign a Job Card No (ZF-xxxx) to each article line that lacks one
   let jcSeq = jcNoBase();
   o.lines.forEach(l => { if (!l.jc_no) { jcSeq += 1; l.jc_no = 'ZF-' + String(jcSeq).padStart(4, '0'); } });
   Store.put('orders', o);
   audit(P.id ? 'order.edit' : 'order.create', o.no, cu.name + ' · PO ' + P.buyer_po + ' · ' + qtyFmt(orderTotals(o).qty) + ' qty');
   if (P.id) { PUNCH = null; flash('Saved ' + esc(o.no) + '.'); go('order', o.id); return; }
-  if (mergedNote) flash('Same article/colour/size ki rows qty jod kar ek kar di gayi.');
+  if (mergedNote) flash('Rows with the same article/colour/packing were merged.');
   newPunch(); VIEWS.punch.render();
   flash('Saved <b>' + esc(o.no) + '</b> — FMS started. <a href="#/order/' + esc(o.id) + '">Open</a> · punch the next order below.');
 };

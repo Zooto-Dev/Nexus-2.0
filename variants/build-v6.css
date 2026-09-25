@@ -200,5 +200,17 @@ td input.right, input.right { text-align: right; }
 .szbox input { border: 0; border-radius: 0; height: 26px; }
 .szbox input[data-szl] { width: 46px; background: #f3f6fa; text-align: center; font-weight: 600; border-right: 1px solid var(--line); }
 .szbox input[data-szq] { width: 64px; text-align: right; }
-/* V1 Classic Blue - the original compact look, refined */
-:root { --accent: #1f5fae; --accent-d: #174a89; --accent-bg: #eaf1fa; }
+/* V6 Sheet Grid - spreadsheet-style full-bordered tables, green accent */
+:root { --bg: #fbfcfb; --line: #dadce0; --line2: #e7e9ec; --text: #202124; --muted: #5f6368;
+  --accent: #188038; --accent-d: #137333; --accent-bg: #e6f4ea; --r: 4px; --r-s: 4px; --fs: 12.5px; --ctl-h: 28px;
+  --cell-py: 4px; --cell-px: 8px; --th-bg: #f1f3f4; --card-h-bg: #f8f9fa; }
+th, td { border-right: 1px solid var(--line2); }
+th:last-child, td:last-child { border-right: 0; }
+th { color: #3c4043; font-weight: 600; text-transform: none; border-bottom: 2px solid var(--line); }
+table tr:last-child td { border-bottom-color: var(--line2); }
+tr:nth-child(even) td { background: #fafbfa; }
+tr.click:hover td { background: #f0f7f2; }
+#nav a.on { border-bottom-color: var(--accent); color: var(--accent); }
+.kpis b { font-size: 16px; }
+#flash { background: #202124; color: #fff; border: 0; position: fixed; left: 24px; bottom: 24px; margin: 0; border-radius: 4px; padding: 9px 16px; box-shadow: var(--sh-2); }
+#flash.err { background: #d93025; }

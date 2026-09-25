@@ -200,5 +200,18 @@ td input.right, input.right { text-align: right; }
 .szbox input { border: 0; border-radius: 0; height: 26px; }
 .szbox input[data-szl] { width: 46px; background: #f3f6fa; text-align: center; font-weight: 600; border-right: 1px solid var(--line); }
 .szbox input[data-szq] { width: 64px; text-align: right; }
-/* V1 Classic Blue - the original compact look, refined */
-:root { --accent: #1f5fae; --accent-d: #174a89; --accent-bg: #eaf1fa; }
+/* V3 Stripe Indigo - indigo accent, soft shadows, uppercase headers */
+:root { --bg: #f6f8fb; --line: #e3e8ef; --line2: #eef2f6; --text: #1a1f36; --muted: #697386;
+  --accent: #635bff; --accent-d: #5149e6; --accent-bg: #eeedff; --r: 8px; --r-s: 6px;
+  --sh: 0 1px 3px rgba(50,50,93,.06), 0 1px 2px rgba(0,0,0,.04); --th-bg: #f7f9fc; --card-h-bg: #fbfcfe; }
+th { text-transform: uppercase; font-size: 10.5px; letter-spacing: .06em; color: #8792a2; }
+.btn { box-shadow: 0 1px 1px rgba(0,0,0,.04); border-color: #dbe1ea; }
+.btn.primary { box-shadow: 0 1px 2px rgba(81,73,230,.35); }
+#nav a { border-bottom: none; border-radius: 6px; margin: 5px 1px; padding: 10px 10px; }
+#nav a.on { background: var(--accent-bg); }
+#nav a:hover { background: #f0f2f7; }
+#nav { min-height: 46px; }
+.st { padding: 1px 8px 1px 6px; border-radius: 99px; }
+.st.Late, .st.Cancelled { background: var(--late-bg); } .st.Pending, .st.OnHold { background: var(--pending-bg); }
+.st.Done { background: var(--done-bg); } .st.Waiting, .st.NA { background: var(--line2); }
+#flash { position: fixed; right: 20px; bottom: 20px; margin: 0; max-width: 380px; border-radius: 8px; box-shadow: var(--sh-2); border-left-width: 3px; }

@@ -200,5 +200,19 @@ td input.right, input.right { text-align: right; }
 .szbox input { border: 0; border-radius: 0; height: 26px; }
 .szbox input[data-szl] { width: 46px; background: #f3f6fa; text-align: center; font-weight: 600; border-right: 1px solid var(--line); }
 .szbox input[data-szq] { width: 64px; text-align: right; }
-/* V1 Classic Blue - the original compact look, refined */
-:root { --accent: #1f5fae; --accent-d: #174a89; --accent-bg: #eaf1fa; }
+/* V2 Hairline Minimal - near-white, black text, hairlines, ghost chrome */
+:root { --bg: #ffffff; --panel: #fff; --line: #ececec; --line2: #f3f3f3; --text: #111; --muted: #72777f;
+  --accent: #0a66d0; --accent-d: #0853ab; --accent-bg: #f0f4fa; --r: 6px; --r-s: 6px; --th-bg: #fff; --card-h-bg: #fff; }
+#nav { border-bottom: 1px solid var(--line); min-height: 42px; }
+#nav a { padding: 11px 9px; border-bottom: none; border-radius: 5px; margin: 5px 1px; }
+#nav a.on { background: #f2f2f2; color: #111; }
+#nav a:hover { background: #f6f6f6; color: #111; }
+#top { border-bottom: 1px solid var(--line); }
+#gsearch { border-color: transparent; background: #f4f4f5; border-radius: 6px; }
+.tbl-wrap, .card, .panel, .kpis { border-color: var(--line); }
+th { background: #fff; text-transform: uppercase; font-size: 10.5px; letter-spacing: .07em; color: #9a9fa6; border-bottom: 1px solid var(--line); }
+.btn { border-color: #e2e2e2; }
+.kpis { border: 0; background: transparent; gap: 26px; }
+.kpis > a, .kpis > div { border: 0; padding: 0; }
+#flash { position: fixed; left: 50%; transform: translateX(-50%); bottom: 26px; margin: 0; background: #1c1c1e; color: #fff; border: 0; border-radius: 8px; padding: 9px 16px; box-shadow: var(--sh-2); }
+#flash.err { background: #b3261e; }

@@ -200,5 +200,16 @@ td input.right, input.right { text-align: right; }
 .szbox input { border: 0; border-radius: 0; height: 26px; }
 .szbox input[data-szl] { width: 46px; background: #f3f6fa; text-align: center; font-weight: 600; border-right: 1px solid var(--line); }
 .szbox input[data-szq] { width: 64px; text-align: right; }
-/* V1 Classic Blue - the original compact look, refined */
-:root { --accent: #1f5fae; --accent-d: #174a89; --accent-bg: #eaf1fa; }
+/* V8 Teal Enterprise - teal accent, tinted headers, crisp */
+:root { --bg: #f4f7f7; --line: #dbe3e3; --line2: #eaf0f0; --text: #16302e; --muted: #5c7270;
+  --accent: #0d7377; --accent-d: #0a5c5f; --accent-bg: #e3f2f2; --r: 6px; --r-s: 5px;
+  --th-bg: #eef4f4; --card-h-bg: #f6fafa; }
+th { color: #47605e; font-weight: 650; }
+#nav a.on { border-bottom-color: var(--accent); color: var(--accent); }
+#nav .cnt { background: var(--accent); color: #fff; }
+.kpis > a, .kpis > div { border-right-color: var(--line2); }
+.kpis b { color: #0d7377; }
+.st { padding: 1px 8px 1px 6px; border-radius: 3px; }
+.st.Late, .st.Cancelled { background: var(--late-bg); } .st.Pending, .st.OnHold { background: var(--pending-bg); }
+.st.Done { background: var(--done-bg); } .st.Waiting, .st.NA { background: var(--line2); }
+#flash { border-left-color: var(--accent); }

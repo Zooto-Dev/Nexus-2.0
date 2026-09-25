@@ -200,5 +200,20 @@ td input.right, input.right { text-align: right; }
 .szbox input { border: 0; border-radius: 0; height: 26px; }
 .szbox input[data-szl] { width: 46px; background: #f3f6fa; text-align: center; font-weight: 600; border-right: 1px solid var(--line); }
 .szbox input[data-szq] { width: 64px; text-align: right; }
-/* V1 Classic Blue - the original compact look, refined */
-:root { --accent: #1f5fae; --accent-d: #174a89; --accent-bg: #eaf1fa; }
+/* V4 Linear Slate - tight, muted slate, violet accent, flat */
+:root { --bg: #f9fafb; --line: #e5e7eb; --line2: #f0f1f3; --text: #282a30; --muted: #6f7178; --faint: #9d9fa6;
+  --accent: #5e6ad2; --accent-d: #4c58c4; --accent-bg: #eef0fb; --r: 6px; --r-s: 5px; --fs: 12.5px; --ctl-h: 28px;
+  --cell-py: 5px; --cell-px: 9px; --th-bg: #fbfbfc; --card-h-bg: #fbfbfc; }
+h1 { font-size: 15px; }
+#nav { min-height: 42px; }
+#nav a { font-size: 12.5px; padding: 6px 8px; margin: 6px 1px; border-bottom: none; border-radius: 5px; color: #56585f; }
+#nav a.on { background: #ececef; color: #282a30; }
+#nav a:hover { background: #f1f1f4; color: #282a30; }
+#nav .cnt { background: #ececef; color: #56585f; }
+th { font-size: 11px; font-weight: 550; color: #85878d; }
+.btn { font-weight: 500; }
+.seg { background: #f0f1f3; border-color: transparent; padding: 2px; gap: 2px; }
+.seg button { background: transparent; border-right: 0; border-radius: 4px; }
+.seg button.on { background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.08); color: var(--text); }
+#gsearch { background: #f0f1f3; border-color: transparent; }
+#flash { position: fixed; right: 18px; bottom: 18px; margin: 0; border-radius: 8px; box-shadow: var(--sh-2); font-size: 12.5px; }

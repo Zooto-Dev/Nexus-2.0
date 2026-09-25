@@ -16,15 +16,15 @@ const DEFAULT_O2D_SPEC = {
   priority: { field: 'priority', urgent: ['Urgent'], hold: ['On Hold'], cancel: ['Cancelled'] },
   doerTables: {},
   steps: [
-    { id: 'order_verify', name: 'Order Verification', what: 'PO, qty, size, article aur expiry date check karo', doer: { type: 'fixed', name: 'MERCHANT' }, trigger: { type: 'instanceStart' }, tat: { value: 2, unit: 'hours' } },
+    { id: 'order_verify', name: 'Order Verification', what: 'Check PO, qty, size, article and expiry date', doer: { type: 'fixed', name: 'MERCHANT' }, trigger: { type: 'instanceStart' }, tat: { value: 2, unit: 'hours' } },
     { id: 'planning', name: 'Production Planning', doer: { type: 'fixed', name: 'PRODUCTION' }, trigger: { type: 'afterStep', step: 'order_verify' }, tat: { value: 1, urgent: 0.5, unit: 'days' } },
-    { id: 'material', name: 'Material Arrangement', what: 'BOM ke hisaab se material issue / purchase', doer: { type: 'fixed', name: 'STORE' }, trigger: { type: 'afterStep', step: 'planning' }, tat: { value: 2, urgent: 1, unit: 'days' } },
+    { id: 'material', name: 'Material Arrangement', what: 'Issue / purchase material as per BOM', doer: { type: 'fixed', name: 'STORE' }, trigger: { type: 'afterStep', step: 'planning' }, tat: { value: 2, urgent: 1, unit: 'days' } },
     { id: 'production', name: 'Production', doer: { type: 'fixed', name: 'PRODUCTION' }, trigger: { type: 'afterStep', step: 'material' }, tat: { value: 3, urgent: 2, unit: 'days' } },
     { id: 'qc', name: 'Quality Check', doer: { type: 'fixed', name: 'QC' }, trigger: { type: 'afterStep', step: 'production' }, tat: { value: 4, unit: 'hours' } },
-    { id: 'labels', name: 'Labels & Barcode Ready', what: 'PO expiry se 3 din pehle ready', doer: { type: 'fixed', name: 'MERCHANT' }, trigger: { type: 'beforeDate', field: 'po_expiry_date' }, tat: { value: 3, unit: 'days' } },
+    { id: 'labels', name: 'Labels & Barcode Ready', what: 'Ready 3 days before PO expiry', doer: { type: 'fixed', name: 'MERCHANT' }, trigger: { type: 'beforeDate', field: 'po_expiry_date' }, tat: { value: 3, unit: 'days' } },
     { id: 'packing', name: 'Packing', what: 'Assortment / solid packing as per order', doer: { type: 'fixed', name: 'DISPATCH' }, trigger: { type: 'afterStep', step: 'qc' }, tat: { value: 4, unit: 'hours' } },
     { id: 'invoice', name: 'Invoice', doer: { type: 'fixed', name: 'ACCOUNTS' }, trigger: { type: 'afterStep', step: 'packing' }, tat: { value: 2, unit: 'hours' } },
-    { id: 'dispatch', name: 'Dispatch', what: 'Dispatch screen se entry karo — poori qty jaane par step apne aap Done', doer: { type: 'fixed', name: 'DISPATCH' }, trigger: { type: 'afterStep', step: 'invoice' }, tat: { value: 4, unit: 'hours' }, status: { type: 'auto', source: 'Dispatch module', rule: 'Done when full order qty is dispatched' } }
+    { id: 'dispatch', name: 'Dispatch', what: 'Enter via the Dispatch screen — step auto-completes when the full qty is dispatched', doer: { type: 'fixed', name: 'DISPATCH' }, trigger: { type: 'afterStep', step: 'invoice' }, tat: { value: 4, unit: 'hours' }, status: { type: 'auto', source: 'Dispatch module', rule: 'Done when full order qty is dispatched' } }
   ]
 };
 
@@ -100,7 +100,7 @@ function seedData(cloud) {
     { c: 'c1', cat: 'Shoes', ch: 'Online', ago: 3, done: 0, lines: [L('ZT-102', 'Beige', '4X8', 120, 'Solid', 120)], dd: 10 },
     { c: 'c3', cat: 'Eva Slider', ch: 'Online', ago: 40, done: 4, lines: [L('ZT-501', 'Lilac', '4X8', 1000, 'Assortment', 100)], dd: 5 }
   ];
-  let jcSeed = 2;   // ZF-0001/0002 job cards ke baad se
+  let jcSeed = 2;   // continue after job cards ZF-0001/0002
   plan.forEach((p, n) => {
     const cu = base.customers.find(c => c.id === p.c);
     const created = hoursAgo(p.ago);
@@ -152,7 +152,7 @@ function seedData(cloud) {
   ];
   base.purchase_orders = [
     { id: 'po1', no: 'ZF/PO/FY/001'.replace('FY', fyTag()), approval: 'Approved', approved_by: 'Pankaj (Manager)', date: ymdOf(hoursAgo(120)), vendor: 'Shree Polymers', expected: ymdOf(new Date(now.getTime() - 86400000)), remarks: '', created_by: 'Ashish (Purchase)', at: hoursAgo(120).toISOString(),
-      lines: [{ material: 'EVA-10', uom: 'SHEET', qty: 31, rate: 420, received: 25, rejected: 1, jc_no: 'ZF-0001' }], followups: [{ at: ymdOf(hoursAgo(24)), by: 'Ashish (Purchase)', note: 'Vendor bola kal tak bhej dega', next: todayYmd() }] },
+      lines: [{ material: 'EVA-10', uom: 'SHEET', qty: 31, rate: 420, received: 25, rejected: 1, jc_no: 'ZF-0001' }], followups: [{ at: ymdOf(hoursAgo(24)), by: 'Ashish (Purchase)', note: 'Vendor promised delivery by tomorrow', next: todayYmd() }] },
     { id: 'po2', no: 'ZF/PO/FY/002'.replace('FY', fyTag()), approval: 'Approved', approved_by: 'Pankaj (Manager)', date: ymdOf(hoursAgo(48)), vendor: 'Balaji Soles', expected: ymdOf(new Date(now.getTime() + 5 * 86400000)), remarks: '', created_by: 'Ashish (Purchase)', at: hoursAgo(48).toISOString(),
       lines: [{ material: 'SOLE-TPR', uom: 'PAIR', qty: 1000, rate: 38, received: 0, rejected: 0 }, { material: 'BOX-K3', uom: 'PCS', qty: 500, rate: 12, received: 0, rejected: 0 }], followups: [] }
   ];
@@ -165,16 +165,16 @@ function seedData(cloud) {
   const jcL = (art, qty) => { const b = base.boms.find(x => x.article === art); return b.lines.map(l => ({ material: l.material, uom: l.uom, norms: l.qty, supplier: l.supplier, required: Math.ceil(l.qty * qty * 1.02 * 1000) / 1000, po_raised: 0 })); };
   base.job_cards = [
     { id: 'jc1', no: 'ZF-0001', order_no: 'ORD-' + now.getFullYear() + '-0001', brand: 'Max', article: 'ZT-101', colour: 'Black', qty: 600, lines: jcL('ZT-101', 600), swatch_status: 'Approved', swatch_note: '', status: 'Open', corrections: [], by: 'Pooja (Merchant)', at: hoursAgo(100).toISOString() },
-    { id: 'jc2', no: 'ZF-0002', order_no: 'ORD-' + now.getFullYear() + '-0004', brand: 'Campus', article: 'ZT-301', colour: 'Blue', qty: 200, swatch_status: 'Pending', status: 'Open', corrections: [{ at: hoursAgo(6).toISOString(), by: 'Vikas (Production)', note: 'Colour shade dark chahiye', resolved: false }], by: 'Pooja (Merchant)', at: hoursAgo(18).toISOString() }
+    { id: 'jc2', no: 'ZF-0002', order_no: 'ORD-' + now.getFullYear() + '-0004', brand: 'Campus', article: 'ZT-301', colour: 'Blue', qty: 200, swatch_status: 'Pending', status: 'Open', corrections: [{ at: hoursAgo(6).toISOString(), by: 'Vikas (Production)', note: 'Colour shade should be darker', resolved: false }], by: 'Pooja (Merchant)', at: hoursAgo(18).toISOString() }
   ];
-  base.job_cards[0].lines[0].po_raised = 31; // approved PO-001 ka EVA-10
+  base.job_cards[0].lines[0].po_raised = 31; // EVA-10 from approved PO-001
   base.requisitions = [{ id: 'rq1', no: 'REQ-0001', date: todayYmd(), jc_no: base.job_cards[0].no, dept: 'Production', lines: [{ material: 'SOLE-TPR', qty: 300 }], status: 'Pending', by: 'Vikas (Production)' }];
   base.tickets = [
-    { id: 't1', no: 'TKT-' + now.getFullYear() + '-0001', at: hoursAgo(60).toISOString(), by: 'Vikas (Production)', dept: 'Store', priority: 'Critical', subject: 'EVA sheet shortage line 2 par', detail: 'Production ruk jayega agar aaj issue nahi hua', status: 'Open', comments: [{ at: hoursAgo(3).toISOString(), by: 'Suresh (Store)', note: 'GRN ho gaya, aaj issue karenge' }] },
-    { id: 't2', no: 'TKT-' + now.getFullYear() + '-0002', at: hoursAgo(8).toISOString(), by: 'Pooja (Merchant)', dept: 'IT', priority: 'Normal', subject: 'Printer chal nahi raha', detail: '', status: 'In Progress', comments: [] }
+    { id: 't1', no: 'TKT-' + now.getFullYear() + '-0001', at: hoursAgo(60).toISOString(), by: 'Vikas (Production)', dept: 'Store', priority: 'Critical', subject: 'EVA sheet shortage on line 2', detail: 'Production will stop if the material is not issued today', status: 'Open', comments: [{ at: hoursAgo(3).toISOString(), by: 'Suresh (Store)', note: 'GRN done, issuing today' }] },
+    { id: 't2', no: 'TKT-' + now.getFullYear() + '-0002', at: hoursAgo(8).toISOString(), by: 'Pooja (Merchant)', dept: 'IT', priority: 'Normal', subject: 'Printer not working', detail: '', status: 'In Progress', comments: [] }
   ];
   base.checklist = [
-    { id: 'ck1', title: 'Stock register update karo', doer: 'STORE', freq: 'Daily', done: {}, active: true, by: 'Admin' },
+    { id: 'ck1', title: 'Update stock register', doer: 'STORE', freq: 'Daily', done: {}, active: true, by: 'Admin' },
     { id: 'ck2', title: 'Pending PO followup calls', doer: 'PURCHASE', freq: 'Daily', done: {}, active: true, by: 'Admin' },
     { id: 'ck3', title: 'Weekly production plan review', doer: 'PRODUCTION', freq: 'Weekly', wday: 1, done: {}, active: true, by: 'Admin' }
   ];

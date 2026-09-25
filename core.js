@@ -84,7 +84,7 @@ const Store = {
 /* ---- cloud (Supabase): one generic table nx_docs(collection, id, data) ---- */
 let pendingWrites = 0;
 const RETRY_Q = new Map();   // failed writes: key col|id -> {col, id, isDelete}
-function syncBadge() { const s = $('#syncState'); if (s) s.textContent = CLOUD ? (pendingWrites ? 'Saving…' : RETRY_Q.size ? RETRY_Q.size + ' change retry mein…' : 'Synced') : 'Local mode'; }
+function syncBadge() { const s = $('#syncState'); if (s) s.textContent = CLOUD ? (pendingWrites ? 'Saving…' : RETRY_Q.size ? RETRY_Q.size + ' change(s) retrying…' : 'Synced') : 'Local mode'; }
 async function cloudWrite(col, doc, isDelete) {
   pendingWrites++; syncBadge();
   try {
@@ -94,11 +94,11 @@ async function cloudWrite(col, doc, isDelete) {
     RETRY_Q.delete(col + '|' + doc.id);
   } catch (e) {
     RETRY_Q.set(col + '|' + doc.id, { col, id: doc.id, isDelete: !!isDelete });
-    flash('Cloud save failed: ' + esc(e.message || e) + ' — auto-retry hota rahega, tab tak page band mat karo.', 'err');
+    flash('Cloud save failed: ' + esc(e.message || e) + ' — will retry automatically; keep this page open.', 'err');
   }
   pendingWrites--; syncBadge();
 }
-// har 20s mein failed writes dobara try (latest local copy bhejta hai)
+// retry failed writes every 20s (sends the latest local copy)
 setInterval(() => {
   if (!CLOUD || !SB || !RETRY_Q.size) return;
   Array.from(RETRY_Q.values()).forEach(r => {
@@ -156,7 +156,7 @@ function audit(action, ref, detail) {
   Store.put('audit', { id: uid(), at: nowIso(), user: ME ? ME.name : 'system', action, ref: ref || '', detail: detail || '' });
 }
 
-/* ---- dropdown options: Settings se manage hote hain, hardcode nahi ---- */
+/* ---- dropdown options: managed in Settings, not hardcoded ---- */
 const DEF_OPTS = {
   category: ['Shoes', 'Slider', 'Clogs', 'V Shape', 'Eva Slider'],
   channel: ['Online', 'Offline', 'Export'],
@@ -495,7 +495,7 @@ async function doLogin(email, pin) {
   }
   return u;
 }
-// Purane data ko naye format par lana (jaise bina JC no wali order lines)
+// Migrate old data to the current format (e.g. order lines without a JC no)
 function migrateDb() {
   let jcMax = 0;
   const scan = no => { if (no && String(no).startsWith('ZF-')) jcMax = Math.max(jcMax, parseInt(String(no).slice(3), 10) || 0); };

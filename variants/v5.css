@@ -1,0 +1,15 @@
+/* V5 Atlassian - Jira-like blue, square-ish, bold small headers */
+:root { --bg: #f7f8f9; --line: #dcdfe4; --line2: #ebecf0; --text: #172b4d; --muted: #626f86; --faint: #8993a5;
+  --accent: #0052cc; --accent-d: #0747a6; --accent-bg: #e9f2ff; --r: 3px; --r-s: 3px; --th-bg: #f7f8f9; --card-h-bg: #fff; }
+h1 { font-size: 17px; font-weight: 600; }
+th { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; font-weight: 700; color: #626f86; }
+.btn { font-weight: 600; background: #f1f2f4; border-color: transparent; }
+.btn:hover { background: #dcdfe4; border-color: transparent; }
+.btn.primary { background: var(--accent); }
+.btn.ghost { background: transparent; }
+#nav a { font-weight: 500; }
+#nav a.on { border-bottom-width: 3px; }
+#nav { min-height: 46px; box-shadow: 0 1px 1px rgba(9,30,66,.13); border-bottom: 0; }
+.kpis b { color: var(--accent); }
+#flash { border: 0; border-left: 0; background: #e3fcef; color: #216e4e; box-shadow: 0 1px 3px rgba(9,30,66,.12); }
+#flash.err { background: #ffedeb; color: #ae2e24; }

@@ -200,5 +200,19 @@ td input.right, input.right { text-align: right; }
 .szbox input { border: 0; border-radius: 0; height: 26px; }
 .szbox input[data-szl] { width: 46px; background: #f3f6fa; text-align: center; font-weight: 600; border-right: 1px solid var(--line); }
 .szbox input[data-szq] { width: 64px; text-align: right; }
-/* V1 Classic Blue - the original compact look, refined */
-:root { --accent: #1f5fae; --accent-d: #174a89; --accent-bg: #eaf1fa; }
+/* V7 Soft Cards - warm gray, gentle shadows, roomier cards, muted blue */
+:root { --bg: #f8f9fa; --line: #e9ecef; --line2: #f1f3f5; --text: #212529; --muted: #66707a;
+  --accent: #3574d4; --accent-d: #2a5eb0; --accent-bg: #e9f1fc; --r: 10px; --r-s: 7px;
+  --sh: 0 1px 4px rgba(20,30,50,.06); --th-bg: #fcfcfd; --card-h-bg: #fcfcfd; }
+#main { padding: 22px 24px 70px; }
+#nav { min-height: 48px; }
+#nav a { border-bottom: none; border-radius: 7px; margin: 6px 1px; padding: 9px 11px; }
+#nav a.on { background: var(--accent-bg); }
+#nav a:hover { background: var(--line2); }
+.card, .panel, .tbl-wrap, .kpis { border-color: #edf0f3; }
+.kpis { gap: 12px; background: transparent; border: 0; }
+.kpis > a, .kpis > div { background: #fff; border: 1px solid #edf0f3; border-radius: 10px; box-shadow: var(--sh); padding: 11px 16px; }
+.kpis b { font-size: 19px; }
+.btn { border-radius: 7px; }
+#gsearch { border-radius: 99px; padding-left: 14px; }
+#flash { position: fixed; right: 22px; bottom: 22px; margin: 0; border-radius: 10px; box-shadow: var(--sh-2); }

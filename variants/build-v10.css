@@ -200,5 +200,17 @@ td input.right, input.right { text-align: right; }
 .szbox input { border: 0; border-radius: 0; height: 26px; }
 .szbox input[data-szl] { width: 46px; background: #f3f6fa; text-align: center; font-weight: 600; border-right: 1px solid var(--line); }
 .szbox input[data-szq] { width: 64px; text-align: right; }
-/* V1 Classic Blue - the original compact look, refined */
-:root { --accent: #1f5fae; --accent-d: #174a89; --accent-bg: #eaf1fa; }
+/* V10 Fluent - Microsoft-style, Segoe, 2px radius, cool blue */
+:root { --bg: #faf9f8; --line: #e1dfdd; --line2: #edebe9; --text: #242424; --muted: #616161; --faint: #8a8886;
+  --accent: #0f6cbd; --accent-d: #0c559a; --accent-bg: #ebf3fb; --r: 4px; --r-s: 2px;
+  --font: "Segoe UI", system-ui, sans-serif; --th-bg: #faf9f8; --card-h-bg: #fff; }
+th { font-weight: 600; color: #424242; }
+.btn { border-radius: 2px; border-color: #d1cfcd; font-weight: 600; }
+.btn.primary { border-radius: 2px; }
+input, select, textarea { border-radius: 2px; border-color: #d1cfcd; border-bottom-color: #8a8886; }
+input:focus, select:focus, textarea:focus { border-bottom: 2px solid var(--accent); }
+#nav a.on { border-bottom-width: 3px; }
+#nav { min-height: 44px; }
+.seg { border-radius: 2px; }
+.st { font-weight: 600; }
+#flash { border-radius: 2px; border-left-width: 4px; box-shadow: 0 2px 6px rgba(0,0,0,.1); }
