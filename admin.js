@@ -83,12 +83,12 @@ VIEWS.customers = {
         '<div id="cdbMsg" class="small" style="margin-top:6px"></div></div></div>';
     }
     const rows = Store.all('customers').slice().sort((x, y) => String(x.name).localeCompare(String(y.name)));
-    h += '<div class="tbl-wrap"><table><tr><th>Brand Name</th><th>Contact Person</th><th>Merchandiser</th><th>Phone</th><th class="num">Orders</th>' + (edit ? '<th></th>' : '') + '</tr>' +
+    h += '<div class="tbl-wrap"><table><tr><th>Customer ID</th><th>Brand Name</th><th>Contact Person</th><th>Merchandiser</th><th>Phone</th><th class="num">Orders</th>' + (edit ? '<th></th>' : '') + '</tr>' +
       (rows.length ? rows.map(c => {
         const oc = Store.all('orders').filter(o => o.customer_id === c.id).length;
-        return '<tr' + (CDB_UI.edit === c.id ? ' style="background:var(--accent-bg)"' : '') + '><td><b>' + esc(c.name) + '</b></td><td>' + esc(c.contact_person || '') + '</td><td>' + esc(c.merchandiser || '') + '</td><td>' + esc(c.phone || '') + '</td><td class="num">' + (oc || '—') + '</td>' +
+        return '<tr' + (CDB_UI.edit === c.id ? ' style="background:var(--accent-bg)"' : '') + '><td class="mono">' + esc(c.code || '') + '</td><td><b>' + esc(c.name) + '</b></td><td>' + esc(c.contact_person || '') + '</td><td>' + esc(c.merchandiser || '') + '</td><td>' + esc(c.phone || '') + '</td><td class="num">' + (oc || '—') + '</td>' +
           (edit ? '<td class="right nowrap"><button class="btn sm" data-act="cdb-edit" data-id="' + esc(c.id) + '">Edit</button> ' + (oc ? '' : '<button class="btn sm ghost danger" data-act="cdb-del" data-id="' + esc(c.id) + '" data-confirm="Delete?">×</button>') + '</td>' : '') + '</tr>';
-      }).join('') : '<tr><td colspan="6" class="empty">No brands yet — add one above</td></tr>') + '</table></div>';
+      }).join('') : '<tr><td colspan="7" class="empty">No brands yet — add one above</td></tr>') + '</table></div>';
     setMain(h);
     if (edit && !ed) { const n = $('#cdbName'); if (n && !rows.length) n.focus(); }
   }

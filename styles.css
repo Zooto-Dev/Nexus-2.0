@@ -224,3 +224,6 @@ th, td { white-space: nowrap; }
   #nav { flex-wrap: wrap; }
   #nav a { padding: 8px 8px; }
 }
+
+/* table pager */
+.pager { display: flex; gap: 8px; align-items: center; justify-content: flex-end; margin: 6px 0 12px; }

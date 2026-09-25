@@ -512,6 +512,10 @@ function migrateDb() {
     }
     if (changed) Store.put('orders', o);
   });
+  // Backfill customer codes (Customer ID) for records created before codes existed
+  let cMax = 0;
+  Store.all('customers').forEach(c => { const m = /^B(\d+)$/.exec(c.code || ''); if (m) cMax = Math.max(cMax, parseInt(m[1], 10)); });
+  Store.all('customers').forEach(c => { if (!c.code) { cMax += 1; c.code = 'B' + String(cMax).padStart(3, '0'); Store.put('customers', c); } });
 }
 function startApp(u) {
   ME = u; localStorage.setItem('nexus2_me', u.id);
@@ -545,7 +549,46 @@ function setMain(html) {
   const old = $('#main'); const m = old.cloneNode(false); m.innerHTML = html;
   try { old.replaceWith(m); }
   catch (e) { const cur = document.getElementById('main'); if (cur && cur !== m) cur.replaceWith(m); }
-  SEG_HANDLER = null; return m;
+  SEG_HANDLER = null; applyPagination(m); return m;
+}
+
+/* ---- table pagination: applied to every .tbl-wrap table after render ---- */
+const PAGE_SIZE = 20;
+const PAGER_STATE = new Map();   // hash|tableIndex -> current page
+function applyPagination(root) {
+  root.querySelectorAll('.tbl-wrap > table').forEach((tbl, ti) => {
+    const rows = Array.from(tbl.rows).filter(r => !r.querySelector('th'));
+    if (!rows.length || rows.some(r => r.querySelector('.empty'))) return;
+    // group rows that must stay together: rowspan continuations + attached rows (size grid, inline forms)
+    const groups = [];
+    let span = 0;
+    rows.forEach(r => {
+      const attach = span > 0 || r.classList.contains('szrow') || r.classList.contains('inline-form');
+      if (span > 0) span -= 1;
+      const rs = Math.max(1, ...Array.from(r.cells).map(c => c.rowSpan || 1)) - 1;
+      if (rs > 0) span = Math.max(span, rs);
+      if (attach && groups.length) groups[groups.length - 1].push(r); else groups.push([r]);
+    });
+    if (groups.length <= PAGE_SIZE) return;
+    const key = location.hash + '|' + ti;
+    const pages = Math.ceil(groups.length / PAGE_SIZE);
+    let page = Math.min(PAGER_STATE.get(key) || 1, pages);
+    const bar = document.createElement('div'); bar.className = 'pager noprint';
+    const info = document.createElement('span'); info.className = 'muted small';
+    const prev = document.createElement('button'); prev.className = 'btn sm'; prev.type = 'button'; prev.textContent = '‹ Prev';
+    const next = document.createElement('button'); next.className = 'btn sm'; next.type = 'button'; next.textContent = 'Next ›';
+    const show = () => {
+      PAGER_STATE.set(key, page);
+      groups.forEach((g, i) => { const on = i >= (page - 1) * PAGE_SIZE && i < page * PAGE_SIZE; g.forEach(r => { r.style.display = on ? '' : 'none'; }); });
+      info.textContent = ((page - 1) * PAGE_SIZE + 1) + '–' + Math.min(page * PAGE_SIZE, groups.length) + ' of ' + groups.length;
+      prev.disabled = page <= 1; next.disabled = page >= pages;
+    };
+    prev.onclick = () => { page -= 1; show(); };
+    next.onclick = () => { page += 1; show(); };
+    bar.append(info, prev, next);
+    tbl.closest('.tbl-wrap').after(bar);
+    show();
+  });
 }
 function onSeg(fn) { SEG_HANDLER = fn; }
 document.addEventListener('segchange', e => { if (SEG_HANDLER && e.target.closest('#main') && !e.target.hasAttribute('data-own')) SEG_HANDLER(e); });
