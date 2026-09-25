@@ -46,7 +46,7 @@ function flash(msg, type) {
 }
 
 /* ================= store ================= */
-const DB_KEY = 'nexus2_db_v6';
+const DB_KEY = 'nexus2_db_v7';
 const COLS = ['users', 'roles', 'customers', 'items', 'materials', 'processes', 'orders', 'dispatches', 'purchase_orders', 'sourcing', 'grns', 'inwards', 'vendors', 'issues', 'rsjw', 'rtvs', 'boms', 'job_cards', 'requisitions', 'tickets', 'checklist', 'audit'];
 let DB = null;
 const CFG = window.NEXUS_CONFIG || {};
@@ -141,6 +141,19 @@ function nextNo(col, prefix) {
 function audit(action, ref, detail) {
   Store.put('audit', { id: uid(), at: nowIso(), user: ME ? ME.name : 'system', action, ref: ref || '', detail: detail || '' });
 }
+
+/* ---- dropdown options: Settings se manage hote hain, hardcode nahi ---- */
+const DEF_OPTS = {
+  category: ['Shoes', 'Slider', 'Clogs', 'V Shape', 'Eva Slider'],
+  channel: ['Online', 'Offline', 'Export'],
+  gender: ['Gents', 'Ladies', 'Kids', 'Unisex'],
+  packing: ['Assortment', 'Solid']
+};
+function optList(key) {
+  const o = (settings().options || {})[key];
+  return (o && o.length) ? o : (DEF_OPTS[key] || []);
+}
+function selOpts(list, val, ph) { return '<option value="">' + esc(ph || '— select —') + '</option>' + list.map(x => '<option' + (norm(x) === norm(val || '') ? ' selected' : '') + '>' + esc(x) + '</option>').join(''); }
 
 /* ================= RBAC ================= */
 const MODULES = [

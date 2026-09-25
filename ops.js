@@ -105,8 +105,8 @@ VIEWS.tasks = {
 
 /* ---------------- Punch order ---------------- */
 const CORE_FIELDS = ['created_at', 'order_no', 'order_date', 'brand', 'buyer_po', 'po_expiry_date', 'tooling_no', 'channel', 'category', 'priority', 'qty'];
-const GENDERS = ['Gents', 'Ladies', 'Kids', 'Unisex'];
-const PACKS = ['Assortment', 'Solid'];
+function GENDERS_() { return optList('gender'); }
+function PACKS_() { return optList('packing'); }
 let PUNCH = null;
 function blankLine() { return { article: '', style: '', colour: '', gender: '', size: '', qty: '', pack: '', pack_qty: '' }; }
 function newPunch(order) {
@@ -114,7 +114,7 @@ function newPunch(order) {
   if (!PUNCH.lines.length || PUNCH.lines[PUNCH.lines.length - 1].article) PUNCH.lines.push(blankLine());
 }
 function fieldOptions(key) { const p = activeProcess(); const f = p && p.spec.fields.find(x => x.key === key); return f && f.options ? f.options.filter(o => o !== '') : []; }
-function lineSel(f, opts, val) { return '<select data-f="' + f + '"><option value=""></option>' + opts.map(o => '<option' + (o === val ? ' selected' : '') + '>' + esc(o) + '</option>').join('') + '</select>'; }
+function lineSel(f, opts, val) { return '<select data-f="' + f + '"><option value=""></option>' + opts.map(o => '<option' + (norm(o) === norm(val || '') ? ' selected' : '') + '>' + esc(o) + '</option>').join('') + '</select>'; }
 VIEWS.punch = {
   mod: 'orders', edit: true, render(param) {
     if (param) { const o = Store.get('orders', param); if (!o) return go('orders'); if (dispatchedQty(o).total > 0) { flash('Dispatched orders cannot be edited.', 'err'); return go('order', o.id); } if (!PUNCH || PUNCH.id !== o.id) newPunch(o); }
@@ -124,16 +124,16 @@ VIEWS.punch = {
     const extra = proc.spec.fields.filter(f => f.source === 'form' && !CORE_FIELDS.includes(f.key));
     const P = PUNCH;
     let h = '<h1>' + (P.id ? 'Edit ' + esc(P.no) : 'Punch Order') + ' <span class="muted small">Time stamp auto lagta hai · Enter = next box · <span class="kbd">Ctrl</span>+<span class="kbd">S</span> save</span></h1><div class="panel punch">';
-    h += '<datalist id="dlBrand">' + Store.all('customers').map(c => '<option value="' + esc(c.name) + '">' + esc(c.merchandiser || '') + '</option>').join('') + '</datalist>';
+
     h += '<datalist id="dlArt">' + Store.all('items').map(i => '<option value="' + esc(i.code) + '">' + esc(i.name + ' · ' + (i.group || '')) + '</option>').join('') + '</datalist>';
     h += '<div class="hdr">' +
       '<label>Order date<input id="pDate" type="date" value="' + esc(P.order_date) + '"></label>' +
-      '<label>Brand *<input id="pBrand" list="dlBrand" value="' + esc(P.brand || P.customer_name || '') + '" autocomplete="off"></label>' +
+      '<label>Brand *<select id="pBrand">' + selOpts(Store.all('customers').map(c => c.name).sort(), P.brand || P.customer_name) + '</select></label>' +
       '<label>Buyer PO no *<input id="pPo" value="' + esc(P.buyer_po) + '"></label>' +
       '<label>PO expiry date *<input id="pExp" type="date" value="' + esc(P.po_expiry_date) + '"></label>' +
       '<label>Tooling / Mould no<input id="pTool" value="' + esc(P.tooling_no) + '"></label>' +
-      '<label>Category *' + seg('category', fieldOptions('category'), P.category) + '</label>' +
-      '<label>Channel *' + seg('channel', fieldOptions('channel'), P.channel) + '</label>' +
+      '<label>Category *<select id="pCat">' + selOpts(optList('category'), P.category) + '</select></label>' +
+      '<label>Channel *<select id="pChan">' + selOpts(optList('channel'), P.channel) + '</select></label>' +
       '<label>Priority' + seg('priority', [{ v: '', l: 'Normal' }, { v: 'Urgent', l: 'Urgent' }], P.priority === 'Urgent' ? 'Urgent' : '') + '</label>' +
       '<label>Remarks<input id="pRem" value="' + esc(P.remarks) + '"></label>' +
       extra.map(f => '<label>' + esc(f.label) + (f.options && f.options.length <= 4 ? seg('x_' + f.key, f.options, (P.extra || {})[f.key]) :
@@ -144,10 +144,10 @@ VIEWS.punch = {
         '<td><input data-f="article" list="dlArt" value="' + esc(l.article) + '" autocomplete="off"></td>' +
         '<td><input data-f="style" value="' + esc(l.style) + '"></td>' +
         '<td><input data-f="colour" value="' + esc(l.colour) + '"></td>' +
-        '<td>' + lineSel('gender', GENDERS, l.gender) + '</td>' +
+        '<td>' + lineSel('gender', GENDERS_(), l.gender) + '</td>' +
         '<td><input data-f="size" placeholder="6X10" value="' + esc(l.size) + '"></td>' +
         '<td><input data-f="qty" type="number" min="0" step="any" class="right" value="' + esc(l.qty) + '"></td>' +
-        '<td>' + lineSel('pack', PACKS, l.pack) + '</td>' +
+        '<td>' + lineSel('pack', PACKS_(), l.pack) + '</td>' +
         '<td><input data-f="pack_qty" type="number" min="0" step="any" class="right" value="' + esc(l.pack_qty) + '"></td>' +
         '<td><button class="btn ghost sm" data-act="punch-del" data-i="' + i + '" title="Remove">×</button></td></tr>').join('') +
       '<tr><td></td><td colspan="4"><a data-act="punch-add">+ Add row</a></td><td></td><td class="num"><b id="pTq"></b></td><td></td><td></td><td></td></tr></table>';
@@ -177,15 +177,15 @@ function punchLineChange(e) {
   e.target.value = it.code;
   const st = $('[data-f="style"]', tr); if (!st.value) st.value = it.name || '';
   const g = $('[data-f="gender"]', tr); if (!g.value && it.gender) g.value = it.gender;
-  const cat = $('[data-seg="category"]');
-  if (cat && !segVal(cat) && it.group) $$('button', cat).forEach(b => b.classList.toggle('on', b.dataset.v === it.group));
+  const cat = $('#pCat');
+  if (cat && !cat.value && it.group && optList('category').some(x => norm(x) === norm(it.group))) cat.value = it.group;
 }
 function punchTotals() { let q = 0; $$('tr[data-i]').forEach(tr => { q += num($('input[data-f="qty"]', tr).value); }); if ($('#pTq')) $('#pTq').textContent = qtyFmt(q); }
 function punchCollect() {
   const P = PUNCH;
-  P.order_date = $('#pDate').value; P.brand = $('#pBrand').value.trim(); P.buyer_po = $('#pPo').value.trim();
+  P.order_date = $('#pDate').value; P.buyer_po = $('#pPo').value.trim();
   P.po_expiry_date = $('#pExp').value; P.tooling_no = $('#pTool').value.trim(); P.remarks = $('#pRem').value.trim();
-  P.category = segVal($('[data-seg="category"]')); P.channel = segVal($('[data-seg="channel"]'));
+  P.brand = $('#pBrand').value; P.category = $('#pCat').value; P.channel = $('#pChan').value;
   const pr = segVal($('[data-seg="priority"]')); if (!P.id || P.priority === '' || P.priority === 'Urgent') P.priority = pr;
   P.extra = P.extra || {};
   $$('[data-extra]').forEach(i => P.extra[i.dataset.extra] = i.value.trim());
@@ -210,22 +210,26 @@ ACTIONS['punch-save'] = () => {
   if (!P.channel) errs.push('channel');
   if (!lines.length) errs.push('at least one article row');
   lines.forEach((l, i) => { if (!l.article) errs.push('row ' + (i + 1) + ': article'); if (num(l.qty) <= 0) errs.push('row ' + (i + 1) + ': qty'); });
-  const key = l => norm(l.article + '|' + l.colour + '|' + l.size);
-  const dup = lines.map(key).filter((c, i, a) => a.indexOf(c) !== i);
-  if (dup.length) errs.push('duplicate article/colour/size row');
+  // Same article+colour+size ki rows allowed hain — qty jod di jaati hai (size-wise entry normal hai)
+  const key = l => norm(l.article + '|' + l.colour + '|' + l.size + '|' + l.pack);
+  const merged = [];
+  let mergedNote = false;
+  lines.forEach(l => {
+    const ex = merged.find(x => key(x) === key(l));
+    if (ex) { ex.qty = num(ex.qty) + num(l.qty); ex.pack_qty = num(ex.pack_qty) + num(l.pack_qty); mergedNote = true; }
+    else merged.push(Object.assign({}, l));
+  });
+  lines.length = 0; merged.forEach(l => lines.push(l));
   if (errs.length) { $('#pMsg').innerHTML = '<span class="late-txt">Missing / wrong: ' + esc(errs.join(', ')) + '</span>'; return; }
-  let cu = Store.all('customers').find(c => norm(c.name) === norm(P.brand));
-  if (!cu) {
-    const code = 'B' + String(Store.all('customers').length + 1).padStart(3, '0');
-    cu = Store.put('customers', { id: uid(), code, name: P.brand, merchandiser: '', phone: '' });
-    audit('customer.create', code, cu.name + ' (from order punch)');
-  }
+  const cu = Store.all('customers').find(c => norm(c.name) === norm(P.brand));
+  if (!cu) { $('#pMsg').innerHTML = '<span class="late-txt">Brand list mein nahi hai — Merchant → Brands mein pehle add karo.</span>'; return; }
   lines.forEach(l => { if (l.article && !Store.all('items').some(x => norm(x.code) === norm(l.article))) Store.put('items', { id: uid(), code: l.article, name: l.style, group: P.category, gender: l.gender }); });
   const o = P.id ? Store.get('orders', P.id) : { id: uid(), no: nextNo('orders', 'ORD'), process_id: activeProcess().id, actuals: {}, done_by: {}, created_at: nowIso(), created_by: ME.name };
   Object.assign(o, { order_date: P.order_date, customer_id: cu.id, customer_name: cu.name, brand: cu.name, buyer_po: P.buyer_po, po_expiry_date: P.po_expiry_date, tooling_no: P.tooling_no, channel: P.channel, category: P.category, priority: P.priority, remarks: P.remarks, extra: P.extra, lines: lines.map(l => ({ article: l.article, style: l.style, colour: l.colour, gender: l.gender, size: l.size, qty: num(l.qty), pack: l.pack, pack_qty: num(l.pack_qty) })) });
   Store.put('orders', o);
   audit(P.id ? 'order.edit' : 'order.create', o.no, cu.name + ' · PO ' + P.buyer_po + ' · ' + qtyFmt(orderTotals(o).qty) + ' qty');
   if (P.id) { PUNCH = null; flash('Saved ' + esc(o.no) + '.'); go('order', o.id); return; }
+  if (mergedNote) flash('Same article/colour/size ki rows qty jod kar ek kar di gayi.');
   newPunch(); VIEWS.punch.render();
   flash('Saved <b>' + esc(o.no) + '</b> — FMS started. <a href="#/order/' + esc(o.id) + '">Open</a> · punch the next order below.');
 };

@@ -155,6 +155,9 @@ VIEWS.settings = {
       [['open', 'Office opens'], ['close', 'Office closes'], ['lunchStart', 'Lunch from'], ['lunchEnd', 'Lunch to']].map(([k, l]) => '<label>' + l + '<input type="time" data-cal="' + k + '" value="' + esc(c[k]) + '"' + dis + '></label>').join('') + '</div>' +
       '<div style="margin-top:10px"><span class="muted small">Weekly off</span><div class="row" style="margin-top:4px">' + days.map((d, i) => '<label style="flex-direction:row;align-items:center;gap:4px;min-width:0"><input type="checkbox" data-off="' + i + '"' + ((c.weeklyOff || []).includes(i) ? ' checked' : '') + dis + '>' + d + '</label>').join('') + '</div></div>' +
       '<div style="margin-top:10px"><span class="muted small">Half-day TAT (1.5 days)</span><div style="margin-top:4px">' + seg('halfDays', [{ v: 'exact', l: 'Exact — 1.5 days = 1.5 × office hours' }, { v: 'truncate', l: 'Sheet style — 1.5 → 1 day' }], c.halfDays, edit ? '' : 'data-locked') + '</div></div></div>';
+    const OPT_KEYS = [['category', 'Category'], ['channel', 'Channel'], ['gender', 'Gender'], ['packing', 'Packing']];
+    h += '<div class="panel" style="margin-top:12px"><h2 style="margin-top:0">Dropdown Options</h2><div class="muted small" style="margin-bottom:8px">Order punch, Job Card, Articles — sab jagah ke dropdowns yahin se chalte hain. Comma se alag karke likho. Brand list Merchant → Brands se aati hai.</div>' +
+      OPT_KEYS.map(([k, l]) => '<label style="margin-bottom:8px">' + l + '<input data-opt="' + k + '" value="' + esc(optList(k).join(', ')) + '"' + (edit ? '' : ' disabled') + '></label>').join('') + '</div>';
     h += '<div class="panel" style="margin-top:12px"><h2 style="margin-top:0">Data</h2><div class="toolbar"><button class="btn" data-act="backup">Download full backup (JSON)</button>' +
       (edit ? '<label class="btn" style="flex-direction:row;color:var(--text)">Restore backup<input type="file" id="restoreFile" accept=".json,application/json" class="hidden"></label>' : '') +
       (edit && !CLOUD ? '<button class="btn danger" data-act="reset-demo" data-confirm="Erase all & reload demo?">Reset to demo data</button>' : '') + '</div>' +
@@ -169,6 +172,12 @@ VIEWS.settings = {
       if (t.dataset.s) { st[t.dataset.s] = t.value.trim(); }
       else if (t.dataset.cal) { if (!/^\d\d:\d\d$/.test(t.value)) return; st.calendar[t.dataset.cal] = t.value; }
       else if (t.dataset.off != null) { st.calendar.weeklyOff = $$('[data-off]').filter(x => x.checked).map(x => +x.dataset.off); if (st.calendar.weeklyOff.length > 5) { flash('At least 2 working days needed.', 'err'); return VIEWS.settings.render(); } }
+      else if (t.dataset.opt) {
+        const list = t.value.split(',').map(x => x.trim()).filter(Boolean);
+        if (!list.length) { flash('Kam se kam ek option chahiye.', 'err'); return VIEWS.settings.render(); }
+        st.options = st.options || {}; st.options[t.dataset.opt] = list;
+        Store.setSettings(st); audit('settings.options', t.dataset.opt, list.join(', ')); flash('Options saved — sab dropdowns update.'); return;
+      }
       else if (t.id === 'restoreFile') return restoreBackup(t.files[0]);
       else return;
       const cc = st.calendar; if (!(cc.open < cc.lunchStart && cc.lunchStart <= cc.lunchEnd && cc.lunchEnd < cc.close)) { flash('Timings must be: open < lunch from ≤ lunch to < close.', 'err'); return; }

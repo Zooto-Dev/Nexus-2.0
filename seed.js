@@ -38,6 +38,7 @@ function seedData(cloud) {
   const base = {
     settings: {
       id: 'main', company: 'My Company', gstin: '', address: '',
+      options: { category: ['Shoes', 'Slider', 'Clogs', 'V Shape', 'Eva Slider'], channel: ['Online', 'Offline', 'Export'], gender: ['Gents', 'Ladies', 'Kids', 'Unisex'], packing: ['Assortment', 'Solid'] },
       calendar: { open: '09:30', close: '18:30', lunchStart: '13:30', lunchEnd: '14:00', weeklyOff: [0], halfDays: 'exact' },
       holidays: [{ date: now.getFullYear() + '-10-02', name: 'Gandhi Jayanti' }]
     },
