@@ -78,6 +78,7 @@ create policy "nx delete" on public.nx_docs for delete to authenticated
 grant usage on schema public to anon, authenticated;
 grant select, insert, update, delete on public.nx_docs to authenticated;
 grant select on public.nx_profiles to authenticated;
+grant execute on function public.nx_is_admin() to authenticated;  -- RLS policies ke liye zaroori
 -- anon role ko koi table grant NAHI — bina login kuch nahi khulta.
 
 -- Live updates for every open screen.

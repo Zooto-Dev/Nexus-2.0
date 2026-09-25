@@ -83,16 +83,30 @@ const Store = {
 
 /* ---- cloud (Supabase): one generic table nx_docs(collection, id, data) ---- */
 let pendingWrites = 0;
-function syncBadge() { const s = $('#syncState'); if (s) s.textContent = CLOUD ? (pendingWrites ? 'Saving…' : 'Synced') : 'Local mode'; }
+const RETRY_Q = new Map();   // failed writes: key col|id -> {col, id, isDelete}
+function syncBadge() { const s = $('#syncState'); if (s) s.textContent = CLOUD ? (pendingWrites ? 'Saving…' : RETRY_Q.size ? RETRY_Q.size + ' change retry mein…' : 'Synced') : 'Local mode'; }
 async function cloudWrite(col, doc, isDelete) {
   pendingWrites++; syncBadge();
   try {
     const q = isDelete ? SB.from('nx_docs').delete().eq('collection', col).eq('id', doc.id)
       : SB.from('nx_docs').upsert({ collection: col, id: doc.id, data: doc, updated_at: nowIso() });
     const { error } = await q; if (error) throw error;
-  } catch (e) { flash('Cloud save failed: ' + esc(e.message || e) + ' — change kept in this browser only.', 'err'); }
+    RETRY_Q.delete(col + '|' + doc.id);
+  } catch (e) {
+    RETRY_Q.set(col + '|' + doc.id, { col, id: doc.id, isDelete: !!isDelete });
+    flash('Cloud save failed: ' + esc(e.message || e) + ' — auto-retry hota rahega, tab tak page band mat karo.', 'err');
+  }
   pendingWrites--; syncBadge();
 }
+// har 20s mein failed writes dobara try (latest local copy bhejta hai)
+setInterval(() => {
+  if (!CLOUD || !SB || !RETRY_Q.size) return;
+  Array.from(RETRY_Q.values()).forEach(r => {
+    const doc = r.isDelete ? { id: r.id } : (r.col === 'settings' ? DB.settings : Store.get(r.col, r.id));
+    if (doc) cloudWrite(r.col, doc, r.isDelete); else RETRY_Q.delete(r.col + '|' + r.id);
+  });
+}, 20000);
+window.addEventListener('beforeunload', ev => { if (CLOUD && (pendingWrites > 0 || RETRY_Q.size)) { ev.preventDefault(); ev.returnValue = ''; } });
 async function cloudLoad() {
   const out = { settings: null }; COLS.forEach(c => out[c] = []);
   let from = 0; const page = 1000;
