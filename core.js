@@ -509,7 +509,9 @@ async function boot() {
 /* fresh #main per render, so listeners never pile up across screens */
 let SEG_HANDLER = null;
 function setMain(html) {
-  const old = $('#main'); const m = old.cloneNode(false); m.innerHTML = html; old.replaceWith(m);
+  const old = $('#main'); const m = old.cloneNode(false); m.innerHTML = html;
+  try { old.replaceWith(m); }
+  catch (e) { const cur = document.getElementById('main'); if (cur && cur !== m) cur.replaceWith(m); }
   SEG_HANDLER = null; return m;
 }
 function onSeg(fn) { SEG_HANDLER = fn; }

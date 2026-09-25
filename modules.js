@@ -474,9 +474,10 @@ function jcfFillFromOrder() {
   const li = num($('#jfLine').value); const l = jcOrderLine(o, li);
   $('#jfDetails').innerHTML = [['Date', fmtD(o.order_date)], ['Brand', o.customer_name], ['Style', l.style], ['Colour', l.colour], ['Gender', l.gender], ['Category', o.category], ['Tooling', o.tooling_no], ['Article', l.article], ['Size Run', l.size], ['Order Qty', qtyFmt(l.qty)]]
     .map(([k, v]) => '<tr><td class="muted" style="width:90px">' + k + '</td><td>' + esc(v || '') + '</td></tr>').join('');
-  // size rows: order line size run as one row prefilled
+  // size rows: order line ke size-wise breakup se prefill (fallback: single row)
   $$('#jfSizes tr[data-szrow]').forEach(tr => tr.remove());
-  $('#jfSzTotal').insertAdjacentHTML('beforebegin', jcfSizeRow(l.size || '', l.qty || ''));
+  if (l.sizes && l.sizes.length) l.sizes.forEach(sz => $('#jfSzTotal').insertAdjacentHTML('beforebegin', jcfSizeRow(sz.size, sz.qty)));
+  else $('#jfSzTotal').insertAdjacentHTML('beforebegin', jcfSizeRow(l.size || '', l.qty || ''));
   // BOM auto-load
   const b = jcBomFor(l.article, l.colour);
   $$('#jfBom tr[data-bomrow]').forEach(tr => tr.remove());

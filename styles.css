@@ -193,3 +193,11 @@ td input.right, input.right { text-align: right; }
   body.print-po tr:not(.inline-form):not(:first-child) { display: none; }
   body.print-po .inline-form { display: table-row !important; }
 }
+
+/* size-wise qty grid (punch order) */
+.szrow > td { border-left: 3px solid var(--accent-bg); background: #fafcff; padding: 6px 10px; }
+.szgrid { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.szbox { display: inline-flex; border: 1px solid var(--line); border-radius: var(--r-s); overflow: hidden; }
+.szbox input { border: 0; border-radius: 0; height: 30px; }
+.szbox input[data-szl] { width: 52px; background: #f3f6fa; text-align: center; font-weight: 600; border-right: 1px solid var(--line); }
+.szbox input[data-szq] { width: 72px; text-align: right; }
