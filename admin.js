@@ -66,15 +66,54 @@ ACTIONS['mt-paste'] = el => {
 ACTIONS['mt-csv'] = el => { const cfg = MT_CFG[el.dataset.col]; downloadCsv(cfg.col + '-' + todayYmd() + '.csv', [cfg.cols.filter(c => !c.secret).map(c => c.l)].concat(Store.all(cfg.col).map(d => cfg.cols.filter(c => !c.secret).map(c => c.fmt ? c.fmt(d[c.k]) : d[c.k])))); };
 function uniq(col, key, label) { return (d, old) => { if (!String(d[key] || '').trim()) return label + ' is required.'; if (Store.all(col).some(x => x.id !== d.id && norm(x[key]) === norm(d[key]))) return label + ' "' + d[key] + '" already exists.'; return ''; }; }
 
+const CDB_UI = { edit: null };
 VIEWS.customers = {
   mod: 'masters', render() {
-    masterView({
-      col: 'customers', mod: 'masters', title: 'Brands', view: VIEWS.customers, sort: 'name', paste: true,
-      cols: [{ k: 'code', l: 'Code', w: 80, upper: true, ph: 'B006' }, { k: 'name', l: 'Brand', ph: 'Brand name' }, { k: 'merchandiser', l: 'Merchandiser', w: 140, upper: true }, { k: 'phone', l: 'Phone', w: 120 }],
-      validate: (d, old) => uniq('customers', 'code', 'Code')(d) || uniq('customers', 'name', 'Brand')(d),
-      inUse: d => Store.all('orders').some(o => o.customer_id === d.id) ? 'Brand has orders — cannot delete.' : ''
-    });
+    const edit = can('masters', 'edit');
+    const ed = CDB_UI.edit ? Store.get('customers', CDB_UI.edit) : null;
+    let h = subTitle('CDB', 'Customer / Brand Database');
+    if (edit) {
+      h += '<div class="card"><div class="card-h"><b>' + (ed ? 'Edit Brand — ' + esc(ed.name) : 'Add Brand') + '</b>' + (ed ? '<span class="grow"></span><a data-act="cdb-cancel">Cancel edit</a>' : '') + '</div><div class="card-b">' +
+        '<div class="row">' +
+        '<label>Brand Name *<input id="cdbName" value="' + esc(ed ? ed.name : '') + '"></label>' +
+        '<label>Contact Person<input id="cdbPerson" value="' + esc(ed ? ed.contact_person || '' : '') + '"></label>' +
+        '<label>Merchandiser<input id="cdbMerch" list="dlDoersC" value="' + esc(ed ? ed.merchandiser || '' : '') + '"><datalist id="dlDoersC">' + Array.from(new Set(Store.all('users').map(u => u.doer).filter(Boolean))).map(d => '<option>' + esc(d) + '</option>').join('') + '</datalist></label>' +
+        '<label>Phone<input id="cdbPhone" value="' + esc(ed ? ed.phone || '' : '') + '"></label>' +
+        '<button class="btn primary" data-act="cdb-save">' + (ed ? 'Update' : 'Add Brand') + '</button></div>' +
+        '<div id="cdbMsg" class="small" style="margin-top:6px"></div></div></div>';
+    }
+    const rows = Store.all('customers').slice().sort((x, y) => String(x.name).localeCompare(String(y.name)));
+    h += '<div class="tbl-wrap"><table><tr><th>Brand Name</th><th>Contact Person</th><th>Merchandiser</th><th>Phone</th><th class="num">Orders</th>' + (edit ? '<th></th>' : '') + '</tr>' +
+      (rows.length ? rows.map(c => {
+        const oc = Store.all('orders').filter(o => o.customer_id === c.id).length;
+        return '<tr' + (CDB_UI.edit === c.id ? ' style="background:var(--accent-bg)"' : '') + '><td><b>' + esc(c.name) + '</b></td><td>' + esc(c.contact_person || '') + '</td><td>' + esc(c.merchandiser || '') + '</td><td>' + esc(c.phone || '') + '</td><td class="num">' + (oc || '—') + '</td>' +
+          (edit ? '<td class="right nowrap"><button class="btn sm" data-act="cdb-edit" data-id="' + esc(c.id) + '">Edit</button> ' + (oc ? '' : '<button class="btn sm ghost danger" data-act="cdb-del" data-id="' + esc(c.id) + '" data-confirm="Delete?">×</button>') + '</td>' : '') + '</tr>';
+      }).join('') : '<tr><td colspan="6" class="empty">Koi brand nahi — upar form se add karo</td></tr>') + '</table></div>';
+    setMain(h);
+    if (edit && !ed) { const n = $('#cdbName'); if (n && !rows.length) n.focus(); }
   }
+};
+ACTIONS['cdb-edit'] = el => { CDB_UI.edit = el.dataset.id; VIEWS.customers.render(); $('#cdbName').focus(); };
+ACTIONS['cdb-cancel'] = () => { CDB_UI.edit = null; VIEWS.customers.render(); };
+ACTIONS['cdb-save'] = () => {
+  if (!requirePerm('masters', 'edit')) return;
+  const name = $('#cdbName').value.trim();
+  if (!name) { $('#cdbMsg').innerHTML = '<span class="late-txt">Brand Name zaroori hai.</span>'; return; }
+  if (Store.all('customers').some(c => c.id !== CDB_UI.edit && norm(c.name) === norm(name))) { $('#cdbMsg').innerHTML = '<span class="late-txt">Ye brand pehle se hai.</span>'; return; }
+  const d = CDB_UI.edit ? Store.get('customers', CDB_UI.edit) : { id: uid(), code: 'B' + String(Store.all('customers').length + 1).padStart(3, '0') };
+  const oldName = d.name;
+  d.name = name; d.contact_person = $('#cdbPerson').value.trim(); d.merchandiser = $('#cdbMerch').value.trim().toUpperCase(); d.phone = $('#cdbPhone').value.trim();
+  Store.put('customers', d);
+  if (CDB_UI.edit && oldName && norm(oldName) !== norm(name)) {
+    Store.all('orders').filter(o => o.customer_id === d.id).forEach(o => { o.customer_name = name; o.brand = name; Store.put('orders', o); });
+  }
+  audit(CDB_UI.edit ? 'cdb.edit' : 'cdb.create', name, (d.contact_person || '') + (d.merchandiser ? ' · ' + d.merchandiser : ''));
+  flash((CDB_UI.edit ? 'Updated' : 'Added') + ': <b>' + esc(name) + '</b>'); CDB_UI.edit = null; VIEWS.customers.render();
+};
+ACTIONS['cdb-del'] = el => {
+  const c = Store.get('customers', el.dataset.id);
+  if (Store.all('orders').some(o => o.customer_id === c.id)) { flash('Brand ke orders hain — delete nahi hoga.', 'err'); return; }
+  Store.del('customers', c.id); audit('cdb.delete', c.name, ''); VIEWS.customers.render();
 };
 VIEWS.items = {
   mod: 'masters', render() {

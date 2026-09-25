@@ -74,11 +74,11 @@ function seedData(cloud) {
   if (cloud) return base;
 
   base.customers = [
-    { id: 'c1', code: 'B001', name: 'Max', merchandiser: 'POOJA', phone: '9820000001' },
-    { id: 'c2', code: 'B002', name: 'Kappa', merchandiser: 'POOJA', phone: '9810000002' },
-    { id: 'c3', code: 'B003', name: 'Pepe Jeans', merchandiser: 'TANUJ', phone: '9829000003' },
-    { id: 'c4', code: 'B004', name: 'Campus', merchandiser: 'RASHMI', phone: '9839000004' },
-    { id: 'c5', code: 'B005', name: 'Gas', merchandiser: 'RASHMI', phone: '9890000005' }
+    { id: 'c1', code: 'B001', name: 'Max', contact_person: 'Rohit Mehra', merchandiser: 'POOJA', phone: '9820000001' },
+    { id: 'c2', code: 'B002', name: 'Kappa', contact_person: 'Sanya Arora', merchandiser: 'POOJA', phone: '9810000002' },
+    { id: 'c3', code: 'B003', name: 'Pepe Jeans', contact_person: 'Vipul Jain', merchandiser: 'TANUJ', phone: '9829000003' },
+    { id: 'c4', code: 'B004', name: 'Campus', contact_person: 'Neeraj Gupta', merchandiser: 'RASHMI', phone: '9839000004' },
+    { id: 'c5', code: 'B005', name: 'Gas', contact_person: 'Anita Rao', merchandiser: 'RASHMI', phone: '9890000005' }
   ];
   base.items = [
     ['ZT-101', 'Ranger Runner', 'Shoes', 'Gents'], ['ZT-102', 'City Walk', 'Shoes', 'Ladies'],

@@ -336,7 +336,7 @@ const NAV = [
     { v: 'jobcards', l: 'Job Card', mod: 'merchant' },
     { v: 'swatch', l: 'Swatch Approval', mod: 'merchant' },
     { v: 'jccorrection', l: 'Job Card Correction', mod: 'merchant' },
-    { v: 'customers', l: 'Brands', mod: 'masters' },
+    { v: 'customers', l: 'CDB', mod: 'masters' },
     { v: 'items', l: 'Articles', mod: 'masters' }] },
   { menu: 'Store', items: [
     { v: 'inward', l: 'Inwarding', mod: 'store' },
