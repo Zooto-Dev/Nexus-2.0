@@ -216,8 +216,11 @@ th { color: #47605e; font-weight: 650; }
 
 /* final: nothing wraps — tables scroll horizontally instead */
 th, td { white-space: nowrap; }
-#nav { flex-wrap: nowrap; overflow-x: auto; }
-#nav::-webkit-scrollbar { display: none; }
+/* no overflow clipping on #nav: it would hide the dropdown menus */
+#nav { flex-wrap: nowrap; }
 .kpis b, .kpis span { white-space: nowrap; }
 .card-h { white-space: nowrap; }
-@media (max-width: 900px) { #nav { flex-wrap: nowrap; } }
+@media (max-width: 1100px) {
+  #nav { flex-wrap: wrap; }
+  #nav a { padding: 8px 8px; }
+}
