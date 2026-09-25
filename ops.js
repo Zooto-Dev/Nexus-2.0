@@ -167,12 +167,17 @@ VIEWS.punch = {
           '<td><input data-f="size_run" placeholder="6-10" value="' + esc(l.size_run || l.size || '') + '" title="Enter size run (6-10 or 6X10)"></td>' +
           '<td class="num"><b data-lq>' + (lineQty(l) ? qtyFmt(lineQty(l)) : '') + '</b></td>' +
           '<td>' + lineSel('pack', PACKS_(), l.pack) + '</td>' +
-          '<td class="small muted" data-lsum>' + esc(sizeSummary(l)) + '</td>' +
+          '<td class="small" data-lsum>' + (l.sizes && l.sizes.length && !l._szo
+            ? '<a data-act="punch-sz-toggle" data-i="' + i + '" title="Edit size-wise qty">' + esc(sizeSummary(l) || 'sizes') + ' ✎</a>'
+            : '<span class="muted">' + esc(sizeSummary(l)) + '</span>') + '</td>' +
           '<td><button class="btn ghost sm" data-act="punch-del" data-i="' + i + '" title="Remove">×</button></td></tr>';
+        // size-wise entry row: open while entering; collapses once done so the next article is safe to type
+        if (l.sizes && l.sizes.length && !l._szo) return row;
         row += '<tr class="szrow" data-sz-for="' + i + '"><td></td><td colspan="9">' +
           ((l.sizes && l.sizes.length) ? '<div class="szgrid"><span class="muted small" style="align-self:center">Asst/Solid Qty \u2014 size-wise:</span>' +
             l.sizes.map((sz, k) => '<span class="szbox"><input data-szl data-i="' + i + '" data-k="' + k + '" value="' + esc(sz.size) + '" title="Size"><input type="number" min="0" data-szq data-i="' + i + '" data-k="' + k + '" value="' + (sz.qty || '') + '" placeholder="qty" title="Qty for size ' + esc(sz.size) + '"></span>').join('') +
-            '<a data-act="punch-size-add" data-i="' + i + '" class="small">+ size</a></div>'
+            '<a data-act="punch-size-add" data-i="' + i + '" class="small">+ size</a>' +
+            '<button class="btn sm" data-act="punch-sz-done" data-i="' + i + '">Done ✓</button></div>'
             : '<span class="muted small">Enter a Size Run (e.g. <b>6-10</b>) for size-wise qty boxes</span>') + '</td></tr>';
         return row;
       }).join('') +
@@ -191,9 +196,10 @@ VIEWS.punch = {
         punchCollect();
         const i = +e.target.closest('tr').dataset.i; const l = PUNCH.lines[i];
         const run = parseSizeRun(e.target.value);
-        if (l.sizes && l.sizes.length === run.length && run.every((szn, k) => norm(l.sizes[k].size) === norm(szn))) return; // same run fired again — skip re-render
+        if (l._szo && l.sizes && l.sizes.length === run.length && run.every((szn, k) => norm(l.sizes[k].size) === norm(szn))) return; // same run fired again — skip re-render
         l.size_run = e.target.value.trim().toUpperCase();
         l.sizes = run.map(szn => { const ex = (l.sizes || []).find(x => norm(x.size) === norm(szn)); return { size: szn, qty: ex ? ex.qty : '' }; });
+        l._szo = true;
         VIEWS.punch.render(PUNCH.id);
         const first = $('tr[data-sz-for="' + i + '"] [data-szq]'); if (first) first.focus();
       }
@@ -204,8 +210,11 @@ VIEWS.punch = {
         e.preventDefault();
         const boxes = $$('[data-szq][data-i="' + e.target.dataset.i + '"]'); const at = boxes.indexOf(e.target);
         if (at < boxes.length - 1) return boxes[at + 1].focus();
+        // last size box done: close this line's size grid and move to the next article
         const i2 = +e.target.dataset.i;
-        if (i2 === PUNCH.lines.length - 1) { punchCollect(); PUNCH.lines.push(blankLine()); VIEWS.punch.render(PUNCH.id); }
+        punchCollect(); PUNCH.lines[i2]._szo = false;
+        if (i2 === PUNCH.lines.length - 1) PUNCH.lines.push(blankLine());
+        VIEWS.punch.render(PUNCH.id);
         const nx = $('tr[data-i="' + (i2 + 1) + '"] [data-f="article"]'); if (nx) nx.focus();
         return;
       }
@@ -251,7 +260,9 @@ function punchCollect() {
     l.qty = lineQty(l);
   });
 }
-ACTIONS['punch-add'] = () => { punchCollect(); PUNCH.lines.push(blankLine()); VIEWS.punch.render(PUNCH.id); $('tr[data-i="' + (PUNCH.lines.length - 1) + '"] input').focus(); };
+ACTIONS['punch-add'] = () => { punchCollect(); PUNCH.lines.forEach(l => { l._szo = false; }); PUNCH.lines.push(blankLine()); VIEWS.punch.render(PUNCH.id); $('tr[data-i="' + (PUNCH.lines.length - 1) + '"] input').focus(); };
+ACTIONS['punch-sz-done'] = el => { punchCollect(); PUNCH.lines[+el.dataset.i]._szo = false; VIEWS.punch.render(PUNCH.id); };
+ACTIONS['punch-sz-toggle'] = el => { punchCollect(); const l = PUNCH.lines[+el.dataset.i]; l._szo = !l._szo; VIEWS.punch.render(PUNCH.id); const f = $('tr[data-sz-for="' + el.dataset.i + '"] [data-szq]'); if (f) f.focus(); };
 ACTIONS['punch-size-add'] = el => { punchCollect(); const l = PUNCH.lines[+el.dataset.i]; l.sizes = l.sizes || []; l.sizes.push({ size: '', qty: '' }); VIEWS.punch.render(PUNCH.id); const boxes = $$('[data-szl][data-i="' + el.dataset.i + '"]'); if (boxes.length) boxes[boxes.length - 1].focus(); };
 ACTIONS['punch-del'] = el => { punchCollect(); PUNCH.lines.splice(+el.dataset.i, 1); if (!PUNCH.lines.length) PUNCH.lines.push(blankLine()); VIEWS.punch.render(PUNCH.id); };
 ACTIONS['punch-clear'] = () => { newPunch(); VIEWS.punch.render(); };
@@ -317,10 +328,11 @@ VIEWS.orders = {
     let h = '<h1>Punched Orders</h1><div class="toolbar">' + seg('f', [{ v: 'open', l: 'Open' }, { v: 'late', l: 'Late' }, { v: 'hold', l: 'On hold' }, { v: 'done', l: 'Dispatched' }, { v: 'cancel', l: 'Cancelled' }, { v: 'all', l: 'All' }], ORD_UI.f) +
       '<input id="ordQ" placeholder="Order no / brand / PO / article / JC\u2026" value="' + esc(ORD_UI.q) + '"><span class="muted small">' + rows.length + ' order(s)</span><span class="grow"></span>' +
       '<button class="btn" data-act="orders-csv">Export CSV</button>' + (can('orders', 'edit') ? '<a class="btn primary" href="#/punch">+ Punch order</a>' : '') + '</div>';
-    h += '<div class="tbl-wrap"><table><tr><th>Time Stamp</th><th>Order Date</th><th>Tooling/Mould No</th><th>Buyer PO NO</th><th>Po Expiry Date</th><th>Brand</th><th>Article</th><th>Style</th><th>Colour</th><th>Gender</th><th class="num">Qty</th><th>Channel</th><th>Size</th><th>Category</th><th>Packing Assortment/Solid</th><th>Assortment Qty /Solid Qty</th><th>Job Card No.</th></tr>' +
+    h += '<div class="tbl-wrap"><table><tr><th>Time Stamp</th><th>Job Card No.</th><th>Order Date</th><th>Tooling/Mould No</th><th>Buyer PO NO</th><th>Po Expiry Date</th><th>Brand</th><th>Article</th><th>Style</th><th>Colour</th><th>Gender</th><th class="num">Qty</th><th>Channel</th><th>Size</th><th>Category</th><th>Packing Assortment/Solid</th><th>Assortment Qty /Solid Qty</th></tr>' +
       (rows.length ? rows.flatMap(x => (x.o.lines || []).map((l, li) => '<tr class="click" data-act="go" data-v="order" data-p="' + esc(x.o.id) + '">' +
-        (li === 0 ? '<td class="nowrap" rowspan="' + x.o.lines.length + '">' + fmtDT(x.o.created_at) + '<div class="small"><b>' + esc(x.o.no) + '</b>' + (x.o.priority === 'Urgent' ? ' <span class="late-txt">URGENT</span>' : '') + '</div></td>' +
-          '<td class="nowrap" rowspan="' + x.o.lines.length + '">' + fmtD(x.o.order_date) + '</td>' +
+        (li === 0 ? '<td class="nowrap" rowspan="' + x.o.lines.length + '">' + fmtDT(x.o.created_at) + (x.o.priority === 'Urgent' ? ' <span class="late-txt small">URGENT</span>' : '') + '</td>' : '') +
+        '<td class="nowrap"><b>' + esc(l.jc_no || '') + '</b></td>' +
+        (li === 0 ? '<td class="nowrap" rowspan="' + x.o.lines.length + '">' + fmtD(x.o.order_date) + '</td>' +
           '<td rowspan="' + x.o.lines.length + '">' + esc(x.o.tooling_no || '') + '</td>' +
           '<td rowspan="' + x.o.lines.length + '">' + esc(x.o.buyer_po || '') + '</td>' +
           '<td class="nowrap" rowspan="' + x.o.lines.length + '">' + fmtD(x.o.po_expiry_date) + '</td>' +
@@ -329,7 +341,7 @@ VIEWS.orders = {
         (li === 0 ? '<td rowspan="' + x.o.lines.length + '">' + esc(x.o.channel || '') + '</td>' : '') +
         '<td>' + esc(l.size_run || l.size || '') + '</td>' +
         (li === 0 ? '<td rowspan="' + x.o.lines.length + '">' + esc(x.o.category || '') + '</td>' : '') +
-        '<td>' + esc(l.pack || '') + '</td><td class="small">' + esc(sizeSummary(l)) + '</td><td class="nowrap"><b>' + esc(l.jc_no || '') + '</b></td></tr>')).join('') :
+        '<td>' + esc(l.pack || '') + '</td><td class="small">' + esc(sizeSummary(l)) + '</td></tr>')).join('') :
         '<tr><td colspan="17" class="empty">No orders</td></tr>') + '</table></div>';
     setMain(h); VIEWS.orders.rows = rows;
     onSeg(e => { ORD_UI.f = e.detail; VIEWS.orders.render(); });
@@ -341,8 +353,8 @@ function downloadCsv(name, rows) {
   const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv' })); a.download = name; a.click();
 }
 ACTIONS['orders-csv'] = () => downloadCsv('orders-' + todayYmd() + '.csv',
-  [['Order No', 'Time Stamp', 'Order Date', 'Tooling/Mould No', 'Buyer PO No', 'PO Expiry Date', 'Brand', 'Article', 'Style', 'Colour', 'Gender', 'Qty', 'Channel', 'Size', 'Category', 'Packing Assortment/Solid', 'Assortment Qty /Solid Qty', 'Job Card No.', 'Dispatched', 'Current step']]
-  .concat((VIEWS.orders.rows || []).flatMap(x => (x.o.lines || []).map(l => [x.o.no, fmtDT(x.o.created_at), x.o.order_date, x.o.tooling_no, x.o.buyer_po, x.o.po_expiry_date, x.o.customer_name, l.article, l.style, l.colour, l.gender, l.qty, x.o.channel, l.size_run || l.size || '', x.o.category, l.pack, sizeSummary(l), l.jc_no || '', x.d.total, x.st.label]))));
+  [['Time Stamp', 'Job Card No.', 'Order Date', 'Tooling/Mould No', 'Buyer PO No', 'PO Expiry Date', 'Brand', 'Article', 'Style', 'Colour', 'Gender', 'Qty', 'Channel', 'Size', 'Category', 'Packing Assortment/Solid', 'Assortment Qty /Solid Qty', 'Dispatched', 'Current step']]
+  .concat((VIEWS.orders.rows || []).flatMap(x => (x.o.lines || []).map(l => [fmtDT(x.o.created_at), l.jc_no || '', x.o.order_date, x.o.tooling_no, x.o.buyer_po, x.o.po_expiry_date, x.o.customer_name, l.article, l.style, l.colour, l.gender, l.qty, x.o.channel, l.size_run || l.size || '', x.o.category, l.pack, sizeSummary(l), x.d.total, x.st.label]))));
 
 /* ---------------- Order page ---------------- */
 VIEWS.order = {
