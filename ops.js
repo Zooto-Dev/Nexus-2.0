@@ -287,11 +287,12 @@ ACTIONS['punch-save'] = () => {
   const cu = Store.all('customers').find(c => norm(c.name) === norm(P.brand));
   if (!cu) { $('#pMsg').innerHTML = '<span class="late-txt">Brand is not in the list — add it in Merchant → Brands first.</span>'; return; }
   lines.forEach(l => { if (l.article && !Store.all('items').some(x => norm(x.code) === norm(l.article))) Store.put('items', { id: uid(), code: l.article, name: l.style, group: P.category, gender: l.gender }); });
-  const o = P.id ? Store.get('orders', P.id) : { id: uid(), no: nextNo('orders', 'ORD'), process_id: activeProcess().id, actuals: {}, done_by: {}, created_at: nowIso(), created_by: ME.name };
+  const o = P.id ? Store.get('orders', P.id) : { id: uid(), no: '', process_id: activeProcess().id, actuals: {}, done_by: {}, created_at: nowIso(), created_by: ME.name };
   Object.assign(o, { order_date: P.order_date, customer_id: cu.id, customer_name: cu.name, brand: cu.name, buyer_po: P.buyer_po, po_expiry_date: P.po_expiry_date, tooling_no: P.tooling_no, channel: P.channel, category: P.category, priority: P.priority, remarks: P.remarks, extra: P.extra, lines: lines.map(l => ({ article: l.article, style: l.style, colour: l.colour, gender: l.gender, size_run: l.size_run, size: l.size_run, sizes: (l.sizes || []).filter(x => num(x.qty) > 0).map(x => ({ size: x.size, qty: num(x.qty) })), qty: lineQty(l), pack: l.pack, jc_no: l.jc_no || '' })) });
   // Auto-assign a Job Card No (ZF-xxxx) to each article line that lacks one
   let jcSeq = jcNoBase();
   o.lines.forEach(l => { if (!l.jc_no) { jcSeq += 1; l.jc_no = 'ZF-' + String(jcSeq).padStart(4, '0'); } });
+  o.no = o.lines[0].jc_no;   // the Job Card No is the order number
   Store.put('orders', o);
   audit(P.id ? 'order.edit' : 'order.create', o.no, cu.name + ' · PO ' + P.buyer_po + ' · ' + qtyFmt(orderTotals(o).qty) + ' qty');
   if (P.id) { PUNCH = null; flash('Saved ' + esc(o.no) + '.'); go('order', o.id); return; }
@@ -490,7 +491,7 @@ VIEWS.tracker = {
 document.addEventListener('keydown', e => {
   if (e.target.id !== 'gsearch' || e.key !== 'Enter') return;
   const q = e.target.value.trim(); if (!q) return;
-  const hit = Store.all('orders').find(o => norm(o.no) === norm(q) || norm(o.no).endsWith('-' + norm(q).padStart(4, '0')));
+  const hit = Store.all('orders').find(o => norm(o.no) === norm(q) || norm(o.no).endsWith('-' + norm(q).padStart(4, '0')) || (o.lines || []).some(l => norm(l.jc_no) === norm(q)));
   e.target.value = ''; e.target.blur();
   if (hit) go('order', hit.id); else { ORD_UI.q = q; ORD_UI.f = 'all'; go('orders', q); }
 });

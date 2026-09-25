@@ -105,7 +105,7 @@ function seedData(cloud) {
     const cu = base.customers.find(c => c.id === p.c);
     const created = hoursAgo(p.ago);
     const o = {
-      id: 'o' + (n + 1), no: 'ORD-' + now.getFullYear() + '-' + String(n + 1).padStart(4, '0'), order_date: ymdOf(created),
+      id: 'o' + (n + 1), no: '', order_date: ymdOf(created),
       customer_id: cu.id, customer_name: cu.name, brand: cu.name, buyer_po: 'PO/' + (4400 + n), tooling_no: 'TM-' + (110 + n),
       po_expiry_date: ymdOf(new Date(now.getTime() + p.dd * 86400000)), channel: p.ch, category: p.cat,
       priority: p.pri || '', remarks: '', lines: p.lines,
@@ -116,6 +116,7 @@ function seedData(cloud) {
       else if (n === 3 && li === 0) l.jc_no = 'ZF-0002';
       else { jcSeed += 1; l.jc_no = 'ZF-' + String(jcSeed).padStart(4, '0'); }
     });
+    o.no = o.lines[0].jc_no;   // the Job Card No is the order number
     DB.orders.push(o);
     for (let k = 0; k < p.done; k++) {
       o.updated_at = uid(); RES_CACHE.clear();
@@ -164,8 +165,8 @@ function seedData(cloud) {
     { id: 'b2', brand: 'Gas', article: 'ZT-201', style: 'Cloud Slide', colour: '', version: 1, lines: [{ material: 'EVA-06', uom: 'SHEET', qty: 0.04, supplier: 'Shree Polymers' }, { material: 'STRAP-P', uom: 'PAIR', qty: 1, supplier: 'Jain Traders' }], status: 'Final', by: 'Manoj (Development)', at: hoursAgo(60).toISOString() }];
   const jcL = (art, qty) => { const b = base.boms.find(x => x.article === art); return b.lines.map(l => ({ material: l.material, uom: l.uom, norms: l.qty, supplier: l.supplier, required: Math.ceil(l.qty * qty * 1.02 * 1000) / 1000, po_raised: 0 })); };
   base.job_cards = [
-    { id: 'jc1', no: 'ZF-0001', order_no: 'ORD-' + now.getFullYear() + '-0001', brand: 'Max', article: 'ZT-101', colour: 'Black', qty: 600, lines: jcL('ZT-101', 600), swatch_status: 'Approved', swatch_note: '', status: 'Open', corrections: [], by: 'Pooja (Merchant)', at: hoursAgo(100).toISOString() },
-    { id: 'jc2', no: 'ZF-0002', order_no: 'ORD-' + now.getFullYear() + '-0004', brand: 'Campus', article: 'ZT-301', colour: 'Blue', qty: 200, swatch_status: 'Pending', status: 'Open', corrections: [{ at: hoursAgo(6).toISOString(), by: 'Vikas (Production)', note: 'Colour shade should be darker', resolved: false }], by: 'Pooja (Merchant)', at: hoursAgo(18).toISOString() }
+    { id: 'jc1', no: 'ZF-0001', order_no: 'ZF-0001', brand: 'Max', article: 'ZT-101', colour: 'Black', qty: 600, lines: jcL('ZT-101', 600), swatch_status: 'Approved', swatch_note: '', status: 'Open', corrections: [], by: 'Pooja (Merchant)', at: hoursAgo(100).toISOString() },
+    { id: 'jc2', no: 'ZF-0002', order_no: 'ZF-0002', brand: 'Campus', article: 'ZT-301', colour: 'Blue', qty: 200, swatch_status: 'Pending', status: 'Open', corrections: [{ at: hoursAgo(6).toISOString(), by: 'Vikas (Production)', note: 'Colour shade should be darker', resolved: false }], by: 'Pooja (Merchant)', at: hoursAgo(18).toISOString() }
   ];
   base.job_cards[0].lines[0].po_raised = 31; // EVA-10 from approved PO-001
   base.requisitions = [{ id: 'rq1', no: 'REQ-0001', date: todayYmd(), jc_no: base.job_cards[0].no, dept: 'Production', lines: [{ material: 'SOLE-TPR', qty: 300 }], status: 'Pending', by: 'Vikas (Production)' }];

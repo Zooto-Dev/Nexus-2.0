@@ -504,6 +504,12 @@ function migrateDb() {
   Store.all('orders').forEach(o => {
     let changed = false;
     (o.lines || []).forEach(l => { if (!l.jc_no) { jcMax += 1; l.jc_no = 'ZF-' + String(jcMax).padStart(4, '0'); changed = true; } });
+    // The Job Card No is the order number: replace legacy ORD- numbers
+    if (o.lines && o.lines[0] && o.lines[0].jc_no && o.no !== o.lines[0].jc_no) {
+      const oldNo = o.no;
+      o.no = o.lines[0].jc_no; changed = true;
+      Store.all('job_cards').forEach(j => { if (j.order_no === oldNo) { j.order_no = o.no; Store.put('job_cards', j); } });
+    }
     if (changed) Store.put('orders', o);
   });
 }
