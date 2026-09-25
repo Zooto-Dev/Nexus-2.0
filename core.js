@@ -481,11 +481,24 @@ async function doLogin(email, pin) {
   }
   return u;
 }
+// Purane data ko naye format par lana (jaise bina JC no wali order lines)
+function migrateDb() {
+  let jcMax = 0;
+  const scan = no => { if (no && String(no).startsWith('ZF-')) jcMax = Math.max(jcMax, parseInt(String(no).slice(3), 10) || 0); };
+  Store.all('job_cards').forEach(j => scan(j.no));
+  Store.all('orders').forEach(o => (o.lines || []).forEach(l => scan(l.jc_no)));
+  Store.all('orders').forEach(o => {
+    let changed = false;
+    (o.lines || []).forEach(l => { if (!l.jc_no) { jcMax += 1; l.jc_no = 'ZF-' + String(jcMax).padStart(4, '0'); changed = true; } });
+    if (changed) Store.put('orders', o);
+  });
+}
 function startApp(u) {
   ME = u; localStorage.setItem('nexus2_me', u.id);
   $('#login').classList.add('hidden'); $('#app').classList.remove('hidden');
   const r = myRole();
   $('#who').innerHTML = esc(u.name) + ' <span class="muted">· ' + esc(r ? r.name : '') + (u.doer ? ' · ' + esc(u.doer) : '') + '</span>';
+  migrateDb();
   syncBadge(); if (!location.hash) go(can('tasks', 'view') && !can('dashboard', 'view') ? 'tasks' : 'home'); route();
   setInterval(() => { RES_CACHE.clear(); const a = document.activeElement; if (!a || !/INPUT|TEXTAREA|SELECT/.test(a.tagName)) { renderNav(); if (['home', 'tasks', 'tracker'].includes(curView().v)) route(); } }, 60000);
 }
