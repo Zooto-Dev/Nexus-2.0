@@ -54,7 +54,7 @@ function seedData(cloud) {
       { id: 'r_dispatch', name: 'Dispatch', perms: rolePerms(['tasks', 'dispatch', 'tickets', 'checklist'], ['dashboard', 'orders', 'tracker', 'accounts']) },
       { id: 'r_viewer', name: 'Viewer', perms: rolePerms([], WORK_VIEW.concat(['tickets', 'checklist'])) }
     ],
-    users: [], customers: [], items: [], materials: [], vendors: [], processes: [], orders: [], dispatches: [], purchase_orders: [], sourcing: [], grns: [], inwards: [], issues: [], rtvs: [], boms: [], job_cards: [], requisitions: [], tickets: [], checklist: [], audit: []
+    users: [], customers: [], items: [], materials: [], vendors: [], rsjw: [], processes: [], orders: [], dispatches: [], purchase_orders: [], sourcing: [], grns: [], inwards: [], issues: [], rtvs: [], boms: [], job_cards: [], requisitions: [], tickets: [], checklist: [], audit: []
   };
   const U = (name, email, role_id, doer) => ({ id: 'u_' + doer.toLowerCase(), name, email, role_id, doer, active: true, pin_seed: '1234', seed: !!cloud });
   base.users = cloud ? [U('Super Admin', 'admin@nexus.local', 'r_admin', 'ADMIN')] : [
@@ -145,19 +145,22 @@ function seedData(cloud) {
   ];
   base.purchase_orders = [
     { id: 'po1', no: 'ZF/PO/FY/001'.replace('FY', fyTag()), approval: 'Approved', approved_by: 'Pankaj (Manager)', date: ymdOf(hoursAgo(120)), vendor: 'Shree Polymers', expected: ymdOf(new Date(now.getTime() - 86400000)), remarks: '', created_by: 'Ashish (Purchase)', at: hoursAgo(120).toISOString(),
-      lines: [{ material: 'EVA-10', uom: 'SHEET', qty: 200, rate: 420, received: 120, rejected: 5 }], followups: [{ at: ymdOf(hoursAgo(24)), by: 'Ashish (Purchase)', note: 'Vendor bola kal tak bhej dega', next: todayYmd() }] },
+      lines: [{ material: 'EVA-10', uom: 'SHEET', qty: 31, rate: 420, received: 25, rejected: 1, jc_no: 'JC-' + now.getFullYear() + '-0001' }], followups: [{ at: ymdOf(hoursAgo(24)), by: 'Ashish (Purchase)', note: 'Vendor bola kal tak bhej dega', next: todayYmd() }] },
     { id: 'po2', no: 'ZF/PO/FY/002'.replace('FY', fyTag()), approval: 'Approved', approved_by: 'Pankaj (Manager)', date: ymdOf(hoursAgo(48)), vendor: 'Balaji Soles', expected: ymdOf(new Date(now.getTime() + 5 * 86400000)), remarks: '', created_by: 'Ashish (Purchase)', at: hoursAgo(48).toISOString(),
       lines: [{ material: 'SOLE-TPR', uom: 'PAIR', qty: 1000, rate: 38, received: 0, rejected: 0 }, { material: 'BOX-K3', uom: 'PCS', qty: 500, rate: 12, received: 0, rejected: 0 }], followups: [] }
   ];
-  base.grns = [{ id: 'g1', no: 'ZF/GRN/FY/0001'.replace('FY', fyTag()), inv_qty: 120, date: ymdOf(hoursAgo(30)), po_id: 'po1', po_no: base.purchase_orders[0].no, vendor: 'Shree Polymers', invoice: 'SP/221', lines: [{ material: 'EVA-10', inv_qty: 120, accepted: 115, rejected: 5, short: 0, excess: 0 }], by: 'Suresh (Store)' }];
-  base.inwards = [{ id: 'in1', no: 'INW-' + now.getFullYear() + '-0001', date: ymdOf(hoursAgo(30)), vendor: 'Shree Polymers', po_no: base.purchase_orders[0].no, material: 'EVA-10', uom: 'SHEET', qty: 120, remark: '', swatch_match: '', by: 'Suresh (Store)' }];
-  base.issues = [{ id: 'is1', no: 'ISS-' + now.getFullYear() + '-0001', date: todayYmd(), material: 'EVA-10', qty: 40, to_jc: 'JC-' + now.getFullYear() + '-0001', to_dept: 'Production', by: 'Suresh (Store)', at: hoursAgo(5).toISOString() }];
-  base.boms = [{ id: 'b1', article: 'ZT-101', colour: '', version: 1, lines: [{ material: 'EVA-10', uom: 'SHEET', qty: 0.05 }, { material: 'SOLE-TPR', uom: 'PAIR', qty: 1 }, { material: 'BOX-K3', uom: 'PCS', qty: 0.5 }], status: 'Final', by: 'Manoj (Development)', at: hoursAgo(80).toISOString() },
-    { id: 'b2', article: 'ZT-201', colour: '', version: 1, lines: [{ material: 'EVA-06', uom: 'SHEET', qty: 0.04 }, { material: 'STRAP-P', uom: 'PAIR', qty: 1 }], status: 'Final', by: 'Manoj (Development)', at: hoursAgo(60).toISOString() }];
+  base.grns = [{ id: 'g1', no: 'ZF/GRN/FY/0001'.replace('FY', fyTag()), inv_qty: 120, date: ymdOf(hoursAgo(30)), po_id: 'po1', po_no: base.purchase_orders[0].no, vendor: 'Shree Polymers', invoice: 'SP/221', lines: [{ material: 'EVA-10', inv_qty: 26, accepted: 25, rejected: 1, short: 0, excess: 0 }], by: 'Suresh (Store)' }];
+  base.inwards = [{ id: 'in1', no: 'INW-' + now.getFullYear() + '-0001', date: ymdOf(hoursAgo(30)), vendor: 'Shree Polymers', po_no: base.purchase_orders[0].no, material: 'EVA-10', uom: 'SHEET', qty: 26, remark: '', swatch_match: '', by: 'Suresh (Store)' }];
+  base.issues = [{ id: 'is1', no: 'ISS-' + now.getFullYear() + '-0001', date: todayYmd(), material: 'EVA-10', qty: 10, source: 'AUTO', to_jc: 'JC-' + now.getFullYear() + '-0001', to_dept: 'Production', status: 'Approved', by: 'Suresh (Store)', approved_by: 'Pankaj (Manager)', at: hoursAgo(5).toISOString() }];
+  base.rsjw = [{ id: 'rs1', jc_no: 'JC-' + now.getFullYear() + '-0001', material: 'EVA-10', qty: 5, by: 'Suresh (Store)', at: hoursAgo(4).toISOString() }];
+  base.boms = [{ id: 'b1', article: 'ZT-101', colour: '', version: 1, lines: [{ material: 'EVA-10', uom: 'SHEET', qty: 0.05, supplier: 'Shree Polymers' }, { material: 'SOLE-TPR', uom: 'PAIR', qty: 1, supplier: 'Balaji Soles' }, { material: 'BOX-K3', uom: 'PCS', qty: 0.5, supplier: 'Jain Traders' }], status: 'Final', by: 'Manoj (Development)', at: hoursAgo(80).toISOString() },
+    { id: 'b2', article: 'ZT-201', colour: '', version: 1, lines: [{ material: 'EVA-06', uom: 'SHEET', qty: 0.04, supplier: 'Shree Polymers' }, { material: 'STRAP-P', uom: 'PAIR', qty: 1, supplier: 'Jain Traders' }], status: 'Final', by: 'Manoj (Development)', at: hoursAgo(60).toISOString() }];
+  const jcL = (art, qty) => { const b = base.boms.find(x => x.article === art); return b.lines.map(l => ({ material: l.material, uom: l.uom, norms: l.qty, supplier: l.supplier, required: Math.ceil(l.qty * qty * 1.02 * 1000) / 1000, po_raised: 0 })); };
   base.job_cards = [
-    { id: 'jc1', no: 'JC-' + now.getFullYear() + '-0001', order_no: 'ORD-' + now.getFullYear() + '-0001', brand: 'Max', article: 'ZT-101', colour: 'Black', qty: 600, swatch_status: 'Approved', swatch_note: '', status: 'Open', corrections: [], by: 'Pooja (Merchant)', at: hoursAgo(100).toISOString() },
+    { id: 'jc1', no: 'JC-' + now.getFullYear() + '-0001', order_no: 'ORD-' + now.getFullYear() + '-0001', brand: 'Max', article: 'ZT-101', colour: 'Black', qty: 600, lines: jcL('ZT-101', 600), swatch_status: 'Approved', swatch_note: '', status: 'Open', corrections: [], by: 'Pooja (Merchant)', at: hoursAgo(100).toISOString() },
     { id: 'jc2', no: 'JC-' + now.getFullYear() + '-0002', order_no: 'ORD-' + now.getFullYear() + '-0004', brand: 'Campus', article: 'ZT-301', colour: 'Blue', qty: 200, swatch_status: 'Pending', status: 'Open', corrections: [{ at: hoursAgo(6).toISOString(), by: 'Vikas (Production)', note: 'Colour shade dark chahiye', resolved: false }], by: 'Pooja (Merchant)', at: hoursAgo(18).toISOString() }
   ];
+  base.job_cards[0].lines[0].po_raised = 31; // approved PO-001 ka EVA-10
   base.requisitions = [{ id: 'rq1', no: 'RQ-' + now.getFullYear() + '-0001', date: todayYmd(), jc_no: base.job_cards[0].no, dept: 'Production', lines: [{ material: 'SOLE-TPR', qty: 300 }], status: 'Pending', by: 'Vikas (Production)' }];
   base.tickets = [
     { id: 't1', no: 'TKT-' + now.getFullYear() + '-0001', at: hoursAgo(60).toISOString(), by: 'Vikas (Production)', dept: 'Store', priority: 'Critical', subject: 'EVA sheet shortage line 2 par', detail: 'Production ruk jayega agar aaj issue nahi hua', status: 'Open', comments: [{ at: hoursAgo(3).toISOString(), by: 'Suresh (Store)', note: 'GRN ho gaya, aaj issue karenge' }] },

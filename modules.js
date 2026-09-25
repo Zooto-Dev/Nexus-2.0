@@ -12,11 +12,19 @@ function stockMaps() {
   const stk = {}, rej = {};
   const add = (m, k, q) => { const key = norm(k); m[key] = (m[key] || 0) + q; };
   Store.all('grns').forEach(g => (g.lines || []).forEach(l => { add(stk, l.material, num(l.accepted)); add(rej, l.material, num(l.rejected)); }));
-  Store.all('issues').forEach(i => add(stk, i.material, -num(i.qty)));
+  // sirf APPROVED issues stock kaatti hain (pending request se stock nahi hilta); return wapas jodta hai
+  Store.all('issues').forEach(i => { if (i.status === 'Pending' || i.status === 'Rejected') return; add(stk, i.material, i.type === 'return' ? num(i.qty) : -num(i.qty)); });
   Store.all('rtvs').forEach(r => add(rej, r.material, -num(r.qty)));
   return { stk, rej };
 }
 function stockOf(code) { return stockMaps().stk[norm(code)] || 0; }
+// Reserved stock per JC (purane RSJW jaisa): reserved physical stock ka hissa hai.
+function reservedOf(code, jc) { return Store.all('rsjw').filter(r => norm(r.material) === norm(code) && (!jc || norm(r.jc_no) === norm(jc))).reduce((s2, r) => s2 + num(r.qty), 0); }
+function openStockOf(code) { return Math.max(0, stockOf(code) - reservedOf(code)); }
+// Transit = approved POs mein order hua par aaya nahi
+function transitOf(code) { return openPOs().reduce((s2, p) => s2 + p.lines.filter(l => norm(l.material) === norm(code)).reduce((a, l) => a + Math.max(0, num(l.qty) - num(l.received)), 0), 0); }
+function jcBy(no) { return Store.all('job_cards').find(j => norm(j.no) === norm(no)); }
+function issuedToJc(jc, code) { return Store.all('issues').filter(i => i.status === 'Approved' && norm(i.to_jc) === norm(jc) && norm(i.material) === norm(code)).reduce((s2, i) => s2 + (i.type === 'return' ? -num(i.qty) : num(i.qty)), 0); }
 function poPending(po) { return (po.lines || []).reduce((s, l) => s + Math.max(0, num(l.qty) - num(l.received)), 0); }
 function poStatus(po) {
   if (po.cancelled) return 'Cancelled';
@@ -92,7 +100,7 @@ VIEWS.po = {
       }).join('') : '<tr><td colspan="9" class="empty">No purchase orders</td></tr>') + '</table></div>';
     if (!canApprove()) h += '<div class="muted small" style="margin-top:8px">PO approve/reject sirf Admin ya Manager kar sakta hai.</div>';
     setMain(h);
-    onSeg(e => { PO_UI.f = e.detail; VIEWS.po.render(); });
+    onSeg(e => { if (e.target.dataset.seg === 'poMode') { PO_UI.mode = e.detail; poFormSetup(); const v = vendorBy($('#npVen').value); if (v && e.detail === 'jc') poFillJc(v.name); return; } PO_UI.f = e.detail; VIEWS.po.render(); });
     $('#poQ').addEventListener('input', e => { PO_UI.q = e.target.value; clearTimeout(PO_UI.t); PO_UI.t = setTimeout(() => { VIEWS.po.render(); const i = $('#poQ'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }, 250); });
   }
 };
@@ -102,7 +110,7 @@ function poDetail(p) {
     '<div class="right"><b>' + esc(p.no) + '</b><div class="muted small">' + fmtD(p.date) + ' · Expected ' + fmtD(p.expected) + '</div></div></div>' +
     '<div class="small" style="margin:6px 0"><b>Vendor:</b> ' + esc(p.vendor) + (v.address ? ' · ' + esc(v.address) : '') + (v.gstin ? ' · GSTIN ' + esc(v.gstin) : '') + (v.mobile ? ' · ' + esc(v.mobile) : '') + '</div>' +
     '<table style="max-width:640px"><tr><th>Material</th><th>UOM</th><th class="num">Qty</th><th class="num">Rate ₹</th><th class="num">Amount ₹</th></tr>' +
-    p.lines.map(l => '<tr><td>' + esc(l.material) + '</td><td>' + esc(l.uom) + '</td><td class="num">' + qtyFmt(l.qty) + '</td><td class="num">' + money(l.rate) + '</td><td class="num">' + money(num(l.qty) * num(l.rate)) + '</td></tr>').join('') +
+    p.lines.map(l => '<tr><td>' + esc(l.material) + (l.jc_no ? ' <span class="muted small">' + esc(l.jc_no) + '</span>' : '') + '</td><td>' + esc(l.uom) + '</td><td class="num">' + qtyFmt(l.qty) + '</td><td class="num">' + money(l.rate) + '</td><td class="num">' + money(num(l.qty) * num(l.rate)) + '</td></tr>').join('') +
     '<tr><td colspan="4" class="right"><b>Total</b></td><td class="num"><b>' + money(total) + '</b></td></tr></table>' +
     (p.remarks ? '<div class="small" style="margin-top:4px"><b>Remarks:</b> ' + esc(p.remarks) + '</div>' : '') +
     '<div class="toolbar noprint" style="margin-top:8px"><button class="btn sm" data-act="po-print">Print</button></div></div>';
@@ -114,6 +122,8 @@ ACTIONS['po-approve'] = el => {
   const p = Store.get('purchase_orders', el.dataset.id);
   if (p.approval === 'Approved') { flash('Ye PO pehle se approved hai.', 'err'); return; }
   p.approval = 'Approved'; p.approved_by = ME.name; p.approved_at = nowIso(); Store.put('purchase_orders', p);
+  // JC lines ka "PO Raised" update (purane IMS ka approve step)
+  p.lines.forEach(l => { if (!l.jc_no) return; const j = jcBy(l.jc_no); if (!j) return; const jl = (j.lines || []).find(x => norm(x.material) === norm(l.material)); if (jl) { jl.po_raised = num(jl.po_raised) + num(l.qty); Store.put('job_cards', j); } });
   audit('po.approve', p.no, p.vendor); flash(esc(p.no) + ' approved — ab GRN/followup mein aayega.'); VIEWS.po.render();
 };
 ACTIONS['po-reject'] = el => {
@@ -123,20 +133,57 @@ ACTIONS['po-reject'] = el => {
 };
 function poForm() {
   return '<div class="panel" style="margin-bottom:12px">' + dlVendor() + dlMat('dlMatPo') +
-    '<div class="row"><label>Vendor *<input id="npVen" list="dlVen"></label><label>PO date<input id="npDate" type="date" value="' + todayYmd() + '"></label><label>Expected delivery *<input id="npExp" type="date"></label><label style="flex:1">Remarks<input id="npRem"></label></div>' +
-    '<table style="margin-top:8px"><tr><th style="width:200px">Material</th><th style="width:70px">UOM</th><th class="num" style="width:110px">Qty</th><th class="num" style="width:110px">Rate ₹</th><th style="width:30px"></th></tr>' +
-    '<tbody id="npLines"></tbody></table><a class="small" data-act="po-line">+ material</a>' +
+    '<div class="row"><label>Mode' + seg('poMode', [{ v: 'jc', l: 'JC requirement se' }, { v: 'manual', l: 'Manual' }], PO_UI.mode || 'jc') + '</label>' +
+    '<label>Vendor *<input id="npVen" list="dlVen"></label><label>PO date<input id="npDate" type="date" value="' + todayYmd() + '"></label><label>Expected delivery *<input id="npExp" type="date"></label><label style="flex:1">Remarks<input id="npRem"></label></div>' +
+    '<div id="npHint" class="muted small" style="margin:6px 0"></div>' +
+    '<table style="margin-top:4px"><tr id="npHead"></tr><tbody id="npLines"></tbody></table><a class="small" data-act="po-line" id="npAdd">+ material</a>' +
     '<div class="toolbar" style="margin-top:10px"><button class="btn primary" data-act="po-save">Save PO</button><button class="btn" data-act="po-new">Close</button><span id="npMsg" class="small"></span></div></div>';
 }
+function poFormSetup() {
+  const mode = PO_UI.mode || 'jc';
+  $('#npHead').innerHTML = mode === 'manual'
+    ? '<th style="width:200px">Material</th><th style="width:70px">UOM</th><th class="num" style="width:110px">Qty</th><th class="num" style="width:110px">Rate ₹</th><th style="width:30px"></th>'
+    : '<th style="width:110px">JC</th><th style="width:180px">Material</th><th class="num">JC pending</th><th class="num">Stock free</th><th class="num">Transit</th><th class="num" style="width:110px">Order qty</th><th class="num" style="width:100px">Rate ₹</th>';
+  $('#npAdd').classList.toggle('hidden', mode !== 'manual');
+  $('#npLines').innerHTML = mode === 'manual' ? poLineRow() : '';
+  $('#npHint').textContent = mode === 'manual' ? '' : 'Vendor chuno — us supplier ke saare open JC materials jinka PO banna baaki hai, apne aap aa jayenge (purana "vendor pending list" logic).';
+}
+// vendor ke pending JC lines: pending = required − po_raised; prefill net = max(0, pending − stockFree − transit) per material FIFO
+function poJcRows(vendor) {
+  const rows = [];
+  Store.all('job_cards').filter(j => j.status !== 'Closed').forEach(j => (j.lines || []).forEach((l, li) => {
+    if (norm(l.supplier) !== norm(vendor)) return;
+    const pen = Math.max(0, num(l.required) - num(l.po_raised));
+    if (pen > 0.0001) rows.push({ jc: j.no, jid: j.id, li, material: l.material, uom: l.uom, pending: pen });
+  }));
+  const free = {}, tran = {};
+  rows.forEach(r => { const k = norm(r.material); if (free[k] == null) { free[k] = openStockOf(r.material); tran[k] = transitOf(r.material); } });
+  rows.forEach(r => { const k = norm(r.material); const cover = Math.min(r.pending, Math.max(0, free[k]) + Math.max(0, tran[k])); const use = Math.min(cover, free[k] + tran[k]); r.stockFree = free[k]; r.transit = tran[k]; r.net = Math.max(0, r.pending - use); const t = Math.min(r.pending, free[k]); free[k] -= t; tran[k] = Math.max(0, tran[k] - Math.max(0, Math.min(r.pending - t, tran[k]))); });
+  return rows;
+}
+function poFillJc(vendor) {
+  const rows = poJcRows(vendor);
+  const src = Store.all('sourcing');
+  $('#npLines').innerHTML = rows.length ? rows.map((r, i) => {
+    const rate = (src.find(x => norm(x.material) === norm(r.material) && norm(x.vendor) === norm(vendor)) || {}).rate || '';
+    return '<tr data-jrow data-jc="' + esc(r.jc) + '" data-mat="' + esc(r.material) + '" data-max="' + r.pending + '"><td>' + esc(r.jc) + '</td><td>' + esc(r.material) + ' <span class="muted small">' + esc(r.uom) + '</span></td><td class="num">' + qtyFmt(r.pending) + '</td><td class="num muted">' + qtyFmt(r.stockFree) + '</td><td class="num muted">' + qtyFmt(r.transit) + '</td><td><input class="qty" type="number" min="0" max="' + r.pending + '" step="any" data-jqty value="' + r.net + '"></td><td><input class="qty" type="number" min="0" step="any" data-jrate value="' + rate + '"></td></tr>';
+  }).join('') : '<tr><td colspan="7" class="empty">Is vendor ka koi pending JC requirement nahi — Manual mode use karo.</td></tr>';
+  $('#npHint').innerHTML = rows.length ? 'Order qty pehle se <b>net-to-order</b> hai (pending − free stock − transit). JC pending se zyada nahi ja sakti. Rate sourcing se aaya hai.' : '';
+}
 function poLineRow() { return '<tr><td><input data-np="mat" list="dlMatPo"></td><td class="muted" data-uom></td><td><input data-np="qty" type="number" min="0" step="any" class="right"></td><td><input data-np="rate" type="number" min="0" step="any" class="right"></td><td><button class="btn ghost sm" data-act="po-line-del">×</button></td></tr>'; }
-ACTIONS['po-new'] = () => { PO_UI.form = !PO_UI.form; VIEWS.po.render(); if (PO_UI.form) { $('#npLines').innerHTML = poLineRow(); $('#npVen').focus(); } };
+ACTIONS['po-new'] = () => { PO_UI.form = !PO_UI.form; VIEWS.po.render(); if (PO_UI.form) { poFormSetup(); $('#npVen').focus(); } };
+document.addEventListener('change', e => { if (e.target.id === 'npVen' && (PO_UI.mode || 'jc') === 'jc') { const v = vendorBy(e.target.value); if (v) poFillJc(v.name); } });
+document.addEventListener('input', e => { if (e.target.dataset && e.target.dataset.jqty != null) { const tr = e.target.closest('tr'); if (num(e.target.value) > num(tr.dataset.max)) { e.target.value = tr.dataset.max; flash('JC pending se zyada order nahi ho sakta.', 'err'); } } });
 ACTIONS['po-line'] = () => { $('#npLines').insertAdjacentHTML('beforeend', poLineRow()); };
 ACTIONS['po-line-del'] = el => el.closest('tr').remove();
 document.addEventListener('change', e => { if (e.target.dataset.np === 'mat') { const m = matBy(e.target.value); if (m) { e.target.value = m.code; $('[data-uom]', e.target.closest('tr')).textContent = m.uom; } } });
 ACTIONS['po-save'] = () => {
   if (!requirePerm('purchase', 'edit')) return;
   const ven = $('#npVen').value.trim(); const exp = $('#npExp').value;
-  const lines = $$('#npLines tr').map(tr => { const m = matBy($('[data-np="mat"]', tr).value); return { material: m ? m.code : $('[data-np="mat"]', tr).value.trim().toUpperCase(), uom: m ? m.uom : '', qty: num($('[data-np="qty"]', tr).value), rate: num($('[data-np="rate"]', tr).value), received: 0, rejected: 0 }; }).filter(l => l.material && l.qty > 0);
+  const mode = PO_UI.mode || 'jc';
+  const lines = mode === 'manual'
+    ? $$('#npLines tr').map(tr => { const m = matBy($('[data-np="mat"]', tr).value); return { material: m ? m.code : ($('[data-np="mat"]', tr) ? $('[data-np="mat"]', tr).value.trim().toUpperCase() : ''), uom: m ? m.uom : '', qty: num(($('[data-np="qty"]', tr) || {}).value), rate: num(($('[data-np="rate"]', tr) || {}).value), received: 0, rejected: 0 }; }).filter(l => l.material && l.qty > 0)
+    : $$('#npLines tr[data-jrow]').map(tr => { const m = matBy(tr.dataset.mat); return { material: tr.dataset.mat, uom: m ? m.uom : '', qty: num($('[data-jqty]', tr).value), rate: num($('[data-jrate]', tr).value), jc_no: tr.dataset.jc, received: 0, rejected: 0 }; }).filter(l => l.qty > 0);
   if (!ven || !exp || !lines.length) { $('#npMsg').innerHTML = '<span class="late-txt">Vendor, expected date aur kam se kam ek material line chahiye.</span>'; return; }
   const vm = vendorBy(ven);
   if (!vm) { $('#npMsg').innerHTML = '<span class="late-txt">Vendor master mein nahi hai — pehle Purchase → Vendors mein add karo (GST/mobile ke saath).</span>'; return; }
@@ -193,10 +240,20 @@ VIEWS.jobcards = {
     if (JC_UI.form && edit) h += '<div class="panel" style="margin-bottom:12px"><datalist id="dlOrd">' + Store.all('orders').filter(o => orderState(o).open).map(o => '<option value="' + esc(o.no) + '">' + esc(o.customer_name) + '</option>').join('') + '</datalist>' +
       '<div class="row"><label>Order (optional)<input id="njOrd" list="dlOrd"></label><label>Brand *<input id="njBrand" list="dlBrand2"></label><label>Article *<input id="njArt" list="dlArt2"></label><label>Colour<input id="njCol"></label><label>Qty *<input id="njQty" type="number" min="0" style="width:90px"></label><button class="btn primary" data-act="jc-save">Save</button><span id="njMsg" class="small"></span></div>' +
       '<datalist id="dlBrand2">' + Store.all('customers').map(c => '<option value="' + esc(c.name) + '">').join('') + '</datalist><datalist id="dlArt2">' + Store.all('items').map(i => '<option value="' + esc(i.code) + '">').join('') + '</datalist></div>';
-    h += '<div class="tbl-wrap"><table><tr><th>JC No</th><th>Order</th><th>Brand</th><th>Article</th><th>Colour</th><th class="num">Qty</th><th>Swatch</th><th>Corrections</th><th>Status</th><th></th></tr>' +
-      (rows.length ? rows.map(j => { const oc = (j.corrections || []).filter(x => !x.resolved).length; return '<tr><td><b>' + esc(j.no) + '</b><div class="muted small">' + esc(j.by) + ' · ' + fmtD(j.at) + '</div></td><td>' + esc(j.order_no || '') + '</td><td>' + esc(j.brand) + '</td><td>' + esc(j.article) + '</td><td>' + esc(j.colour) + '</td><td class="num">' + qtyFmt(j.qty) + '</td>' +
-        '<td><span class="st ' + (j.swatch_status === 'Approved' ? 'Done' : j.swatch_status === 'Rejected' ? 'Late' : 'Pending') + '">' + esc(j.swatch_status) + '</span></td><td>' + (oc ? '<span class="late-txt">' + oc + ' open</span>' : (j.corrections || []).length ? 'resolved' : '—') + '</td><td>' + stHtml(j.status === 'Closed' ? 'Done' : 'Pending').replace('>Done<', '>Closed<').replace('>Pending<', '>Open<') + '</td>' +
-        '<td class="right">' + (edit && j.status !== 'Closed' ? '<button class="btn sm" data-act="jc-close" data-id="' + esc(j.id) + '" data-confirm="Close JC?">Close</button>' : '') + '</td></tr>'; }).join('') : '<tr><td colspan="10" class="empty">No job cards</td></tr>') + '</table></div>';
+    h += '<div class="tbl-wrap"><table><tr><th>JC No</th><th>Order</th><th>Brand</th><th>Article</th><th class="num">Qty</th><th>Material</th><th>Swatch</th><th>Corrections</th><th>Status</th><th></th></tr>' +
+      (rows.length ? rows.map(j => {
+        const oc = (j.corrections || []).filter(x => !x.resolved).length;
+        const L = j.lines || []; const req = L.reduce((s2, l) => s2 + num(l.required), 0);
+        const iss = L.reduce((s2, l) => s2 + Math.min(num(l.required), issuedToJc(j.no, l.material)), 0);
+        const ready = req ? Math.round(iss / req * 100) : null;
+        let row = '<tr class="click" data-act="jc-toggle" data-id="' + esc(j.id) + '"><td><b>' + esc(j.no) + '</b><div class="muted small">' + esc(j.by) + ' · ' + fmtD(j.at) + '</div></td><td>' + esc(j.order_no || '') + '</td><td>' + esc(j.brand) + '</td><td>' + esc(j.article) + (j.colour ? ' <span class="muted">' + esc(j.colour) + '</span>' : '') + '</td><td class="num">' + qtyFmt(j.qty) + '</td>' +
+          '<td>' + (ready == null ? '<span class="late-txt small">No BOM</span>' : '<span class="' + (ready >= 100 ? 'st Done' : 'small') + '">' + ready + '% issued</span>') + '</td>' +
+          '<td><span class="st ' + (j.swatch_status === 'Approved' ? 'Done' : j.swatch_status === 'Rejected' ? 'Late' : 'Pending') + '">' + esc(j.swatch_status) + '</span></td><td>' + (oc ? '<span class="late-txt">' + oc + ' open</span>' : (j.corrections || []).length ? 'resolved' : '—') + '</td><td>' + stHtml(j.status === 'Closed' ? 'Done' : 'Pending').replace('>Done<', '>Closed<').replace('>Pending<', '>Open<') + '</td>' +
+          '<td class="right">' + (edit && j.status !== 'Closed' ? '<button class="btn sm" data-act="jc-close" data-id="' + esc(j.id) + '" data-confirm="Close JC?">Close</button>' : '') + '</td></tr>';
+        if (JC_UI.open === j.id) row += '<tr class="inline-form"><td colspan="10">' + (L.length ? '<table style="max-width:860px;margin:4px 0"><tr><th>Material</th><th>Supplier</th><th class="num">Norms</th><th class="num">Required (+2%)</th><th class="num">PO raised</th><th class="num">Transit</th><th class="num">Reserved</th><th class="num">Issued</th><th class="num">Pending PO</th></tr>' +
+          L.map(l => { const issd = issuedToJc(j.no, l.material); const pen = Math.max(0, num(l.required) - num(l.po_raised)); return '<tr><td>' + esc(l.material) + '</td><td class="small">' + esc(l.supplier || '') + '</td><td class="num">' + l.norms + '</td><td class="num">' + qtyFmt(l.required) + '</td><td class="num">' + qtyFmt(l.po_raised) + '</td><td class="num muted">' + qtyFmt(transitOf(l.material)) + '</td><td class="num">' + qtyFmt(reservedOf(l.material, j.no)) + '</td><td class="num">' + qtyFmt(issd) + '</td><td class="num ' + (pen ? 'late-txt' : '') + '">' + (pen ? qtyFmt(pen) : '—') + '</td></tr>'; }).join('') + '</table>' : '<span class="muted small">BOM nahi mila tha — Development se BOM banwa ke JC dobara banao.</span>') + '</td></tr>';
+        return row;
+      }).join('') : '<tr><td colspan="10" class="empty">No job cards</td></tr>') + '</table></div>';
     setMain(h);
     onSeg(e => { JC_UI.f = e.detail; VIEWS.jobcards.render(); });
     const ordIn = $('#njOrd'); if (ordIn) ordIn.addEventListener('change', e => {
@@ -206,13 +263,24 @@ VIEWS.jobcards = {
   }
 };
 ACTIONS['jc-new'] = () => { JC_UI.form = !JC_UI.form; VIEWS.jobcards.render(); };
+// BOM se JC material lines: required = ceil(norms x qty x 1.02) — purane IMS ka size-extra rule
+function jcLinesFromBom(article, qty) {
+  const b = Store.all('boms').filter(x => norm(x.article) === norm(article)).sort((a2, b2) => b2.version - a2.version)[0];
+  if (!b) return null;
+  return b.lines.map(l => ({ material: l.material, uom: l.uom, norms: num(l.qty), supplier: l.supplier || '', required: Math.ceil(num(l.qty) * qty * 1.02 * 1000) / 1000, po_raised: 0 }));
+}
 ACTIONS['jc-save'] = () => {
   if (!requirePerm('merchant', 'edit')) return;
   const brand = $('#njBrand').value.trim(), art = $('#njArt').value.trim().toUpperCase(), qty = num($('#njQty').value);
   if (!brand || !art || qty <= 0) { $('#njMsg').innerHTML = '<span class="late-txt">Brand, article aur qty chahiye.</span>'; return; }
-  const j = Store.put('job_cards', { id: uid(), no: nextNo('job_cards', 'JC'), order_no: $('#njOrd').value.trim(), brand, article: art, colour: $('#njCol').value.trim(), qty, swatch_status: 'Pending', status: 'Open', corrections: [], by: ME.name, at: nowIso() });
-  audit('jc.create', j.no, brand + ' · ' + art + ' × ' + qty); JC_UI.form = false; flash(esc(j.no) + ' created — swatch approval pending.'); VIEWS.jobcards.render();
+  const lines = jcLinesFromBom(art, qty);
+  const j = Store.put('job_cards', { id: uid(), no: nextNo('job_cards', 'JC'), order_no: $('#njOrd').value.trim(), brand, article: art, colour: $('#njCol').value.trim(), qty, lines: lines || [], swatch_status: 'Pending', status: 'Open', corrections: [], by: ME.name, at: nowIso() });
+  audit('jc.create', j.no, brand + ' · ' + art + ' × ' + qty + (lines ? ' · BOM v-latest (' + lines.length + ' materials)' : ' · BOM NAHI mila'));
+  JC_UI.form = false;
+  flash(esc(j.no) + ' created — swatch approval pending.' + (lines ? ' Material requirement BOM se ban gayi (' + lines.length + ' items, +2%).' : ' <b>Is article ka BOM nahi hai</b> — Development se banwao, phir JC dobara banana.'), lines ? '' : 'err');
+  VIEWS.jobcards.render();
 };
+ACTIONS['jc-toggle'] = (el, ev) => { if (ev.target.closest('button')) return; JC_UI.open = JC_UI.open === el.dataset.id ? null : el.dataset.id; VIEWS.jobcards.render(); };
 ACTIONS['jc-close'] = el => { const j = Store.get('job_cards', el.dataset.id); if ((j.corrections || []).some(c => !c.resolved)) { flash('Pehle open corrections resolve karo.', 'err'); return; } j.status = 'Closed'; Store.put('job_cards', j); audit('jc.close', j.no, ''); VIEWS.jobcards.render(); };
 
 VIEWS.swatch = {
@@ -334,6 +402,8 @@ ACTIONS['grn-save'] = el => {
   const inv = $('#grnInv').value.trim();
   if (!inv) { $('#grnMsg').innerHTML = '<span class="late-txt">Invoice / challan no zaroori hai.</span>'; return; }
   if (Store.all('grns').some(g => norm(g.vendor) === norm(p.vendor) && norm(g.invoice) === norm(inv))) { $('#grnMsg').innerHTML = '<span class="late-txt">Is vendor ki ye invoice pehle GRN ho chuki hai (duplicate guard).</span>'; return; }
+  const failedInward = Store.all('inwards').find(iw => norm(iw.vendor) === norm(p.vendor) && norm(iw.po_no) === norm(p.no) && iw.swatch_match === 'Fail');
+  if (failedInward) { $('#grnMsg').innerHTML = '<span class="late-txt">' + esc(failedInward.no) + ' ka swatch FAIL hai — Merchant se sort hone tak is PO ki GRN block hai.</span>'; return; }
   rows.forEach(r => { const pl = p.lines[r.i]; pl.received = num(pl.received) + r.acc + r.rej; pl.rejected = num(pl.rejected) + r.rej; });
   Store.put('purchase_orders', p);
   const lines = rows.map(r => ({ material: r.material, inv_qty: r.inv, accepted: r.acc, rejected: r.rej, short: r.short, excess: r.excess }));
@@ -351,43 +421,105 @@ ACTIONS['grn-save'] = el => {
   VIEWS.grn.render();
 };
 
-const ISS_UI = { form: false };
+const ISS_UI = { form: false, ret: false };
+function pendingIssues() { return Store.all('issues').filter(i => i.status === 'Pending'); }
 VIEWS.issuance = {
   mod: 'store', render() {
-    const edit = can('store', 'edit');
+    const edit = can('store', 'edit'); const appr = canApprove();
     const reqs = Store.all('requisitions').filter(r => r.status === 'Pending');
     const { stk } = stockMaps();
-    let h = subTitle('Issuance') + '<h2 style="margin-top:0">Pending requisitions</h2><div class="tbl-wrap"><table><tr><th>Req</th><th>Date</th><th>JC / Dept</th><th>Materials</th><th>Stock check</th>' + (edit ? '<th></th>' : '') + '</tr>' +
+    let h = subTitle('Issuance', 'request → approval → tabhi stock katta hai');
+
+    // 1) approvals
+    const pend = pendingIssues();
+    h += '<h2 style="margin-top:0">Issue approvals (' + pend.length + ')</h2><div class="tbl-wrap"><table><tr><th>No</th><th>Material</th><th class="num">Qty</th><th>Source</th><th>To</th><th>Req</th><th>By</th>' + (appr ? '<th></th>' : '') + '</tr>' +
+      (pend.length ? pend.map(i => '<tr><td><b>' + esc(i.no) + '</b></td><td>' + esc(i.material) + '</td><td class="num">' + qtyFmt(i.qty) + '</td><td class="small">' + esc(i.source || 'AUTO') + '</td><td>' + esc(i.to_jc || i.to_dept || '') + '</td><td>' + esc(i.req_no || '') + '</td><td>' + esc(i.by) + '</td>' +
+        (appr ? '<td class="right nowrap"><button class="btn sm primary" data-act="iss-approve" data-id="' + esc(i.id) + '">Approve</button> <button class="btn sm ghost danger" data-act="iss-deny" data-id="' + esc(i.id) + '" data-confirm="Reject?">Reject</button></td>' : '') + '</tr>').join('') : '<tr><td colspan="8" class="empty">Koi issue approval pending nahi</td></tr>') + '</table></div>' +
+      (appr ? '' : '<div class="muted small" style="margin-top:4px">Approve sirf Admin/Manager kar sakta hai — stock tabhi katta hai.</div>');
+
+    // 2) pending requisitions
+    h += '<h2>Pending requisitions</h2><div class="tbl-wrap"><table><tr><th>Req</th><th>Date</th><th>JC / Dept</th><th>Materials</th><th>Stock check</th>' + (edit ? '<th></th>' : '') + '</tr>' +
       (reqs.length ? reqs.map(r => {
         const short = r.lines.filter(l => (stk[norm(l.material)] || 0) < num(l.qty));
         return '<tr><td><b>' + esc(r.no) + '</b><div class="muted small">' + esc(r.by) + '</div></td><td class="nowrap">' + fmtD(r.date) + '</td><td>' + esc(r.jc_no || r.dept) + '</td><td class="small">' + r.lines.map(l => esc(l.material) + ' × ' + qtyFmt(l.qty)).join('<br>') + '</td>' +
           '<td>' + (short.length ? '<span class="late-txt small">Short: ' + short.map(l => esc(l.material)).join(', ') + '</span>' : '<span class="st Done">OK</span>') + '</td>' +
-          (edit ? '<td class="right nowrap"><button class="btn sm primary" data-act="iss-req" data-id="' + esc(r.id) + '"' + (short.length ? ' disabled title="stock short"' : '') + '>Issue</button> <button class="btn sm ghost danger" data-act="req-reject" data-id="' + esc(r.id) + '" data-confirm="Reject?">Reject</button></td>' : '') + '</tr>';
+          (edit ? '<td class="right nowrap"><button class="btn sm primary" data-act="iss-req" data-id="' + esc(r.id) + '"' + (short.length ? ' disabled title="stock short"' : '') + '>Send for issue</button> <button class="btn sm ghost danger" data-act="req-reject" data-id="' + esc(r.id) + '" data-confirm="Reject?">Reject</button></td>' : '') + '</tr>';
       }).join('') : '<tr><td colspan="6" class="empty">Koi pending requisition nahi</td></tr>') + '</table></div>';
-    h += '<div class="toolbar" style="margin-top:14px"><h2 style="margin:0">Direct issue</h2>' + (edit ? '<button class="btn sm" data-act="iss-new">' + (ISS_UI.form ? 'Close' : '+ Issue material') + '</button>' : '') + '</div>';
-    if (ISS_UI.form && edit) h += '<div class="panel" style="margin-bottom:10px">' + dlMat('dlMatIs') + '<div class="row"><label>Material *<input id="isMat" list="dlMatIs"></label><label>Qty *<input id="isQty" type="number" min="0" style="width:100px"></label><label>To JC<input id="isJc"></label><label>To dept<input id="isDept" list="dlDept"><datalist id="dlDept">' + ['Production', 'Development', 'Merchant', 'Dispatch'].map(d => '<option>' + d + '</option>').join('') + '</datalist></label><button class="btn primary" data-act="iss-save">Issue</button><span id="isMsg" class="small"></span></div></div>';
-    const iss = Store.all('issues').slice().sort((a, b) => (b.at || '') < (a.at || '') ? -1 : 1).slice(0, 15);
-    h += '<div class="tbl-wrap"><table><tr><th>No</th><th>Date</th><th>Material</th><th class="num">Qty</th><th>To</th><th>Req</th><th>By</th></tr>' +
-      (iss.length ? iss.map(i => '<tr><td><b>' + esc(i.no) + '</b></td><td class="nowrap">' + fmtD(i.date) + '</td><td>' + esc(i.material) + '</td><td class="num">' + qtyFmt(i.qty) + '</td><td>' + esc(i.to_jc || i.to_dept || '') + '</td><td>' + esc(i.req_no || '') + '</td><td>' + esc(i.by) + '</td></tr>').join('') : '<tr><td colspan="7" class="empty">No issues yet</td></tr>') + '</table></div>';
+
+    // 3) direct issue + return
+    h += '<div class="toolbar" style="margin-top:14px"><h2 style="margin:0">Direct issue / return</h2>' +
+      (edit ? '<button class="btn sm" data-act="iss-new">' + (ISS_UI.form ? 'Close' : '+ Issue material') + '</button><button class="btn sm" data-act="ret-new">' + (ISS_UI.ret ? 'Close' : '+ Material return') + '</button>' : '') + '</div>';
+    if (ISS_UI.form && edit) h += '<div class="panel" style="margin-bottom:10px">' + dlMat('dlMatIs') + '<datalist id="dlJc2">' + Store.all('job_cards').filter(j => j.status !== 'Closed').map(j => '<option value="' + esc(j.no) + '">').join('') + '</datalist>' +
+      '<div class="row"><label>Material *<input id="isMat" list="dlMatIs"></label><label>Qty *<input id="isQty" type="number" min="0" style="width:100px"></label><label>To JC<input id="isJc" list="dlJc2"></label><label>To dept<input id="isDept" list="dlDept"><datalist id="dlDept">' + ['Production', 'Development', 'Merchant', 'Dispatch'].map(d => '<option>' + d + '</option>').join('') + '</datalist></label>' +
+      '<label>Source' + seg('isSrc', [{ v: 'AUTO', l: 'Auto (reserved→open)' }, { v: 'RSJW', l: 'JC reserved' }, { v: 'OPEN', l: 'Open stock' }], 'AUTO') + '</label><button class="btn primary" data-act="iss-save">Request issue</button><span id="isMsg" class="small"></span></div></div>';
+    if (ISS_UI.ret && edit) h += '<div class="panel" style="margin-bottom:10px">' + dlMat('dlMatRt') + '<datalist id="dlJc3">' + Store.all('job_cards').map(j => '<option value="' + esc(j.no) + '">').join('') + '</datalist>' +
+      '<div class="row"><label>JC *<input id="rtJc" list="dlJc3"></label><label>Material *<input id="rtMat" list="dlMatRt"></label><label>Qty *<input id="rtQty" type="number" min="0" style="width:100px"></label><label style="flex:1">Remark<input id="rtRem"></label><button class="btn primary" data-act="ret-save">Return to stock</button><span id="rtMsg" class="small"></span></div>' +
+      '<div class="muted small">Wapas open stock mein jayega. Issued se zyada return nahi ho sakta.</div></div>';
+
+    // 4) history
+    const iss = Store.all('issues').filter(i => i.status !== 'Pending').slice().sort((a2, b2) => (b2.at || '') < (a2.at || '') ? -1 : 1).slice(0, 15);
+    h += '<div class="tbl-wrap"><table><tr><th>No</th><th>Date</th><th>Type</th><th>Material</th><th class="num">Qty</th><th>To / From</th><th>Req</th><th>Status</th><th>By / Approved</th></tr>' +
+      (iss.length ? iss.map(i => '<tr><td><b>' + esc(i.no) + '</b></td><td class="nowrap">' + fmtD(i.date) + '</td><td>' + (i.type === 'return' ? 'Return' : 'Issue') + '</td><td>' + esc(i.material) + '</td><td class="num">' + qtyFmt(i.qty) + '</td><td>' + esc(i.to_jc || i.to_dept || '') + '</td><td>' + esc(i.req_no || '') + '</td><td><span class="st ' + (i.status === 'Approved' ? 'Done' : 'Cancelled') + '">' + esc(i.status || 'Approved') + '</span></td><td class="small">' + esc(i.by) + (i.approved_by ? ' → ' + esc(i.approved_by) : '') + '</td></tr>').join('') : '<tr><td colspan="9" class="empty">No issues yet</td></tr>') + '</table></div>';
     setMain(h);
   }
 };
-ACTIONS['iss-new'] = () => { ISS_UI.form = !ISS_UI.form; VIEWS.issuance.render(); };
+ACTIONS['iss-new'] = () => { ISS_UI.form = !ISS_UI.form; ISS_UI.ret = false; VIEWS.issuance.render(); };
+ACTIONS['ret-new'] = () => { ISS_UI.ret = !ISS_UI.ret; ISS_UI.form = false; VIEWS.issuance.render(); };
 ACTIONS['iss-save'] = () => {
   if (!requirePerm('store', 'edit')) return;
-  const m = matBy($('#isMat').value); const qty = num($('#isQty').value);
+  const m = matBy($('#isMat').value); const qty = num($('#isQty').value); const src = segVal($('[data-seg="isSrc"]')) || 'AUTO'; const jc = $('#isJc').value.trim();
   if (!m || qty <= 0) { $('#isMsg').innerHTML = '<span class="late-txt">Material aur qty chahiye.</span>'; return; }
-  if (stockOf(m.code) < qty) { $('#isMsg').innerHTML = '<span class="late-txt">Stock sirf ' + qtyFmt(stockOf(m.code)) + ' hai.</span>'; return; }
-  const i = Store.put('issues', { id: uid(), no: nextNo('issues', 'ISS'), date: todayYmd(), material: m.code, qty, to_jc: $('#isJc').value.trim(), to_dept: $('#isDept').value.trim(), by: ME.name, at: nowIso() });
-  audit('issue.create', i.no, m.code + ' × ' + qty); ISS_UI.form = false; flash(esc(i.no) + ' issued.'); VIEWS.issuance.render();
+  if (src === 'RSJW' && (!jc || reservedOf(m.code, jc) < qty)) { $('#isMsg').innerHTML = '<span class="late-txt">' + (jc ? 'Is JC ka reserved sirf ' + qtyFmt(reservedOf(m.code, jc)) + ' hai.' : 'JC reserved se issue ke liye JC chahiye.') + '</span>'; return; }
+  const avail = src === 'OPEN' ? openStockOf(m.code) : src === 'RSJW' ? reservedOf(m.code, jc) : (openStockOf(m.code) + (jc ? reservedOf(m.code, jc) : 0));
+  if (qty > avail) { $('#isMsg').innerHTML = '<span class="late-txt">Available sirf ' + qtyFmt(avail) + ' hai (' + src + ').</span>'; return; }
+  const i = Store.put('issues', { id: uid(), no: nextNo('issues', 'ISS'), date: todayYmd(), material: m.code, qty, source: src, to_jc: jc, to_dept: $('#isDept').value.trim(), status: 'Pending', by: ME.name, at: nowIso() });
+  audit('issue.request', i.no, m.code + ' × ' + qty + ' (' + src + ')'); ISS_UI.form = false;
+  flash(esc(i.no) + ' request bhej di — approval ke baad stock katega.'); VIEWS.issuance.render();
 };
 ACTIONS['iss-req'] = el => {
   if (!requirePerm('store', 'edit')) return;
   const r = Store.get('requisitions', el.dataset.id); const { stk } = stockMaps();
   if (r.lines.some(l => (stk[norm(l.material)] || 0) < num(l.qty))) { flash('Stock short hai.', 'err'); return; }
-  r.lines.forEach(l => Store.put('issues', { id: uid(), no: nextNo('issues', 'ISS'), date: todayYmd(), material: l.material, qty: num(l.qty), to_jc: r.jc_no, to_dept: r.dept, req_no: r.no, by: ME.name, at: nowIso() }));
-  r.status = 'Issued'; r.issued_by = ME.name; Store.put('requisitions', r);
-  audit('req.issue', r.no, r.lines.map(l => l.material + '×' + l.qty).join(', ')); flash(esc(r.no) + ' issued.'); VIEWS.issuance.render();
+  r.lines.forEach(l => Store.put('issues', { id: uid(), no: nextNo('issues', 'ISS'), date: todayYmd(), material: l.material, qty: num(l.qty), source: 'AUTO', to_jc: r.jc_no, to_dept: r.dept, req_no: r.no, status: 'Pending', by: ME.name, at: nowIso() }));
+  r.status = 'Sent for Approval'; Store.put('requisitions', r);
+  audit('req.send', r.no, r.lines.map(l => l.material + '×' + l.qty).join(', ')); flash(esc(r.no) + ' approval ke liye bheja.'); VIEWS.issuance.render();
+};
+ACTIONS['iss-approve'] = el => {
+  if (!canApprove()) { flash('Approve sirf Admin/Manager.', 'err'); return; }
+  const i = Store.get('issues', el.dataset.id); if (i.status !== 'Pending') return;
+  // final stock check at approval time
+  const avail = i.source === 'OPEN' ? openStockOf(i.material) : i.source === 'RSJW' ? reservedOf(i.material, i.to_jc) : (openStockOf(i.material) + (i.to_jc ? reservedOf(i.material, i.to_jc) : 0));
+  if (num(i.qty) > avail) { flash('Ab stock kam hai (' + qtyFmt(avail) + ') — reject karo ya stock aane do.', 'err'); return; }
+  // consume reservation first (AUTO/RSJW)
+  if (i.to_jc && i.source !== 'OPEN') {
+    let need = num(i.qty);
+    Store.all('rsjw').filter(r => norm(r.jc_no) === norm(i.to_jc) && norm(r.material) === norm(i.material)).forEach(r => {
+      if (need <= 0) return; const take = Math.min(need, num(r.qty)); r.qty = num(r.qty) - take; need -= take;
+      if (r.qty <= 0.0001) Store.del('rsjw', r.id); else Store.put('rsjw', r);
+    });
+  }
+  i.status = 'Approved'; i.approved_by = ME.name; i.approved_at = nowIso(); Store.put('issues', i);
+  // requisition close when all its issues resolved
+  if (i.req_no) {
+    const req = Store.all('requisitions').find(r => norm(r.no) === norm(i.req_no));
+    if (req && !Store.all('issues').some(x => x.req_no === i.req_no && x.status === 'Pending')) { req.status = 'Issued'; req.issued_by = ME.name; Store.put('requisitions', req); }
+  }
+  audit('issue.approve', i.no, i.material + ' × ' + qtyFmt(i.qty)); flash(esc(i.no) + ' approved — stock kat gaya.'); VIEWS.issuance.render();
+};
+ACTIONS['iss-deny'] = el => {
+  if (!canApprove()) { flash('Reject sirf Admin/Manager.', 'err'); return; }
+  const i = Store.get('issues', el.dataset.id); i.status = 'Rejected'; i.approved_by = ME.name; Store.put('issues', i);
+  if (i.req_no) { const req = Store.all('requisitions').find(r => norm(r.no) === norm(i.req_no)); if (req) { req.status = 'Pending'; Store.put('requisitions', req); } }
+  audit('issue.reject', i.no, ''); VIEWS.issuance.render();
+};
+ACTIONS['ret-save'] = () => {
+  if (!requirePerm('store', 'edit')) return;
+  const jc = $('#rtJc').value.trim(); const m = matBy($('#rtMat').value); const qty = num($('#rtQty').value);
+  if (!jc || !m || qty <= 0) { $('#rtMsg').innerHTML = '<span class="late-txt">JC, material aur qty chahiye.</span>'; return; }
+  const net = issuedToJc(jc, m.code);
+  if (qty > net) { $('#rtMsg').innerHTML = '<span class="late-txt">Is JC ko net issued sirf ' + qtyFmt(net) + ' hai — usse zyada return nahi hota.</span>'; return; }
+  const i = Store.put('issues', { id: uid(), no: nextNo('issues', 'ISS'), date: todayYmd(), type: 'return', material: m.code, qty, to_jc: jc, status: 'Approved', by: ME.name, approved_by: ME.name, at: nowIso(), remark: $('#rtRem').value.trim() });
+  audit('issue.return', i.no, m.code + ' × ' + qty + ' ← ' + jc); ISS_UI.ret = false; flash('Return ho gaya — open stock badh gaya.'); VIEWS.issuance.render();
 };
 ACTIONS['req-reject'] = el => { const r = Store.get('requisitions', el.dataset.id); r.status = 'Rejected'; Store.put('requisitions', r); audit('req.reject', r.no, ''); VIEWS.issuance.render(); };
 
@@ -397,8 +529,8 @@ VIEWS.stock = {
     const rows = Store.all('materials').map(m => ({ m, q: stk[norm(m.code)] || 0 })).sort((a, b) => a.m.code.localeCompare(b.m.code));
     const low = rows.filter(x => num(x.m.min_level) > 0 && x.q < num(x.m.min_level));
     setMain(subTitle('Stock View', 'GRN accepted − issued') + '<div class="toolbar">' + (low.length ? '<span class="late-txt small"><b>' + low.length + ' item min level se neeche</b></span>' : '<span class="muted small">Sab items min level se upar</span>') + '<span class="grow"></span><button class="btn" data-act="stock-csv">Export CSV</button></div>' +
-      '<div class="tbl-wrap"><table><tr><th>Material</th><th>Name</th><th>Group</th><th>UOM</th><th>Rack</th><th class="num">Min level</th><th class="num">In stock</th></tr>' +
-      rows.map(x => { const lowRow = num(x.m.min_level) > 0 && x.q < num(x.m.min_level); return '<tr' + (lowRow ? ' style="background:#fdf3f3"' : x.q <= 0 ? ' class="muted"' : '') + '><td><b>' + esc(x.m.code) + '</b>' + (lowRow ? ' <span class="late-txt small">LOW</span>' : '') + '</td><td>' + esc(x.m.name) + '</td><td>' + esc(x.m.group || '') + '</td><td>' + esc(x.m.uom) + '</td><td>' + esc(x.m.rack || '') + '</td><td class="num muted">' + (num(x.m.min_level) || '') + '</td><td class="num">' + qtyFmt(x.q) + '</td></tr>'; }).join('') + '</table></div>');
+      '<div class="tbl-wrap"><table><tr><th>Material</th><th>Name</th><th>Group</th><th>UOM</th><th>Rack</th><th class="num">Min level</th><th class="num">Reserved (JC)</th><th class="num">Open</th><th class="num">Total stock</th>' + (can('store', 'edit') ? '<th></th>' : '') + '</tr>' +
+      rows.map(x => { const lowRow = num(x.m.min_level) > 0 && x.q < num(x.m.min_level); return '<tr' + (lowRow ? ' style="background:#fdf3f3"' : x.q <= 0 ? ' class="muted"' : '') + '><td><b>' + esc(x.m.code) + '</b>' + (lowRow ? ' <span class="late-txt small">LOW</span>' : '') + '</td><td>' + esc(x.m.name) + '</td><td>' + esc(x.m.group || '') + '</td><td>' + esc(x.m.uom) + '</td><td>' + esc(x.m.rack || '') + '</td><td class="num muted">' + (num(x.m.min_level) || '') + '</td><td class="num">' + qtyFmt(reservedOf(x.m.code)) + '</td><td class="num">' + qtyFmt(openStockOf(x.m.code)) + '</td><td class="num"><b>' + qtyFmt(x.q) + '</b></td>' + (can('store', 'edit') ? '<td class="right">' + (openStockOf(x.m.code) > 0 ? '<button class="btn ghost sm" data-act="rsv-open" data-c="' + esc(x.m.code) + '">Reserve</button>' : '') + '</td>' : '') + '</tr>' + (VIEWS.stock.rsv === x.m.code ? '<tr class="inline-form"><td colspan="11"><div class="row"><datalist id="dlJcR">' + Store.all('job_cards').filter(j => j.status !== 'Closed').map(j => '<option value="' + esc(j.no) + '">').join('') + '</datalist><label>JC *<input id="rsvJc" list="dlJcR"></label><label>Qty * (open: ' + qtyFmt(openStockOf(x.m.code)) + ')<input id="rsvQty" type="number" min="0" style="width:100px"></label><button class="btn primary sm" data-act="rsv-save" data-c="' + esc(x.m.code) + '">Reserve for JC</button><span id="rsvMsg" class="small"></span></div></td></tr>' : ''); }).join('') + '</table></div>');
     VIEWS.stock.rows = rows;
   }
 };
@@ -456,21 +588,21 @@ VIEWS.bom = {
   mod: 'development', render() {
     const edit = can('development', 'edit');
     if (!edit) { go('boms'); return; }
-    let h = subTitle('Make BOM') + '<div class="panel">' + dlMat('dlMatB') + '<datalist id="dlArtB">' + Store.all('items').map(i => '<option value="' + esc(i.code) + '">' + esc(i.name) + '</option>').join('') + '</datalist>' +
+    let h = subTitle('Make BOM') + '<div class="panel">' + dlMat('dlMatB') + dlVendor() + '<datalist id="dlArtB">' + Store.all('items').map(i => '<option value="' + esc(i.code) + '">' + esc(i.name) + '</option>').join('') + '</datalist>' +
       '<div class="row"><label>Article *<input id="nbArt" list="dlArtB"></label><label>Colour<input id="nbCol" placeholder="blank = all colours"></label></div>' +
-      '<table style="margin-top:10px;max-width:640px"><tr><th>Material</th><th style="width:70px">UOM</th><th class="num" style="width:140px">Qty per pair</th><th style="width:30px"></th></tr><tbody id="nbLines"><tr><td><input data-nb="mat" list="dlMatB"></td><td class="muted" data-uom></td><td><input data-nb="qty" type="number" min="0" step="any" class="right"></td><td><button class="btn ghost sm" data-act="bom-line-del">×</button></td></tr></tbody></table><a class="small" data-act="bom-line">+ material</a>' +
+      '<table style="margin-top:10px;max-width:640px"><tr><th>Material</th><th style="width:70px">UOM</th><th class="num" style="width:120px">Qty per pair</th><th style="width:170px">Supplier</th><th style="width:30px"></th></tr><tbody id="nbLines"><tr><td><input data-nb="mat" list="dlMatB"></td><td class="muted" data-uom></td><td><input data-nb="qty" type="number" min="0" step="any" class="right"></td><td><input data-nb="sup" list="dlVen"></td><td><button class="btn ghost sm" data-act="bom-line-del">×</button></td></tr></tbody></table><a class="small" data-act="bom-line">+ material</a>' +
       '<div class="toolbar" style="margin-top:10px"><button class="btn primary" data-act="bom-save">Save as Final</button><span id="nbMsg" class="small"></span></div>' +
       '<div class="muted small">Same article ka dobara BOM banaya toh naya version ban jaata hai; MRS hamesha latest final version uthata hai.</div></div>';
     setMain(h);
   }
 };
-ACTIONS['bom-line'] = () => $('#nbLines').insertAdjacentHTML('beforeend', '<tr><td><input data-nb="mat" list="dlMatB"></td><td class="muted" data-uom></td><td><input data-nb="qty" type="number" min="0" step="any" class="right"></td><td><button class="btn ghost sm" data-act="bom-line-del">×</button></td></tr>');
+ACTIONS['bom-line'] = () => $('#nbLines').insertAdjacentHTML('beforeend', '<tr><td><input data-nb="mat" list="dlMatB"></td><td class="muted" data-uom></td><td><input data-nb="qty" type="number" min="0" step="any" class="right"></td><td><input data-nb="sup" list="dlVen"></td><td><button class="btn ghost sm" data-act="bom-line-del">×</button></td></tr>');
 ACTIONS['bom-line-del'] = el => el.closest('tr').remove();
 document.addEventListener('change', e => { if (e.target.dataset.nb === 'mat') { const m = matBy(e.target.value); if (m) { e.target.value = m.code; $('[data-uom]', e.target.closest('tr')).textContent = m.uom; } } });
 ACTIONS['bom-save'] = () => {
   if (!requirePerm('development', 'edit')) return;
   const art = $('#nbArt').value.trim().toUpperCase();
-  const lines = $$('#nbLines tr').map(tr => { const m = matBy($('[data-nb="mat"]', tr).value); return m ? { material: m.code, uom: m.uom, qty: num($('[data-nb="qty"]', tr).value) } : null; }).filter(l => l && l.qty > 0);
+  const lines = $$('#nbLines tr').map(tr => { const m = matBy($('[data-nb="mat"]', tr).value); return m ? { material: m.code, uom: m.uom, qty: num($('[data-nb="qty"]', tr).value), supplier: $('[data-nb="sup"]', tr).value.trim() } : null; }).filter(l => l && l.qty > 0);
   if (!art || !lines.length) { $('#nbMsg').innerHTML = '<span class="late-txt">Article aur kam se kam ek material line (master wala) chahiye.</span>'; return; }
   const ver = Store.all('boms').filter(b => norm(b.article) === norm(art)).reduce((m, b) => Math.max(m, b.version), 0) + 1;
   const b = Store.put('boms', { id: uid(), article: art, colour: $('#nbCol').value.trim(), version: ver, lines, status: 'Final', by: ME.name, at: nowIso() });
@@ -670,4 +802,15 @@ VIEWS.vendors = {
     });
     $('#main').insertAdjacentHTML('beforeend', '<div class="muted small" style="margin-top:8px">PO banane ke liye vendor ka mobile ya email hona zaroori hai.</div>');
   }
+};
+
+
+ACTIONS['rsv-open'] = el => { VIEWS.stock.rsv = VIEWS.stock.rsv === el.dataset.c ? null : el.dataset.c; VIEWS.stock.render(); };
+ACTIONS['rsv-save'] = el => {
+  if (!requirePerm('store', 'edit')) return;
+  const code = el.dataset.c; const jc = $('#rsvJc').value.trim(); const qty = num($('#rsvQty').value);
+  if (!jc || !jcBy(jc)) { $('#rsvMsg').innerHTML = '<span class="late-txt">Sahi JC chuno.</span>'; return; }
+  if (qty <= 0 || qty > openStockOf(code)) { $('#rsvMsg').innerHTML = '<span class="late-txt">Open stock sirf ' + qtyFmt(openStockOf(code)) + ' hai.</span>'; return; }
+  Store.put('rsjw', { id: uid(), jc_no: jc, material: code, qty, by: ME.name, at: nowIso() });
+  audit('stock.reserve', jc, code + ' × ' + qtyFmt(qty)); VIEWS.stock.rsv = null; flash(qtyFmt(qty) + ' ' + esc(code) + ' reserve ho gaya ' + esc(jc) + ' ke liye.'); VIEWS.stock.render();
 };
