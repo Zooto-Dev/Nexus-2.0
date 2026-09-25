@@ -397,16 +397,30 @@ function navCounts() {
     dispatch: { n: readyForDispatch().length, late: false }
   };
 }
+// inline nav icons (16px, stroke = currentColor) — keeps local mode dependency-free
+const NAV_IC = {
+  Home: '<path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h5v-6h4v6h5V9.5"/>',
+  Purchase: '<circle cx="9" cy="20" r="1.6"/><circle cx="17" cy="20" r="1.6"/><path d="M3 3h2.5l2.2 12h10.6l2.2-8.5H6"/>',
+  Merchant: '<rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M3 12h18"/>',
+  Store: '<path d="M21 8.5 12 3 3 8.5v11h18v-11Z"/><path d="M3 8.5 12 14l9-5.5M12 14v5.5"/>',
+  Development: '<path d="m9 8-5 4 5 4M15 8l5 4-5 4M13 5l-2 14"/>',
+  Production: '<circle cx="12" cy="12" r="3.2"/><path d="M12 2.8v2.6M12 18.6v2.6M2.8 12h2.6M18.6 12h2.6M5.5 5.5l1.9 1.9M16.6 16.6l1.9 1.9M18.5 5.5l-1.9 1.9M7.4 16.6l-1.9 1.9"/>',
+  Accounts: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9h10M7 13h6M7 17h4"/>',
+  Operations: '<path d="M4 7h10M18 7h2M4 17h2M10 17h10M14 4.6v4.8M8 14.6v4.8"/>',
+  Dispatch: '<path d="M1.5 5.5h13v11h-13zM14.5 9.5h4l3 3.5v3.5h-7"/><circle cx="6" cy="18.5" r="1.8"/><circle cx="17.5" cy="18.5" r="1.8"/>',
+  Task: '<rect x="3.5" y="3.5" width="17" height="17" rx="3"/><path d="m8 12.5 3 3 5.5-6"/>'
+};
+function navIc(name) { const p = NAV_IC[name]; return p ? '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">' + p + '</svg>' : ''; }
 function renderNav() {
   const { v: cur, param: curP } = curView(); const c = navCounts();
   const cntHtml = k => k && k.n ? '<span class="cnt' + (k.late ? ' late' : '') + '">' + k.n + '</span>' : '';
   const itemOk = n => can(n.mod, n.edit ? 'edit' : 'view');
   const itemOn = n => cur === n.v && (n.v === 'dispatch' ? (n.p || '') === (curP || '') : true);
-  let html = '<div class="brand">Nexus <b>2.0</b></div>';
+  let html = '<div class="brand"><span class="logo-mark">N</span>Nexus <b>2.0</b></div>';
   NAV.forEach(n => {
     if (!n.menu) {
       if (!itemOk(n)) return;
-      html += '<a href="#/' + n.v + '" class="' + (cur === n.v ? 'on' : '') + '">' + n.l + cntHtml(n.cnt && c[n.cnt]) + '</a>';
+      html += '<a href="#/' + n.v + '" class="' + (cur === n.v ? 'on' : '') + '">' + navIc(n.l) + n.l + cntHtml(n.cnt && c[n.cnt]) + '</a>';
       return;
     }
     const items = n.items.flatMap(i => i.dyn === 'fms'
@@ -414,7 +428,7 @@ function renderNav() {
       : [i]).filter(itemOk);
     if (!items.length) return;
     const on = items.some(i => cur === i.v);
-    html += '<div class="menu"><a data-act="menu" class="mbtn ' + (on ? 'on' : '') + '">' + n.menu + cntHtml(n.cnt && c[n.cnt]) + '<span class="caret">▾</span></a><div class="mdrop">' +
+    html += '<div class="menu"><a data-act="menu" class="mbtn ' + (on ? 'on' : '') + '">' + navIc(n.menu) + n.menu + cntHtml(n.cnt && c[n.cnt]) + '<span class="caret">▾</span></a><div class="mdrop">' +
       items.map(i => '<a href="#/' + i.v + (i.p ? '/' + i.p : '') + '" class="' + (itemOn(i) ? 'on' : '') + '">' + i.l + '</a>').join('') + '</div></div>';
   });
   $('#nav').innerHTML = html;
