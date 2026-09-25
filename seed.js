@@ -42,7 +42,7 @@ function seedData(cloud) {
       holidays: [{ date: now.getFullYear() + '-10-02', name: 'Gandhi Jayanti' }]
     },
     roles: [
-      { id: 'r_admin', name: 'Admin', system: true, perms: ALL_EDIT() },
+      { id: 'r_admin', name: 'Super Admin', system: true, perms: ALL_EDIT() },
       { id: 'r_manager', name: 'Manager', perms: rolePerms(['tasks', 'orders', 'purchase', 'merchant', 'store', 'development', 'production', 'accounts', 'dispatch', 'tickets', 'checklist', 'tracker', 'masters'], ['dashboard', 'builder', 'users', 'audit']) },
       { id: 'r_purchase', name: 'Purchase', perms: rolePerms(['tasks', 'purchase', 'tickets', 'checklist'], WORK_VIEW.concat(['store', 'masters'])) },
       { id: 'r_merchant', name: 'Merchant', perms: rolePerms(['tasks', 'orders', 'merchant', 'masters', 'tickets', 'checklist'], WORK_VIEW.concat(['development'])) },
@@ -57,7 +57,7 @@ function seedData(cloud) {
     users: [], customers: [], items: [], materials: [], vendors: [], processes: [], orders: [], dispatches: [], purchase_orders: [], sourcing: [], grns: [], inwards: [], issues: [], rtvs: [], boms: [], job_cards: [], requisitions: [], tickets: [], checklist: [], audit: []
   };
   const U = (name, email, role_id, doer) => ({ id: 'u_' + doer.toLowerCase(), name, email, role_id, doer, active: true, pin_seed: '1234', seed: !!cloud });
-  base.users = cloud ? [U('Admin', 'admin@nexus.local', 'r_admin', 'ADMIN')] : [
+  base.users = cloud ? [U('Super Admin', 'admin@nexus.local', 'r_admin', 'ADMIN')] : [
     U('Admin', 'admin@nexus.local', 'r_admin', 'ADMIN'),
     U('Pankaj (Manager)', 'ops@nexus.local', 'r_manager', 'OPS'),
     U('Ashish (Purchase)', 'purchase@nexus.local', 'r_purchase', 'PURCHASE'),

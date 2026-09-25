@@ -25,16 +25,16 @@ create index if not exists nx_docs_updated_idx on public.nx_docs (updated_at des
 -- Who is admin/manager (server-side truth for sensitive writes).
 -- Admin khud SQL editor / Table editor se yahan row daalta hai:
 --   insert into nx_profiles (user_id, email, role)
---   values ('<auth user ka UUID>', 'boss@company.com', 'admin');
+--   values ('<auth user ka UUID>', 'boss@company.com', 'superadmin');
 create table if not exists public.nx_profiles (
   user_id uuid primary key references auth.users (id) on delete cascade,
   email   text not null,
-  role    text not null default 'user' check (role in ('admin', 'manager', 'user'))
+  role    text not null default 'user' check (role in ('superadmin', 'admin', 'manager', 'user'))
 );
 
 create or replace function public.nx_is_admin() returns boolean
 language sql stable security definer set search_path = public as $$
-  select exists (select 1 from nx_profiles where user_id = auth.uid() and role in ('admin', 'manager'));
+  select exists (select 1 from nx_profiles where user_id = auth.uid() and role in ('superadmin', 'admin', 'manager'));
 $$;
 
 alter table public.nx_docs enable row level security;
