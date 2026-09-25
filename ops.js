@@ -118,6 +118,13 @@ function parseSizeRun(str) {
   if (t.includes(',')) return t.split(',').map(x => x.trim().toUpperCase()).filter(Boolean);
   return [t.toUpperCase()];
 }
+function jcNoBase() {
+  let max = 0;
+  const scan = no => { if (no && String(no).startsWith('ZF-')) max = Math.max(max, parseInt(String(no).slice(3), 10) || 0); };
+  Store.all('job_cards').forEach(j => scan(j.no));
+  Store.all('orders').forEach(o => (o.lines || []).forEach(l => scan(l.jc_no)));
+  return max;
+}
 function lineQty(l) { return (l.sizes && l.sizes.length) ? l.sizes.reduce((a, x) => a + num(x.qty), 0) : num(l.qty); }
 function sizeSummary(l) { return (l.sizes && l.sizes.length) ? l.sizes.filter(x => num(x.qty) > 0).map(x => x.size + ':' + qtyFmt(x.qty)).join(' · ') : (l.size || ''); }
 function newPunch(order) {
@@ -150,7 +157,7 @@ VIEWS.punch = {
       extra.map(f => '<label>' + esc(f.label) + (f.options && f.options.length <= 4 ? seg('x_' + f.key, f.options, (P.extra || {})[f.key]) :
         '<input data-extra="' + esc(f.key) + '" type="' + (f.type === 'number' ? 'number' : f.type === 'date' ? 'date' : 'text') + '" value="' + esc((P.extra || {})[f.key]) + '"' + (f.options ? ' list="dl_' + esc(f.key) + '"' : '') + '>' + (f.options ? '<datalist id="dl_' + esc(f.key) + '">' + f.options.map(o => '<option value="' + esc(o) + '">').join('') + '</datalist>' : '')) + '</label>').join('') +
       '</div>';
-    h += '<table class="lines"><tr><th style="width:28px">#</th><th style="width:110px">Article</th><th>Style</th><th style="width:100px">Colour</th><th style="width:95px">Gender</th><th style="width:95px">Size Run</th><th class="num" style="width:80px">Total Qty</th><th style="width:115px">Packing</th><th class="num" style="width:100px">Asst/Solid qty</th><th style="width:30px"></th></tr>' +
+    h += '<table class="lines"><tr><th style="width:28px">#</th><th style="width:110px">Article</th><th>Style</th><th style="width:100px">Colour</th><th style="width:95px">Gender</th><th style="width:95px">Size Run</th><th class="num" style="width:80px">Total Qty</th><th style="width:115px">Packing</th><th style="width:170px">Asst/Solid Qty</th><th style="width:30px"></th></tr>' +
       P.lines.map((l, i) => {
         let row = '<tr data-i="' + i + '"><td class="muted">' + (i + 1) + '</td>' +
           '<td><input data-f="article" list="dlArt" value="' + esc(l.article) + '" autocomplete="off"></td>' +
@@ -160,10 +167,10 @@ VIEWS.punch = {
           '<td><input data-f="size_run" placeholder="6-10" value="' + esc(l.size_run || l.size || '') + '" title="Size run likho (6-10 ya 6X10) — har size ka qty box neeche aayega"></td>' +
           '<td class="num"><b data-lq>' + (lineQty(l) ? qtyFmt(lineQty(l)) : '') + '</b></td>' +
           '<td>' + lineSel('pack', PACKS_(), l.pack) + '</td>' +
-          '<td><input data-f="pack_qty" type="number" min="0" step="any" class="right" value="' + esc(l.pack_qty) + '"></td>' +
+          '<td class="small muted" data-lsum>' + esc(sizeSummary(l)) + '</td>' +
           '<td><button class="btn ghost sm" data-act="punch-del" data-i="' + i + '" title="Remove">×</button></td></tr>';
         row += '<tr class="szrow" data-sz-for="' + i + '"><td></td><td colspan="9">' +
-          ((l.sizes && l.sizes.length) ? '<div class="szgrid"><span class="muted small" style="align-self:center">Size-wise qty:</span>' +
+          ((l.sizes && l.sizes.length) ? '<div class="szgrid"><span class="muted small" style="align-self:center">Asst/Solid Qty \u2014 size-wise:</span>' +
             l.sizes.map((sz, k) => '<span class="szbox"><input data-szl data-i="' + i + '" data-k="' + k + '" value="' + esc(sz.size) + '" title="Size"><input type="number" min="0" data-szq data-i="' + i + '" data-k="' + k + '" value="' + (sz.qty || '') + '" placeholder="qty" title="Size ' + esc(sz.size) + ' ka qty"></span>').join('') +
             '<a data-act="punch-size-add" data-i="' + i + '" class="small">+ size</a></div>'
             : '<span class="muted small">Size Run likho (jaise <b>6-10</b>) — har size ka qty box yahan aa jayega</span>') + '</td></tr>';
@@ -175,7 +182,7 @@ VIEWS.punch = {
     const m = setMain(h);
     punchTotals();
     m.addEventListener('input', e => {
-      if (e.target.dataset.szq != null) { const l = PUNCH.lines[+e.target.dataset.i]; l.sizes[+e.target.dataset.k].qty = num(e.target.value); const tr = $('tr[data-i="' + e.target.dataset.i + '"]'); $('[data-lq]', tr).textContent = lineQty(l) ? qtyFmt(lineQty(l)) : ''; punchTotals(); }
+      if (e.target.dataset.szq != null) { const l = PUNCH.lines[+e.target.dataset.i]; l.sizes[+e.target.dataset.k].qty = num(e.target.value); const tr = $('tr[data-i="' + e.target.dataset.i + '"]'); $('[data-lq]', tr).textContent = lineQty(l) ? qtyFmt(lineQty(l)) : ''; const sm = $('[data-lsum]', tr); if (sm) sm.textContent = sizeSummary(l); punchTotals(); }
       if (e.target.dataset.szl != null) { PUNCH.lines[+e.target.dataset.i].sizes[+e.target.dataset.k].size = e.target.value.trim().toUpperCase(); }
     });
     m.addEventListener('change', e => {
@@ -197,7 +204,9 @@ VIEWS.punch = {
         e.preventDefault();
         const boxes = $$('[data-szq][data-i="' + e.target.dataset.i + '"]'); const at = boxes.indexOf(e.target);
         if (at < boxes.length - 1) return boxes[at + 1].focus();
-        const tr = $('tr[data-i="' + e.target.dataset.i + '"]'); const p = $('[data-f="pack_qty"]', tr); if (p) p.focus();
+        const i2 = +e.target.dataset.i;
+        if (i2 === PUNCH.lines.length - 1) { punchCollect(); PUNCH.lines.push(blankLine()); VIEWS.punch.render(PUNCH.id); }
+        const nx = $('tr[data-i="' + (i2 + 1) + '"] [data-f="article"]'); if (nx) nx.focus();
         return;
       }
       if (!e.target.dataset.f) return;
@@ -237,7 +246,7 @@ function punchCollect() {
     const l = P.lines[+tr.dataset.i]; if (!l) return;
     const g = f => { const el = $('[data-f="' + f + '"]', tr); return el ? el.value.trim() : ''; };
     l.article = g('article').toUpperCase(); l.style = g('style'); l.colour = g('colour'); l.gender = g('gender');
-    l.size_run = g('size_run').toUpperCase(); l.pack = g('pack'); l.pack_qty = g('pack_qty');
+    l.size_run = g('size_run').toUpperCase(); l.pack = g('pack');
     l.sizes = (l.sizes || []).filter(x => String(x.size).trim() !== '');
     l.qty = lineQty(l);
   });
@@ -272,7 +281,6 @@ ACTIONS['punch-save'] = () => {
     if (!ex) { merged.push(Object.assign({}, l, { sizes: (l.sizes || []).map(x => ({ size: x.size, qty: num(x.qty) })) })); return; }
     mergedNote = true;
     (l.sizes || []).forEach(x => { const e2 = ex.sizes.find(y => norm(y.size) === norm(x.size)); if (e2) e2.qty += num(x.qty); else ex.sizes.push({ size: x.size, qty: num(x.qty) }); });
-    ex.pack_qty = num(ex.pack_qty) + num(l.pack_qty);
   });
   lines.length = 0; merged.forEach(l => { l.qty = lineQty(l); lines.push(l); });
   if (errs.length) { $('#pMsg').innerHTML = '<span class="late-txt">Missing / wrong: ' + esc(errs.join(', ')) + '</span>'; return; }
@@ -280,7 +288,10 @@ ACTIONS['punch-save'] = () => {
   if (!cu) { $('#pMsg').innerHTML = '<span class="late-txt">Brand list mein nahi hai — Merchant → Brands mein pehle add karo.</span>'; return; }
   lines.forEach(l => { if (l.article && !Store.all('items').some(x => norm(x.code) === norm(l.article))) Store.put('items', { id: uid(), code: l.article, name: l.style, group: P.category, gender: l.gender }); });
   const o = P.id ? Store.get('orders', P.id) : { id: uid(), no: nextNo('orders', 'ORD'), process_id: activeProcess().id, actuals: {}, done_by: {}, created_at: nowIso(), created_by: ME.name };
-  Object.assign(o, { order_date: P.order_date, customer_id: cu.id, customer_name: cu.name, brand: cu.name, buyer_po: P.buyer_po, po_expiry_date: P.po_expiry_date, tooling_no: P.tooling_no, channel: P.channel, category: P.category, priority: P.priority, remarks: P.remarks, extra: P.extra, lines: lines.map(l => ({ article: l.article, style: l.style, colour: l.colour, gender: l.gender, size_run: l.size_run, size: l.size_run, sizes: (l.sizes || []).filter(x => num(x.qty) > 0).map(x => ({ size: x.size, qty: num(x.qty) })), qty: lineQty(l), pack: l.pack, pack_qty: num(l.pack_qty) })) });
+  Object.assign(o, { order_date: P.order_date, customer_id: cu.id, customer_name: cu.name, brand: cu.name, buyer_po: P.buyer_po, po_expiry_date: P.po_expiry_date, tooling_no: P.tooling_no, channel: P.channel, category: P.category, priority: P.priority, remarks: P.remarks, extra: P.extra, lines: lines.map(l => ({ article: l.article, style: l.style, colour: l.colour, gender: l.gender, size_run: l.size_run, size: l.size_run, sizes: (l.sizes || []).filter(x => num(x.qty) > 0).map(x => ({ size: x.size, qty: num(x.qty) })), qty: lineQty(l), pack: l.pack, jc_no: l.jc_no || '' })) });
+  // Har article line ko Job Card No auto-assign (ZF-xxxx) — agar pehle se nahi hai
+  let jcSeq = jcNoBase();
+  o.lines.forEach(l => { if (!l.jc_no) { jcSeq += 1; l.jc_no = 'ZF-' + String(jcSeq).padStart(4, '0'); } });
   Store.put('orders', o);
   audit(P.id ? 'order.edit' : 'order.create', o.no, cu.name + ' · PO ' + P.buyer_po + ' · ' + qtyFmt(orderTotals(o).qty) + ' qty');
   if (P.id) { PUNCH = null; flash('Saved ' + esc(o.no) + '.'); go('order', o.id); return; }
@@ -302,12 +313,23 @@ VIEWS.orders = {
         case 'done': return x.st.label === 'Dispatched'; case 'cancel': return x.o.priority === 'Cancelled'; default: return true;
       }
     });
-    let h = '<h1>Orders</h1><div class="toolbar">' + seg('f', [{ v: 'open', l: 'Open' }, { v: 'late', l: 'Late' }, { v: 'hold', l: 'On hold' }, { v: 'done', l: 'Dispatched' }, { v: 'cancel', l: 'Cancelled' }, { v: 'all', l: 'All' }], ORD_UI.f) +
-      '<input id="ordQ" placeholder="Order no / brand / PO / article…" value="' + esc(ORD_UI.q) + '"><span class="muted small">' + rows.length + ' order(s)</span><span class="grow"></span>' +
+    let h = '<h1>Punched Orders</h1><div class="toolbar">' + seg('f', [{ v: 'open', l: 'Open' }, { v: 'late', l: 'Late' }, { v: 'hold', l: 'On hold' }, { v: 'done', l: 'Dispatched' }, { v: 'cancel', l: 'Cancelled' }, { v: 'all', l: 'All' }], ORD_UI.f) +
+      '<input id="ordQ" placeholder="Order no / brand / PO / article / JC\u2026" value="' + esc(ORD_UI.q) + '"><span class="muted small">' + rows.length + ' order(s)</span><span class="grow"></span>' +
       '<button class="btn" data-act="orders-csv">Export CSV</button>' + (can('orders', 'edit') ? '<a class="btn primary" href="#/punch">+ Punch order</a>' : '') + '</div>';
-    h += '<div class="tbl-wrap"><table><tr><th>Order</th><th>Date</th><th>Brand</th><th>Buyer PO</th><th>Category</th><th>Channel</th><th class="num">Qty</th><th class="num">Dispatched</th><th>PO expiry</th><th>Current step</th></tr>' +
-      (rows.length ? rows.map(x => '<tr class="click" data-act="go" data-v="order" data-p="' + esc(x.o.id) + '"><td class="nowrap"><b>' + esc(x.o.no) + '</b>' + (x.o.priority === 'Urgent' ? ' <span class="late-txt small">URGENT</span>' : '') + '</td><td class="nowrap">' + fmtD(x.o.order_date) + '</td><td>' + esc(x.o.customer_name) + '</td><td>' + esc(x.o.buyer_po) + '</td><td>' + esc(x.o.category) + '</td><td>' + esc(x.o.channel) + '</td>' +
-        '<td class="num">' + qtyFmt(x.t.qty) + '</td><td class="num">' + (x.d.total ? qtyFmt(x.d.total) : '') + '</td><td class="nowrap">' + fmtD(x.o.po_expiry_date) + '</td><td>' + stHtml(x.st.label).replace('class="st ' + stCls(x.st.label), 'class="st ' + x.st.cls) + (x.st.late > 1 ? ' <span class="muted small">+' + (x.st.late - 1) + ' more late</span>' : '') + '</td></tr>').join('') : '<tr><td colspan="10" class="empty">No orders</td></tr>') + '</table></div>';
+    h += '<div class="tbl-wrap"><table><tr><th>Time Stamp</th><th>Order Date</th><th>Tooling/Mould No</th><th>Buyer PO NO</th><th>Po Expiry Date</th><th>Brand</th><th>Article</th><th>Style</th><th>Colour</th><th>Gender</th><th class="num">Qty</th><th>Channel</th><th>Size</th><th>Category</th><th>Packing Assortment/Solid</th><th>Assortment Qty /Solid Qty</th><th>Job Card No.</th></tr>' +
+      (rows.length ? rows.flatMap(x => (x.o.lines || []).map((l, li) => '<tr class="click" data-act="go" data-v="order" data-p="' + esc(x.o.id) + '">' +
+        (li === 0 ? '<td class="nowrap" rowspan="' + x.o.lines.length + '">' + fmtDT(x.o.created_at) + '<div class="small"><b>' + esc(x.o.no) + '</b>' + (x.o.priority === 'Urgent' ? ' <span class="late-txt">URGENT</span>' : '') + '</div></td>' +
+          '<td class="nowrap" rowspan="' + x.o.lines.length + '">' + fmtD(x.o.order_date) + '</td>' +
+          '<td rowspan="' + x.o.lines.length + '">' + esc(x.o.tooling_no || '') + '</td>' +
+          '<td rowspan="' + x.o.lines.length + '">' + esc(x.o.buyer_po || '') + '</td>' +
+          '<td class="nowrap" rowspan="' + x.o.lines.length + '">' + fmtD(x.o.po_expiry_date) + '</td>' +
+          '<td rowspan="' + x.o.lines.length + '">' + esc(x.o.customer_name) + '</td>' : '') +
+        '<td><b>' + esc(l.article) + '</b></td><td>' + esc(l.style || '') + '</td><td>' + esc(l.colour || '') + '</td><td>' + esc(l.gender || '') + '</td><td class="num">' + qtyFmt(l.qty) + '</td>' +
+        (li === 0 ? '<td rowspan="' + x.o.lines.length + '">' + esc(x.o.channel || '') + '</td>' : '') +
+        '<td>' + esc(l.size_run || l.size || '') + '</td>' +
+        (li === 0 ? '<td rowspan="' + x.o.lines.length + '">' + esc(x.o.category || '') + '</td>' : '') +
+        '<td>' + esc(l.pack || '') + '</td><td class="small">' + esc(sizeSummary(l)) + '</td><td class="nowrap"><b>' + esc(l.jc_no || '') + '</b></td></tr>')).join('') :
+        '<tr><td colspan="17" class="empty">No orders</td></tr>') + '</table></div>';
     setMain(h); VIEWS.orders.rows = rows;
     onSeg(e => { ORD_UI.f = e.detail; VIEWS.orders.render(); });
     $('#ordQ').addEventListener('input', e => { ORD_UI.q = e.target.value; clearTimeout(ORD_UI.t); ORD_UI.t = setTimeout(() => { VIEWS.orders.render(); const i = $('#ordQ'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }, 250); });
@@ -318,8 +340,8 @@ function downloadCsv(name, rows) {
   const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv' })); a.download = name; a.click();
 }
 ACTIONS['orders-csv'] = () => downloadCsv('orders-' + todayYmd() + '.csv',
-  [['Order No', 'Time Stamp', 'Order Date', 'Tooling/Mould No', 'Buyer PO No', 'PO Expiry Date', 'Brand', 'Article', 'Style', 'Colour', 'Gender', 'Qty', 'Channel', 'Size', 'Category', 'Packing', 'Asst/Solid Qty', 'Dispatched', 'Current step']]
-  .concat((VIEWS.orders.rows || []).flatMap(x => (x.o.lines || []).map(l => [x.o.no, fmtDT(x.o.created_at), x.o.order_date, x.o.tooling_no, x.o.buyer_po, x.o.po_expiry_date, x.o.customer_name, l.article, l.style, l.colour, l.gender, l.qty, x.o.channel, sizeSummary(l) || l.size || '', x.o.category, l.pack, l.pack_qty, x.d.total, x.st.label]))));
+  [['Order No', 'Time Stamp', 'Order Date', 'Tooling/Mould No', 'Buyer PO No', 'PO Expiry Date', 'Brand', 'Article', 'Style', 'Colour', 'Gender', 'Qty', 'Channel', 'Size', 'Category', 'Packing Assortment/Solid', 'Assortment Qty /Solid Qty', 'Job Card No.', 'Dispatched', 'Current step']]
+  .concat((VIEWS.orders.rows || []).flatMap(x => (x.o.lines || []).map(l => [x.o.no, fmtDT(x.o.created_at), x.o.order_date, x.o.tooling_no, x.o.buyer_po, x.o.po_expiry_date, x.o.customer_name, l.article, l.style, l.colour, l.gender, l.qty, x.o.channel, l.size_run || l.size || '', x.o.category, l.pack, sizeSummary(l), l.jc_no || '', x.d.total, x.st.label]))));
 
 /* ---------------- Order page ---------------- */
 VIEWS.order = {
@@ -334,9 +356,9 @@ VIEWS.order = {
     h += '<div class="panel"><table class="kv">' + [['Time stamp', fmtDT(o.created_at)], ['Order date', fmtD(o.order_date)], ['Buyer PO no', o.buyer_po], ['PO expiry date', fmtD(o.po_expiry_date)], ['Tooling / Mould no', o.tooling_no], ['Category', o.category], ['Channel', o.channel], ['Priority', o.priority || 'Normal'], ['Remarks', o.remarks], ['Punched by', o.created_by], ['FMS flow', proc ? proc.name + ' v' + proc.version : '—']]
       .concat(Object.entries(o.extra || {}).filter(e => e[1]).map(([k, v]) => { const f = proc && proc.spec.fields.find(x => x.key === k); return [f ? f.label : k, v]; }))
       .map(([k, v]) => '<tr><td class="muted" style="width:140px">' + esc(k) + '</td><td>' + esc(v) + '</td></tr>').join('') + '</table></div>';
-    h += '<h2>Articles</h2><div class="tbl-wrap"><table><tr><th>Article</th><th>Style</th><th>Colour</th><th>Gender</th><th>Size</th><th>Packing</th><th class="num">Ordered</th><th class="num">Dispatched</th><th class="num">Pending</th></tr>' +
-      o.lines.map((l, i) => '<tr><td><b>' + esc(l.article) + '</b></td><td>' + esc(l.style) + '</td><td>' + esc(l.colour) + '</td><td>' + esc(l.gender) + '</td><td class="small">' + esc(sizeSummary(l) || l.size || '') + '</td><td>' + esc(l.pack) + (l.pack_qty ? ' · ' + qtyFmt(l.pack_qty) : '') + '</td><td class="num">' + qtyFmt(l.qty) + '</td><td class="num">' + qtyFmt(d.per[i]) + '</td><td class="num">' + qtyFmt(Math.max(0, l.qty - d.per[i])) + '</td></tr>').join('') +
-      '<tr><td><b>Total</b></td><td colspan="5"></td><td class="num"><b>' + qtyFmt(t.qty) + '</b></td><td class="num">' + qtyFmt(d.total) + '</td><td class="num">' + qtyFmt(d.pending) + '</td></tr></table></div>';
+    h += '<h2>Articles</h2><div class="tbl-wrap"><table><tr><th>Article</th><th>Style</th><th>Colour</th><th>Gender</th><th>Size</th><th>Packing</th><th>Asst/Solid Qty</th><th>Job Card No.</th><th class="num">Ordered</th><th class="num">Dispatched</th><th class="num">Pending</th></tr>' +
+      o.lines.map((l, i) => '<tr><td><b>' + esc(l.article) + '</b></td><td>' + esc(l.style) + '</td><td>' + esc(l.colour) + '</td><td>' + esc(l.gender) + '</td><td>' + esc(l.size_run || l.size || '') + '</td><td>' + esc(l.pack) + '</td><td class="small">' + esc(sizeSummary(l)) + '</td><td class="nowrap"><b>' + esc(l.jc_no || '') + '</b></td><td class="num">' + qtyFmt(l.qty) + '</td><td class="num">' + qtyFmt(d.per[i]) + '</td><td class="num">' + qtyFmt(Math.max(0, l.qty - d.per[i])) + '</td></tr>').join('') +
+      '<tr><td><b>Total</b></td><td colspan="7"></td><td class="num"><b>' + qtyFmt(t.qty) + '</b></td><td class="num">' + qtyFmt(d.total) + '</td><td class="num">' + qtyFmt(d.pending) + '</td></tr></table></div>';
     const dsp = Store.all('dispatches').filter(x => x.order_id === o.id);
     if (dsp.length) h += '<h2>Dispatches</h2><div class="tbl-wrap"><table><tr><th>No</th><th>Date</th><th class="num">Qty</th><th>Invoice</th><th>Vehicle</th><th>Transporter / LR</th></tr>' +
       dsp.map(x => '<tr' + (x.cancelled ? ' class="muted" style="text-decoration:line-through"' : '') + '><td>' + esc(x.no) + '</td><td>' + fmtD(x.date) + '</td><td class="num">' + qtyFmt(x.lines.reduce((s, l) => s + num(l.qty), 0)) + '</td><td>' + esc(x.invoice_no) + '</td><td>' + esc(x.vehicle) + '</td><td>' + esc(x.transporter) + ' ' + esc(x.lr_no) + '</td></tr>').join('') + '</table></div>';

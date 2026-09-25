@@ -11,7 +11,13 @@ function itemCodeAuto(cat) {
   const max = Store.all('materials').reduce((m, x) => x.code && x.code.startsWith(p) ? Math.max(m, parseInt(x.code.slice(p.length), 10) || 0) : m, 0);
   return p + String(max + 1).padStart(4, '0');
 }
-function jcNo() { const max = Store.all('job_cards').reduce((m, j) => j.no && j.no.startsWith('ZF-') ? Math.max(m, parseInt(j.no.slice(3), 10) || 0) : m, 0); return 'ZF-' + String(max + 1).padStart(4, '0'); }
+function jcNo() {
+  let max = 0;
+  const scan = no => { if (no && String(no).startsWith('ZF-')) max = Math.max(max, parseInt(String(no).slice(3), 10) || 0); };
+  Store.all('job_cards').forEach(j => scan(j.no));
+  Store.all('orders').forEach(o => (o.lines || []).forEach(l => scan(l.jc_no)));
+  return 'ZF-' + String(max + 1).padStart(4, '0');
+}
 // image -> small JPEG dataURL (800px max) so localStorage/Supabase par bhaari na pade
 function readImg(file, cb) {
   if (!file) return cb('');
@@ -411,7 +417,7 @@ function jcDetail(j) {
 function jcForm() {
   const orders = Store.all('orders').filter(o => orderState(o).open);
   return '<div class="card"><div class="card-h"><b>New Job Card</b><span class="muted small">' + jcNo() + ' · order chuno, sizes check karo, BOM auto aayega</span></div><div class="card-b"><datalist id="dlOrdJc">' + orders.map(o => '<option value="' + esc(o.no) + '">' + esc(o.customer_name) + '</option>').join('') + '</datalist>' +
-    '<div class="row"><label>Order *<input id="jfOrd" list="dlOrdJc" placeholder="Select order..."></label><label>Article line *<select id="jfLine" disabled><option value="">—</option></select></label><label>JC No<input value="' + esc(jcNo()) + '" readonly style="width:90px"></label></div>' +
+    '<div class="row"><label>Order *<input id="jfOrd" list="dlOrdJc" placeholder="Select order..."></label><label>Article line *<select id="jfLine" disabled><option value="">—</option></select></label><label>JC No <span class="muted small">(order se auto)</span><input id="jfNo" value="" readonly style="width:100px"></label></div>' +
     '<div class="grid2" style="margin-top:10px"><div><h2 style="margin-top:0">Order details</h2><table class="kv" id="jfDetails"><tr><td class="muted">Pehle order aur article chuno</td></tr></table>' +
     '<div class="row" style="margin-top:8px">' + imgField('jfPhoto', 'Product Image') + '<span id="jfPhotoTag" class="muted small"></span></div></div>' +
     '<div><h2 style="margin-top:0">Sizes</h2><table id="jfSizes" style="max-width:420px"><tr><th>SIZE</th><th class="num">Act.Ord</th><th class="num">Extra(2%)</th><th></th></tr><tr id="jfSzTotal"><td><b>Total</b></td><td class="num"><b id="jfActT">0</b></td><td class="num"><b id="jfExtT">0</b></td><td></td></tr></table>' +
@@ -472,6 +478,7 @@ function jcFormWire() {
 function jcfFillFromOrder() {
   const o = Store.all('orders').find(x => norm(x.no) === norm($('#jfOrd').value)); if (!o) return;
   const li = num($('#jfLine').value); const l = jcOrderLine(o, li);
+  if ($('#jfNo')) $('#jfNo').value = l.jc_no || jcNo();
   $('#jfDetails').innerHTML = [['Date', fmtD(o.order_date)], ['Brand', o.customer_name], ['Style', l.style], ['Colour', l.colour], ['Gender', l.gender], ['Category', o.category], ['Tooling', o.tooling_no], ['Article', l.article], ['Size Run', l.size], ['Order Qty', qtyFmt(l.qty)]]
     .map(([k, v]) => '<tr><td class="muted" style="width:90px">' + k + '</td><td>' + esc(v || '') + '</td></tr>').join('');
   // size rows: order line ke size-wise breakup se prefill (fallback: single row)
@@ -517,8 +524,10 @@ ACTIONS['jc-save'] = () => {
   const badNorm = $$('#jfBom tr[data-bomrow]').some(tr => matBy($('[data-b="mat"]', tr).value) && num($('[data-b="norms"]', tr).value) <= 0);
   if (badNorm) { $('#njMsg').innerHTML = '<span class="late-txt">Har item ka Norms 0 se zyada hona chahiye.</span>'; return; }
   if (!lines.length) { $('#njMsg').innerHTML = '<span class="late-txt">Kam se kam ek BOM item chahiye (master wala).</span>'; return; }
+  const wantNo = (($('#jfNo') || {}).value || l.jc_no || '').trim();
+  const useNo = wantNo && !Store.all('job_cards').some(x => norm(x.no) === norm(wantNo)) ? wantNo : jcNo();
   const j = Store.put('job_cards', {
-    id: uid(), no: jcNo(), order_no: o.no, brand: o.customer_name, article: l.article, style: l.style || '', colour: l.colour || '', gender: l.gender || '', category: o.category,
+    id: uid(), no: useNo, order_no: o.no, brand: o.customer_name, article: l.article, style: l.style || '', colour: l.colour || '', gender: l.gender || '', category: o.category,
     qty: act, sizes, lines, photo: JCF.photo || '', line_status: segVal($('[data-seg="jfStatus"]')) || 'NA', remarks: $('#jfRem').value.trim(),
     swatch_status: 'Pending', status: 'Open', corrections: [], by: ME.name, at: nowIso()
   });

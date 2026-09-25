@@ -100,6 +100,7 @@ function seedData(cloud) {
     { c: 'c1', cat: 'Shoes', ch: 'Online', ago: 3, done: 0, lines: [L('ZT-102', 'Beige', '4X8', 120, 'Solid', 120)], dd: 10 },
     { c: 'c3', cat: 'Eva Slider', ch: 'Online', ago: 40, done: 4, lines: [L('ZT-501', 'Lilac', '4X8', 1000, 'Assortment', 100)], dd: 5 }
   ];
+  let jcSeed = 2;   // ZF-0001/0002 job cards ke baad se
   plan.forEach((p, n) => {
     const cu = base.customers.find(c => c.id === p.c);
     const created = hoursAgo(p.ago);
@@ -110,6 +111,11 @@ function seedData(cloud) {
       priority: p.pri || '', remarks: '', lines: p.lines,
       process_id: 'p_o2d_1', actuals: {}, done_by: {}, created_at: created.toISOString(), created_by: 'Rahul (Sales)', updated_at: created.toISOString()
     };
+    o.lines.forEach((l, li) => {
+      if (n === 0 && li === 0) l.jc_no = 'ZF-0001';
+      else if (n === 3 && li === 0) l.jc_no = 'ZF-0002';
+      else { jcSeed += 1; l.jc_no = 'ZF-' + String(jcSeed).padStart(4, '0'); }
+    });
     DB.orders.push(o);
     for (let k = 0; k < p.done; k++) {
       o.updated_at = uid(); RES_CACHE.clear();
