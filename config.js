@@ -9,6 +9,6 @@
 //  * SERVICE_ROLE key kabhi bhi kisi file, app ya chat mein mat daalna.
 //  * Supabase dashboard mein public signup band rakho — users admin banayega.
 window.NEXUS_CONFIG = {
-  SUPABASE_URL: '',
-  SUPABASE_ANON_KEY: ''
+  SUPABASE_URL: 'https://nvpdncpvqwcalibpttdx.supabase.co',
+  SUPABASE_ANON_KEY: 'sb_publishable_YHv5q1-Lmlrgzl2I0s_Ekw_g6Qpvwg-'
 };
