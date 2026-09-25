@@ -46,7 +46,7 @@ function flash(msg, type) {
 }
 
 /* ================= store ================= */
-const DB_KEY = 'nexus2_db_v5';
+const DB_KEY = 'nexus2_db_v6';
 const COLS = ['users', 'roles', 'customers', 'items', 'materials', 'processes', 'orders', 'dispatches', 'purchase_orders', 'sourcing', 'grns', 'inwards', 'vendors', 'issues', 'rsjw', 'rtvs', 'boms', 'job_cards', 'requisitions', 'tickets', 'checklist', 'audit'];
 let DB = null;
 const CFG = window.NEXUS_CONFIG || {};

@@ -3,6 +3,25 @@
 
 /* ---------- shared helpers ---------- */
 function matBy(code) { return Store.all('materials').find(m => norm(m.code) === norm(code) || norm(m.name) === norm(code)); }
+const UOMS = ['NOS', 'PAIR', 'PCS', 'PACK', 'BOX', 'ROLL', 'SET', 'DOZ', 'KGS', 'GM', 'MTR', 'CM', 'MM', 'INCH', 'FT', 'YARD', 'DM', 'LTR', 'ML', 'CAN', 'SQFT', 'SQM', 'SHEET'];
+const ITEM_CATS = ['Compound', 'Consumable Item', 'Fabric', 'Grinderies', 'Leather', 'Packaging', 'Silicon', 'Sole', 'Synthetic', 'Upper'];
+const CAT_PREFIX = { 'compound': 'COM', 'consumable item': 'CON', 'fabric': 'FAB', 'grinderies': 'GRI', 'leather': 'LEA', 'packaging': 'PAC', 'silicon': 'SIL', 'sole': 'SOL', 'synthetic': 'SYN' };
+function itemCodeAuto(cat) {
+  const p = CAT_PREFIX[norm(cat)] || (cat ? norm(cat).slice(0, 3).toUpperCase() : 'ITM');
+  const max = Store.all('materials').reduce((m, x) => x.code && x.code.startsWith(p) ? Math.max(m, parseInt(x.code.slice(p.length), 10) || 0) : m, 0);
+  return p + String(max + 1).padStart(4, '0');
+}
+function jcNo() { const max = Store.all('job_cards').reduce((m, j) => j.no && j.no.startsWith('ZF-') ? Math.max(m, parseInt(j.no.slice(3), 10) || 0) : m, 0); return 'ZF-' + String(max + 1).padStart(4, '0'); }
+// image -> small JPEG dataURL (800px max) so localStorage/Supabase par bhaari na pade
+function readImg(file, cb) {
+  if (!file) return cb('');
+  const img = new Image(); const fr = new FileReader();
+  fr.onload = () => { img.onload = () => { const c = document.createElement('canvas'); const k = Math.min(1, 800 / Math.max(img.width, img.height)); c.width = img.width * k; c.height = img.height * k; c.getContext('2d').drawImage(img, 0, 0, c.width, c.height); cb(c.toDataURL('image/jpeg', 0.72)); }; img.src = fr.result; };
+  fr.readAsDataURL(file);
+}
+function imgField(id, label, req) { return '<label>' + label + (req ? ' *' : '') + '<input type="file" id="' + id + '" accept="image/*"></label>'; }
+function photoThumb(src) { return src ? '<a data-act="img-view" data-src="' + esc(src) + '"><img src="' + esc(src) + '" style="height:26px;border-radius:3px;vertical-align:middle"></a>' : ''; }
+ACTIONS['img-view'] = el => { const w = window.open(''); w.document.write('<img src="' + el.dataset.src + '" style="max-width:100%">'); };
 function dlMat(id) { return '<datalist id="' + id + '">' + Store.all('materials').map(m => '<option value="' + esc(m.code) + '">' + esc(m.name + ' · ' + m.uom) + '</option>').join('') + '</datalist>'; }
 function vendorNames() { return Store.all('vendors').map(v => v.name).sort(); }
 function vendorBy(name) { return Store.all('vendors').find(v => norm(v.name) === norm(name)); }
@@ -110,7 +129,7 @@ function poDetail(p) {
     '<div class="right"><b>' + esc(p.no) + '</b><div class="muted small">' + fmtD(p.date) + ' · Expected ' + fmtD(p.expected) + '</div></div></div>' +
     '<div class="small" style="margin:6px 0"><b>Vendor:</b> ' + esc(p.vendor) + (v.address ? ' · ' + esc(v.address) : '') + (v.gstin ? ' · GSTIN ' + esc(v.gstin) : '') + (v.mobile ? ' · ' + esc(v.mobile) : '') + '</div>' +
     '<table style="max-width:640px"><tr><th>Material</th><th>UOM</th><th class="num">Qty</th><th class="num">Rate ₹</th><th class="num">Amount ₹</th></tr>' +
-    p.lines.map(l => '<tr><td>' + esc(l.material) + (l.jc_no ? ' <span class="muted small">' + esc(l.jc_no) + '</span>' : '') + '</td><td>' + esc(l.uom) + '</td><td class="num">' + qtyFmt(l.qty) + '</td><td class="num">' + money(l.rate) + '</td><td class="num">' + money(num(l.qty) * num(l.rate)) + '</td></tr>').join('') +
+    p.lines.map(l => '<tr><td>' + esc(l.material) + (l.jc_no ? ' <span class="muted small">' + esc(l.jc_no) + '</span>' : '') + (l.remark ? '<div class="muted small">' + esc(l.remark) + '</div>' : '') + '</td><td>' + esc(l.uom) + '</td><td class="num">' + qtyFmt(l.qty) + '</td><td class="num">' + money(l.rate) + (l.gst ? '<div class="muted small">+' + l.gst + '% GST</div>' : '') + '</td><td class="num">' + money(num(l.qty) * num(l.rate) * (1 + num(l.gst || 0) / 100)) + '</td></tr>').join('') +
     '<tr><td colspan="4" class="right"><b>Total</b></td><td class="num"><b>' + money(total) + '</b></td></tr></table>' +
     (p.remarks ? '<div class="small" style="margin-top:4px"><b>Remarks:</b> ' + esc(p.remarks) + '</div>' : '') +
     '<div class="toolbar noprint" style="margin-top:8px"><button class="btn sm" data-act="po-print">Print</button></div></div>';
@@ -142,10 +161,15 @@ function poForm() {
 function poFormSetup() {
   const mode = PO_UI.mode || 'jc';
   $('#npHead').innerHTML = mode === 'manual'
-    ? '<th style="width:200px">Material</th><th style="width:70px">UOM</th><th class="num" style="width:110px">Qty</th><th class="num" style="width:110px">Rate ₹</th><th style="width:30px"></th>'
+    ? '<th>Item Name</th><th>Category</th><th>Code</th><th>HSN</th><th>UOM</th><th class="num">Rate</th><th class="num">GST %</th><th>Remark</th><th>Job Card</th><th class="num">Qty</th><th class="num">Amount</th><th class="num">Total</th><th></th>'
     : '<th style="width:110px">JC</th><th style="width:180px">Material</th><th class="num">JC pending</th><th class="num">Stock free</th><th class="num">Transit</th><th class="num" style="width:110px">Order qty</th><th class="num" style="width:100px">Rate ₹</th>';
   $('#npAdd').classList.toggle('hidden', mode !== 'manual');
   $('#npLines').innerHTML = mode === 'manual' ? poLineRow() : '';
+  const tb = $('#npLines').closest('table');
+  if (!$('#npFoot', tb)) tb.insertAdjacentHTML('beforeend', '<tr id="npFoot"></tr>');
+  $('#npFoot').innerHTML = '';
+  if (!document.getElementById('dlJcPo')) document.body.insertAdjacentHTML('beforeend', '<datalist id="dlJcPo"></datalist>');
+  document.getElementById('dlJcPo').innerHTML = Store.all('job_cards').filter(j => j.status !== 'Closed').map(j => '<option value="' + esc(j.no) + '">').join('');
   $('#npHint').textContent = mode === 'manual' ? '' : 'Vendor chuno — us supplier ke saare open JC materials jinka PO banna baaki hai, apne aap aa jayenge (purana "vendor pending list" logic).';
 }
 // vendor ke pending JC lines: pending = required − po_raised; prefill net = max(0, pending − stockFree − transit) per material FIFO
@@ -170,19 +194,39 @@ function poFillJc(vendor) {
   }).join('') : '<tr><td colspan="7" class="empty">Is vendor ka koi pending JC requirement nahi — Manual mode use karo.</td></tr>';
   $('#npHint').innerHTML = rows.length ? 'Order qty pehle se <b>net-to-order</b> hai (pending − free stock − transit). JC pending se zyada nahi ja sakti. Rate sourcing se aaya hai.' : '';
 }
-function poLineRow() { return '<tr><td><input data-np="mat" list="dlMatPo"></td><td class="muted" data-uom></td><td><input data-np="qty" type="number" min="0" step="any" class="right"></td><td><input data-np="rate" type="number" min="0" step="any" class="right"></td><td><button class="btn ghost sm" data-act="po-line-del">×</button></td></tr>'; }
+function poLineRow() {
+  return '<tr data-mline><td><input data-np="mat" list="dlMatPo" placeholder="Item Name"></td><td class="muted small" data-np-cat></td><td class="muted" data-np-code></td><td class="muted small" data-np-hsn></td><td class="muted" data-uom></td>' +
+    '<td><input data-np="rate" type="number" min="0" step="any" class="right" style="width:80px"></td><td><input data-np="gst" type="number" min="0" step="any" class="right" style="width:60px"></td>' +
+    '<td><input data-np="rem" style="width:100px"></td><td><input data-np="jc" list="dlJcPo" style="width:90px"></td>' +
+    '<td><input data-np="qty" type="number" min="0" step="any" class="right" style="width:80px"></td><td class="num muted" data-np-amt>0</td><td class="num muted" data-np-tot>0</td><td><button class="btn ghost sm" data-act="po-line-del">×</button></td></tr>';
+}
+function poManualRecalc() {
+  let q = 0, amt = 0, net = 0;
+  $$('#npLines tr[data-mline]').forEach(tr => { const a2 = num($('[data-np="qty"]', tr).value) * num($('[data-np="rate"]', tr).value); const g = a2 * (1 + num($('[data-np="gst"]', tr).value) / 100); $('[data-np-amt]', tr).textContent = a2 ? money(a2) : '0'; $('[data-np-tot]', tr).textContent = a2 ? money(g) : '0'; q += num($('[data-np="qty"]', tr).value); amt += a2; net += g; });
+  const f = $('#npFoot'); if (f) f.innerHTML = '<td><b>Total:</b></td><td colspan="8"></td><td class="num"><b>' + qtyFmt(q) + '</b></td><td class="num"><b>' + money(amt) + '</b></td><td class="num"><b>' + money(net) + '</b></td><td></td>';
+}
+document.addEventListener('input', e => { if (e.target.closest && e.target.closest('tr[data-mline]')) poManualRecalc(); });
 ACTIONS['po-new'] = () => { PO_UI.form = !PO_UI.form; VIEWS.po.render(); if (PO_UI.form) { poFormSetup(); $('#npVen').focus(); } };
 document.addEventListener('change', e => { if (e.target.id === 'npVen' && (PO_UI.mode || 'jc') === 'jc') { const v = vendorBy(e.target.value); if (v) poFillJc(v.name); } });
 document.addEventListener('input', e => { if (e.target.dataset && e.target.dataset.jqty != null) { const tr = e.target.closest('tr'); if (num(e.target.value) > num(tr.dataset.max)) { e.target.value = tr.dataset.max; flash('JC pending se zyada order nahi ho sakta.', 'err'); } } });
 ACTIONS['po-line'] = () => { $('#npLines').insertAdjacentHTML('beforeend', poLineRow()); };
 ACTIONS['po-line-del'] = el => el.closest('tr').remove();
-document.addEventListener('change', e => { if (e.target.dataset.np === 'mat') { const m = matBy(e.target.value); if (m) { e.target.value = m.code; $('[data-uom]', e.target.closest('tr')).textContent = m.uom; } } });
+document.addEventListener('change', e => {
+  if (e.target.dataset.np !== 'mat') return;
+  const m = Store.all('materials').find(x => norm(x.name) === norm(e.target.value) || norm(x.code) === norm(e.target.value));
+  const tr = e.target.closest('tr'); if (!m) return;
+  e.target.value = m.name;
+  $('[data-np-cat]', tr).textContent = m.group || ''; $('[data-np-code]', tr).textContent = m.code; $('[data-np-hsn]', tr).textContent = m.hsn || ''; $('[data-uom]', tr).textContent = m.uom;
+  const r = $('[data-np="rate"]', tr); if (!r.value) r.value = m.price || '';
+  const g = $('[data-np="gst"]', tr); if (!g.value && m.gst != null) g.value = m.gst;
+  poManualRecalc();
+});
 ACTIONS['po-save'] = () => {
   if (!requirePerm('purchase', 'edit')) return;
   const ven = $('#npVen').value.trim(); const exp = $('#npExp').value;
   const mode = PO_UI.mode || 'jc';
   const lines = mode === 'manual'
-    ? $$('#npLines tr').map(tr => { const m = matBy($('[data-np="mat"]', tr).value); return { material: m ? m.code : ($('[data-np="mat"]', tr) ? $('[data-np="mat"]', tr).value.trim().toUpperCase() : ''), uom: m ? m.uom : '', qty: num(($('[data-np="qty"]', tr) || {}).value), rate: num(($('[data-np="rate"]', tr) || {}).value), received: 0, rejected: 0 }; }).filter(l => l.material && l.qty > 0)
+    ? $$('#npLines tr[data-mline]').map(tr => { const m = Store.all('materials').find(x => norm(x.name) === norm($('[data-np="mat"]', tr).value) || norm(x.code) === norm($('[data-np="mat"]', tr).value)); return m ? { material: m.code, uom: m.uom, qty: num($('[data-np="qty"]', tr).value), rate: num($('[data-np="rate"]', tr).value), gst: num($('[data-np="gst"]', tr).value), remark: $('[data-np="rem"]', tr).value.trim(), jc_no: $('[data-np="jc"]', tr).value.trim(), received: 0, rejected: 0 } : null; }).filter(l => l && l.qty > 0)
     : $$('#npLines tr[data-jrow]').map(tr => { const m = matBy(tr.dataset.mat); return { material: tr.dataset.mat, uom: m ? m.uom : '', qty: num($('[data-jqty]', tr).value), rate: num($('[data-jrate]', tr).value), jc_no: tr.dataset.jc, received: 0, rejected: 0 }; }).filter(l => l.qty > 0);
   if (!ven || !exp || !lines.length) { $('#npMsg').innerHTML = '<span class="late-txt">Vendor, expected date aur kam se kam ek material line chahiye.</span>'; return; }
   const vm = vendorBy(ven);
@@ -231,56 +275,168 @@ ACTIONS['fu-save'] = el => {
 };
 
 /* ================= MERCHANT: job cards ================= */
-const JC_UI = { f: 'open', form: false };
+const JC_UI = { f: 'open', form: false, open: null };
+let JCF = null;   // job card form state
+function jcOrderLine(o, idx) { return (o.lines || [])[idx] || {}; }
+function jcBomFor(article, colour) {
+  const all = Store.all('boms').filter(x => norm(x.article) === norm(article));
+  return all.find(x => colour && norm(x.colour) === norm(colour)) || all.filter(x => !x.colour || true).sort((p, q) => q.version - p.version)[0] || null;
+}
 VIEWS.jobcards = {
   mod: 'merchant', render() {
     const edit = can('merchant', 'edit');
-    const rows = Store.all('job_cards').slice().sort((a, b) => b.no < a.no ? -1 : 1).filter(j => JC_UI.f === 'all' || (JC_UI.f === 'open' ? j.status !== 'Closed' : j.status === 'Closed'));
-    let h = subTitle('Job Cards') + '<div class="toolbar">' + seg('f', [{ v: 'open', l: 'Open' }, { v: 'closed', l: 'Closed' }, { v: 'all', l: 'All' }], JC_UI.f) + '<span class="grow"></span>' + (edit ? newBtn('New job card', 'jc-new') : '') + '</div>';
-    if (JC_UI.form && edit) h += '<div class="panel" style="margin-bottom:12px"><datalist id="dlOrd">' + Store.all('orders').filter(o => orderState(o).open).map(o => '<option value="' + esc(o.no) + '">' + esc(o.customer_name) + '</option>').join('') + '</datalist>' +
-      '<div class="row"><label>Order (optional)<input id="njOrd" list="dlOrd"></label><label>Brand *<input id="njBrand" list="dlBrand2"></label><label>Article *<input id="njArt" list="dlArt2"></label><label>Colour<input id="njCol"></label><label>Qty *<input id="njQty" type="number" min="0" style="width:90px"></label><button class="btn primary" data-act="jc-save">Save</button><span id="njMsg" class="small"></span></div>' +
-      '<datalist id="dlBrand2">' + Store.all('customers').map(c => '<option value="' + esc(c.name) + '">').join('') + '</datalist><datalist id="dlArt2">' + Store.all('items').map(i => '<option value="' + esc(i.code) + '">').join('') + '</datalist></div>';
-    h += '<div class="tbl-wrap"><table><tr><th>JC No</th><th>Order</th><th>Brand</th><th>Article</th><th class="num">Qty</th><th>Material</th><th>Swatch</th><th>Corrections</th><th>Status</th><th></th></tr>' +
+    const rows = Store.all('job_cards').slice().sort((a2, b2) => b2.no < a2.no ? -1 : 1).filter(j => JC_UI.f === 'all' || (JC_UI.f === 'open' ? j.status !== 'Closed' : j.status === 'Closed'));
+    let h = subTitle('Job Card', 'format: ZF-0001') + '<div class="toolbar">' + seg('f', [{ v: 'open', l: 'Open' }, { v: 'closed', l: 'Closed' }, { v: 'all', l: 'All' }], JC_UI.f) + '<span class="grow"></span>' + (edit ? newBtn('New job card', 'jc-new') : '') + '</div>';
+    if (JC_UI.form && edit) h += jcForm();
+    h += '<div class="tbl-wrap"><table><tr><th>JC No</th><th>Order</th><th>Brand</th><th>Article / Style</th><th class="num">Qty</th><th>Material</th><th>Swatch</th><th>Corrections</th><th>Status</th><th></th></tr>' +
       (rows.length ? rows.map(j => {
         const oc = (j.corrections || []).filter(x => !x.resolved).length;
         const L = j.lines || []; const req = L.reduce((s2, l) => s2 + num(l.required), 0);
         const iss = L.reduce((s2, l) => s2 + Math.min(num(l.required), issuedToJc(j.no, l.material)), 0);
         const ready = req ? Math.round(iss / req * 100) : null;
-        let row = '<tr class="click" data-act="jc-toggle" data-id="' + esc(j.id) + '"><td><b>' + esc(j.no) + '</b><div class="muted small">' + esc(j.by) + ' · ' + fmtD(j.at) + '</div></td><td>' + esc(j.order_no || '') + '</td><td>' + esc(j.brand) + '</td><td>' + esc(j.article) + (j.colour ? ' <span class="muted">' + esc(j.colour) + '</span>' : '') + '</td><td class="num">' + qtyFmt(j.qty) + '</td>' +
+        let row = '<tr class="click" data-act="jc-toggle" data-id="' + esc(j.id) + '"><td><b>' + esc(j.no) + '</b><div class="muted small">' + esc(j.by) + ' · ' + fmtD(j.at) + '</div></td><td>' + esc(j.order_no || '') + '</td><td>' + esc(j.brand) + '</td><td>' + esc(j.article) + (j.style ? ' · ' + esc(j.style) : '') + (j.colour ? ' <span class="muted">' + esc(j.colour) + '</span>' : '') + '</td><td class="num">' + qtyFmt(j.qty) + '</td>' +
           '<td>' + (ready == null ? '<span class="late-txt small">No BOM</span>' : '<span class="' + (ready >= 100 ? 'st Done' : 'small') + '">' + ready + '% issued</span>') + '</td>' +
           '<td><span class="st ' + (j.swatch_status === 'Approved' ? 'Done' : j.swatch_status === 'Rejected' ? 'Late' : 'Pending') + '">' + esc(j.swatch_status) + '</span></td><td>' + (oc ? '<span class="late-txt">' + oc + ' open</span>' : (j.corrections || []).length ? 'resolved' : '—') + '</td><td>' + stHtml(j.status === 'Closed' ? 'Done' : 'Pending').replace('>Done<', '>Closed<').replace('>Pending<', '>Open<') + '</td>' +
           '<td class="right">' + (edit && j.status !== 'Closed' ? '<button class="btn sm" data-act="jc-close" data-id="' + esc(j.id) + '" data-confirm="Close JC?">Close</button>' : '') + '</td></tr>';
-        if (JC_UI.open === j.id) row += '<tr class="inline-form"><td colspan="10">' + (L.length ? '<table style="max-width:860px;margin:4px 0"><tr><th>Material</th><th>Supplier</th><th class="num">Norms</th><th class="num">Required (+2%)</th><th class="num">PO raised</th><th class="num">Transit</th><th class="num">Reserved</th><th class="num">Issued</th><th class="num">Pending PO</th></tr>' +
-          L.map(l => { const issd = issuedToJc(j.no, l.material); const pen = Math.max(0, num(l.required) - num(l.po_raised)); return '<tr><td>' + esc(l.material) + '</td><td class="small">' + esc(l.supplier || '') + '</td><td class="num">' + l.norms + '</td><td class="num">' + qtyFmt(l.required) + '</td><td class="num">' + qtyFmt(l.po_raised) + '</td><td class="num muted">' + qtyFmt(transitOf(l.material)) + '</td><td class="num">' + qtyFmt(reservedOf(l.material, j.no)) + '</td><td class="num">' + qtyFmt(issd) + '</td><td class="num ' + (pen ? 'late-txt' : '') + '">' + (pen ? qtyFmt(pen) : '—') + '</td></tr>'; }).join('') + '</table>' : '<span class="muted small">BOM nahi mila tha — Development se BOM banwa ke JC dobara banao.</span>') + '</td></tr>';
+        if (JC_UI.open === j.id) row += '<tr class="inline-form"><td colspan="10">' + jcDetail(j) + '</td></tr>';
         return row;
       }).join('') : '<tr><td colspan="10" class="empty">No job cards</td></tr>') + '</table></div>';
     setMain(h);
-    onSeg(e => { JC_UI.f = e.detail; VIEWS.jobcards.render(); });
-    const ordIn = $('#njOrd'); if (ordIn) ordIn.addEventListener('change', e => {
-      const o = Store.all('orders').find(x => norm(x.no) === norm(e.target.value)); if (!o) return;
-      $('#njBrand').value = o.customer_name; const l = o.lines[0] || {}; $('#njArt').value = l.article || ''; $('#njCol').value = l.colour || ''; $('#njQty').value = orderTotals(o).qty;
+    onSeg(e => {
+      if (e.target.dataset.seg === 'f') { JC_UI.f = e.detail; VIEWS.jobcards.render(); return; }
     });
+    if (JC_UI.form) jcFormWire();
   }
 };
-ACTIONS['jc-new'] = () => { JC_UI.form = !JC_UI.form; VIEWS.jobcards.render(); };
-// BOM se JC material lines: required = ceil(norms x qty x 1.02) — purane IMS ka size-extra rule
-function jcLinesFromBom(article, qty) {
-  const b = Store.all('boms').filter(x => norm(x.article) === norm(article)).sort((a2, b2) => b2.version - a2.version)[0];
-  if (!b) return null;
-  return b.lines.map(l => ({ material: l.material, uom: l.uom, norms: num(l.qty), supplier: l.supplier || '', required: Math.ceil(num(l.qty) * qty * 1.02 * 1000) / 1000, po_raised: 0 }));
+function jcDetail(j) {
+  let h = '';
+  if (j.photo) h += '<div style="margin:4px 0">' + photoThumb(j.photo) + '</div>';
+  if ((j.sizes || []).length) h += '<table style="max-width:420px;margin:4px 0"><tr><th>SIZE</th><th class="num">Act.Ord</th><th class="num">Extra(2%)</th></tr>' + j.sizes.map(sz => '<tr><td>' + esc(sz.size) + '</td><td class="num">' + qtyFmt(sz.act) + '</td><td class="num">' + qtyFmt(sz.extra) + '</td></tr>').join('') + '<tr><td><b>Total</b></td><td class="num"><b>' + qtyFmt(j.sizes.reduce((s2, x) => s2 + num(x.act), 0)) + '</b></td><td class="num"><b>' + qtyFmt(j.sizes.reduce((s2, x) => s2 + num(x.extra), 0)) + '</b></td></tr></table>';
+  const L = j.lines || [];
+  h += L.length ? '<table style="max-width:960px;margin:4px 0"><tr><th>Section</th><th>Category</th><th>Item</th><th>Code</th><th>UOM</th><th class="num">Norms</th><th class="num">Req.Qty</th><th>Supplier</th><th class="num">PO raised</th><th class="num">Transit</th><th class="num">Reserved</th><th class="num">Issued</th><th class="num">Pending PO</th></tr>' +
+    L.map(l => { const issd = issuedToJc(j.no, l.material); const pen = Math.max(0, num(l.required) - num(l.po_raised)); const m = matBy(l.material) || {}; return '<tr><td class="small">' + esc(l.section || '') + '</td><td class="small">' + esc(l.category || m.group || '') + '</td><td>' + esc(m.name || '') + '</td><td>' + esc(l.material) + '</td><td>' + esc(l.uom) + '</td><td class="num">' + l.norms + '</td><td class="num">' + qtyFmt(l.required) + '</td><td class="small">' + esc(l.supplier || '') + '</td><td class="num">' + qtyFmt(l.po_raised) + '</td><td class="num muted">' + qtyFmt(transitOf(l.material)) + '</td><td class="num">' + qtyFmt(reservedOf(l.material, j.no)) + '</td><td class="num">' + qtyFmt(issd) + '</td><td class="num ' + (pen ? 'late-txt' : '') + '">' + (pen ? qtyFmt(pen) : '—') + '</td></tr>'; }).join('') + '</table>'
+    : '<span class="muted small">BOM nahi mila tha — Development se BOM banwa ke JC dobara banao.</span>';
+  if (j.remarks) h += '<div class="small"><b>Remarks:</b> ' + esc(j.remarks) + '</div>';
+  return h;
 }
+function jcForm() {
+  const orders = Store.all('orders').filter(o => orderState(o).open);
+  return '<div class="panel" style="margin-bottom:12px"><datalist id="dlOrdJc">' + orders.map(o => '<option value="' + esc(o.no) + '">' + esc(o.customer_name) + '</option>').join('') + '</datalist>' +
+    '<div class="row"><label>Order *<input id="jfOrd" list="dlOrdJc" placeholder="Select order..."></label><label>Article line *<select id="jfLine" disabled><option value="">—</option></select></label><label>JC No<input value="' + esc(jcNo()) + '" readonly style="width:90px"></label></div>' +
+    '<div class="grid2" style="margin-top:10px"><div><h2 style="margin-top:0">Order details</h2><table class="kv" id="jfDetails"><tr><td class="muted">Pehle order aur article chuno</td></tr></table>' +
+    '<div class="row" style="margin-top:8px">' + imgField('jfPhoto', 'Product Image') + '<span id="jfPhotoTag" class="muted small"></span></div></div>' +
+    '<div><h2 style="margin-top:0">Sizes</h2><table id="jfSizes" style="max-width:420px"><tr><th>SIZE</th><th class="num">Act.Ord</th><th class="num">Extra(2%)</th><th></th></tr><tr id="jfSzTotal"><td><b>Total</b></td><td class="num"><b id="jfActT">0</b></td><td class="num"><b id="jfExtT">0</b></td><td></td></tr></table>' +
+    '<a class="small" data-act="jcf-size">+ size row</a> <span id="jfSzMsg" class="small"></span>' +
+    '<div class="row" style="margin-top:8px"><label>Status' + seg('jfStatus', ['NA', 'ONLINE', 'OFFLINE'], 'NA') + '</label><label style="flex:1">Remarks<input id="jfRem" placeholder="Remarks..."></label></div></div></div>' +
+    '<h2>Material Requirements BOM</h2><div class="toolbar"><a class="small" data-act="jcf-bomrow">+ Add</a><a class="small" data-act="jcf-paste">Bulk Paste</a><span id="jfBomTag" class="muted small"></span></div>' +
+    '<div id="jfPasteBox" class="hidden" style="margin-bottom:6px"><textarea id="jfPaste" rows="4" class="mono" placeholder="Ek line par ek item name (ya Name[TAB]Norms[TAB]Supplier)"></textarea> <button class="btn sm" data-act="jcf-paste-go">Import</button></div>' +
+    dlMat('dlMatJc') + dlVendor() +
+    '<div class="tbl-wrap"><table id="jfBom"><tr><th>#</th><th style="width:120px">Section</th><th style="width:130px">Category</th><th>Item Name</th><th style="width:90px">Item Code</th><th style="width:60px">Uom</th><th class="num" style="width:80px">Stock</th><th class="num" style="width:90px">Norms</th><th class="num" style="width:90px">Req.Qty</th><th style="width:150px">Supplier</th><th style="width:30px"></th></tr></table></div>' +
+    '<div class="toolbar" style="margin-top:10px"><button class="btn primary" data-save data-act="jc-save">Submit Job Card</button><button class="btn" data-act="jc-new">Close</button><span id="njMsg" class="small"></span></div></div>';
+}
+function jcfSizeRow(size, act) {
+  return '<tr data-szrow><td><input data-sz="size" placeholder="Size" value="' + esc(size || '') + '" style="width:90px"></td><td><input data-sz="act" type="number" min="0" class="right" value="' + esc(act || '') + '" style="width:90px"></td><td class="num" data-sz-ext>0</td><td><button class="btn ghost sm" data-act="jcf-size-del">×</button></td></tr>';
+}
+function jcfBomRow(l) {
+  l = l || {}; const m = matBy(l.material) || {};
+  return '<tr data-bomrow><td class="muted" data-idx></td><td><input data-b="section" value="' + esc(l.section || '') + '"></td><td><input data-b="category" list="dlCatJc" value="' + esc(l.category || m.group || '') + '"></td>' +
+    '<td><input data-b="mat" list="dlMatJc" value="' + esc(m.name || l.material || '') + '"></td><td class="muted" data-b-code>' + esc(l.material || '') + '</td><td class="muted" data-b-uom>' + esc(l.uom || m.uom || '') + '</td><td class="num muted" data-b-stock>' + (l.material ? qtyFmt(stockOf(l.material)) : '') + '</td>' +
+    '<td><input data-b="norms" type="number" min="0" step="any" class="right" value="' + esc(l.norms || l.qty || '') + '"></td><td class="num" data-b-req>0</td><td><input data-b="supplier" list="dlVen" value="' + esc(l.supplier || '') + '"></td><td><button class="btn ghost sm" data-act="jcf-bom-del">×</button></td></tr>';
+}
+function jcfRecalc() {
+  let act = 0, ext = 0;
+  $$('#jfSizes tr[data-szrow]').forEach(tr => { const a2 = num($('[data-sz="act"]', tr).value); const e2 = Math.ceil(a2 * 1.02); $('[data-sz-ext]', tr).textContent = a2 ? qtyFmt(e2) : '0'; act += a2; ext += a2 ? e2 : 0; });
+  $('#jfActT').textContent = qtyFmt(act); $('#jfExtT').textContent = qtyFmt(ext);
+  const o = Store.all('orders').find(x => norm(x.no) === norm(($('#jfOrd') || {}).value || ''));
+  const li = num(($('#jfLine') || {}).value); const oq = o ? num(jcOrderLine(o, li).qty) : 0;
+  $('#jfSzMsg').innerHTML = oq && act !== oq ? '<span class="late-txt">Act total ' + qtyFmt(act) + ' ≠ order qty ' + qtyFmt(oq) + '</span>' : (oq ? '<span class="st Done">Act = order qty</span>' : '');
+  $$('#jfBom tr[data-bomrow]').forEach((tr, i2) => {
+    $('[data-idx]', tr).textContent = i2 + 1;
+    const n = num($('[data-b="norms"]', tr).value);
+    $('[data-b-req]', tr).textContent = n && ext ? qtyFmt(Math.ceil(n * ext * 1000) / 1000) : '0';
+  });
+  return { act, ext };
+}
+function jcFormWire() {
+  const m = $('#main');
+  m.insertAdjacentHTML('beforeend', '<datalist id="dlCatJc">' + ITEM_CATS.map(c => '<option>' + c + '</option>').join('') + '</datalist>');
+  m.addEventListener('input', e => { if (e.target.closest('#jfSizes') || e.target.closest('#jfBom')) jcfRecalc(); });
+  m.addEventListener('change', e => {
+    if (e.target.id === 'jfOrd') {
+      const o = Store.all('orders').find(x => norm(x.no) === norm(e.target.value)); const sel = $('#jfLine');
+      if (o && sel.dataset.ord === o.no) return;   // same order dobara fire hua — selection mat udao
+      sel.dataset.ord = o ? o.no : '';
+      sel.disabled = !o; sel.innerHTML = '<option value="">—</option>' + (o ? o.lines.map((l, i2) => '<option value="' + i2 + '">' + esc(l.article + ' · ' + (l.colour || '') + ' · ' + qtyFmt(l.qty)) + '</option>').join('') : '');
+      if (o && o.lines.length === 1) { sel.value = '0'; sel.dispatchEvent(new Event('change', { bubbles: true })); }
+    }
+    if (e.target.id === 'jfLine') jcfFillFromOrder();
+    if (e.target.id === 'jfPhoto') readImg(e.target.files[0], src => { JCF.photo = src; $('#jfPhotoTag').innerHTML = photoThumb(src); });
+    if (e.target.dataset.b === 'mat') {
+      const mt = matBy(e.target.value); const tr = e.target.closest('tr');
+      if (mt) { e.target.value = mt.name; $('[data-b-code]', tr).textContent = mt.code; $('[data-b-uom]', tr).textContent = mt.uom; $('[data-b-stock]', tr).textContent = qtyFmt(stockOf(mt.code)); const c = $('[data-b="category"]', tr); if (!c.value) c.value = mt.group || ''; }
+      else { $('[data-b-code]', tr).textContent = ''; $('[data-b-uom]', tr).textContent = ''; }
+      jcfRecalc();
+    }
+  });
+  JCF = { photo: '' };
+}
+function jcfFillFromOrder() {
+  const o = Store.all('orders').find(x => norm(x.no) === norm($('#jfOrd').value)); if (!o) return;
+  const li = num($('#jfLine').value); const l = jcOrderLine(o, li);
+  $('#jfDetails').innerHTML = [['Date', fmtD(o.order_date)], ['Brand', o.customer_name], ['Style', l.style], ['Colour', l.colour], ['Gender', l.gender], ['Category', o.category], ['Tooling', o.tooling_no], ['Article', l.article], ['Size Run', l.size], ['Order Qty', qtyFmt(l.qty)]]
+    .map(([k, v]) => '<tr><td class="muted" style="width:90px">' + k + '</td><td>' + esc(v || '') + '</td></tr>').join('');
+  // size rows: order line size run as one row prefilled
+  $$('#jfSizes tr[data-szrow]').forEach(tr => tr.remove());
+  $('#jfSzTotal').insertAdjacentHTML('beforebegin', jcfSizeRow(l.size || '', l.qty || ''));
+  // BOM auto-load
+  const b = jcBomFor(l.article, l.colour);
+  $$('#jfBom tr[data-bomrow]').forEach(tr => tr.remove());
+  if (b) { b.lines.forEach(x => $('#jfBom').insertAdjacentHTML('beforeend', jcfBomRow(x))); $('#jfBomTag').textContent = 'BOM se auto-load (' + b.article + (b.colour ? ' ' + b.colour : '') + ' v' + b.version + ', ' + b.lines.length + ' items)'; if (b.photo && !JCF.photo) { JCF.photo = b.photo; $('#jfPhotoTag').innerHTML = photoThumb(b.photo) + ' <span class="muted small">BOM se auto</span>'; } }
+  else { $('#jfBom').insertAdjacentHTML('beforeend', jcfBomRow()); $('#jfBomTag').innerHTML = '<span class="late-txt">Is article ka Dev BOM nahi hai — rows khud bharo ya Development se banwao.</span>'; }
+  jcfRecalc();
+}
+ACTIONS['jcf-size'] = () => { $('#jfSzTotal').insertAdjacentHTML('beforebegin', jcfSizeRow()); };
+ACTIONS['jcf-size-del'] = el => { el.closest('tr').remove(); jcfRecalc(); };
+ACTIONS['jcf-bomrow'] = () => { $('#jfBom').insertAdjacentHTML('beforeend', jcfBomRow()); jcfRecalc(); };
+ACTIONS['jcf-bom-del'] = el => { el.closest('tr').remove(); jcfRecalc(); };
+ACTIONS['jcf-paste'] = () => $('#jfPasteBox').classList.toggle('hidden');
+ACTIONS['jcf-paste-go'] = () => {
+  let ok = 0, bad = [];
+  $('#jfPaste').value.split(/\r?\n/).map(x => x.split('\t')).filter(r => r.join('').trim()).forEach(r => {
+    const m = Store.all('materials').find(x => norm(x.name) === norm(r[0]) || norm(x.code) === norm(r[0]));
+    if (!m) { bad.push(r[0]); return; }
+    $('#jfBom').insertAdjacentHTML('beforeend', jcfBomRow({ material: m.code, uom: m.uom, norms: r[1] || '', supplier: r[2] || '' })); ok++;
+  });
+  $('#jfPasteBox').classList.add('hidden'); jcfRecalc();
+  flash(ok + ' items import hue.' + (bad.length ? ' Match nahi hue: ' + esc(bad.join(', ')) : ''), bad.length ? 'err' : '');
+};
+ACTIONS['jc-new'] = () => { JC_UI.form = !JC_UI.form; VIEWS.jobcards.render(); };
+ACTIONS['jc-toggle'] = (el, ev) => { if (ev.target.closest('button')) return; JC_UI.open = JC_UI.open === el.dataset.id ? null : el.dataset.id; VIEWS.jobcards.render(); };
 ACTIONS['jc-save'] = () => {
   if (!requirePerm('merchant', 'edit')) return;
-  const brand = $('#njBrand').value.trim(), art = $('#njArt').value.trim().toUpperCase(), qty = num($('#njQty').value);
-  if (!brand || !art || qty <= 0) { $('#njMsg').innerHTML = '<span class="late-txt">Brand, article aur qty chahiye.</span>'; return; }
-  const lines = jcLinesFromBom(art, qty);
-  const j = Store.put('job_cards', { id: uid(), no: nextNo('job_cards', 'JC'), order_no: $('#njOrd').value.trim(), brand, article: art, colour: $('#njCol').value.trim(), qty, lines: lines || [], swatch_status: 'Pending', status: 'Open', corrections: [], by: ME.name, at: nowIso() });
-  audit('jc.create', j.no, brand + ' · ' + art + ' × ' + qty + (lines ? ' · BOM v-latest (' + lines.length + ' materials)' : ' · BOM NAHI mila'));
-  JC_UI.form = false;
-  flash(esc(j.no) + ' created — swatch approval pending.' + (lines ? ' Material requirement BOM se ban gayi (' + lines.length + ' items, +2%).' : ' <b>Is article ka BOM nahi hai</b> — Development se banwao, phir JC dobara banana.'), lines ? '' : 'err');
+  const o = Store.all('orders').find(x => norm(x.no) === norm($('#jfOrd').value));
+  if (!o || $('#jfLine').value === '') { $('#njMsg').innerHTML = '<span class="late-txt">Order aur article line chuno.</span>'; return; }
+  const l = jcOrderLine(o, num($('#jfLine').value));
+  const { act, ext } = jcfRecalc();
+  if (act !== num(l.qty)) { $('#njMsg').innerHTML = '<span class="late-txt">Act.Ord total (' + qtyFmt(act) + ') order qty (' + qtyFmt(l.qty) + ') ke barabar hona chahiye.</span>'; return; }
+  const sizes = $$('#jfSizes tr[data-szrow]').map(tr => ({ size: $('[data-sz="size"]', tr).value.trim().toUpperCase(), act: num($('[data-sz="act"]', tr).value), extra: Math.ceil(num($('[data-sz="act"]', tr).value) * 1.02) })).filter(x => x.act > 0);
+  const lines = $$('#jfBom tr[data-bomrow]').map(tr => {
+    const m = matBy($('[data-b="mat"]', tr).value); const n = num($('[data-b="norms"]', tr).value);
+    return m && n > 0 ? { section: $('[data-b="section"]', tr).value.trim(), category: $('[data-b="category"]', tr).value.trim() || m.group || '', material: m.code, uom: m.uom, norms: n, required: Math.ceil(n * ext * 1000) / 1000, supplier: $('[data-b="supplier"]', tr).value.trim(), po_raised: 0 } : null;
+  }).filter(Boolean);
+  const badNorm = $$('#jfBom tr[data-bomrow]').some(tr => matBy($('[data-b="mat"]', tr).value) && num($('[data-b="norms"]', tr).value) <= 0);
+  if (badNorm) { $('#njMsg').innerHTML = '<span class="late-txt">Har item ka Norms 0 se zyada hona chahiye.</span>'; return; }
+  if (!lines.length) { $('#njMsg').innerHTML = '<span class="late-txt">Kam se kam ek BOM item chahiye (master wala).</span>'; return; }
+  const j = Store.put('job_cards', {
+    id: uid(), no: jcNo(), order_no: o.no, brand: o.customer_name, article: l.article, style: l.style || '', colour: l.colour || '', gender: l.gender || '', category: o.category,
+    qty: act, sizes, lines, photo: JCF.photo || '', line_status: segVal($('[data-seg="jfStatus"]')) || 'NA', remarks: $('#jfRem').value.trim(),
+    swatch_status: 'Pending', status: 'Open', corrections: [], by: ME.name, at: nowIso()
+  });
+  audit('jc.create', j.no, o.no + ' · ' + l.article + ' × ' + act + ' · ' + lines.length + ' materials');
+  JC_UI.form = false; JCF = null;
+  flash(esc(j.no) + ' created — material requirement ban gayi (' + lines.length + ' items, extra +2%). Swatch approval pending.');
   VIEWS.jobcards.render();
 };
-ACTIONS['jc-toggle'] = (el, ev) => { if (ev.target.closest('button')) return; JC_UI.open = JC_UI.open === el.dataset.id ? null : el.dataset.id; VIEWS.jobcards.render(); };
 ACTIONS['jc-close'] = el => { const j = Store.get('job_cards', el.dataset.id); if ((j.corrections || []).some(c => !c.resolved)) { flash('Pehle open corrections resolve karo.', 'err'); return; } j.status = 'Closed'; Store.put('job_cards', j); audit('jc.close', j.no, ''); VIEWS.jobcards.render(); };
 
 VIEWS.swatch = {
@@ -321,26 +477,58 @@ ACTIONS['jcc-resolve'] = el => { const j = Store.get('job_cards', el.dataset.id)
 
 /* ================= STORE ================= */
 const INW_UI = { form: false };
+const BILL_TYPES = [
+  { v: 'Invoice', l: 'Invoice (PO ke against, accounts me)' },
+  { v: 'Challan', l: 'Challan (PO ke against, accounts me)' },
+  { v: 'FOC', l: 'FOC / Free of Cost (sirf stock, accounts me nahi)' },
+  { v: 'Sample', l: 'Sample (PO ke bina, sirf stock, accounts me)' }
+];
 VIEWS.inward = {
   mod: 'store', render() {
     const edit = can('store', 'edit');
-    const rows = Store.all('inwards').slice().sort((a, b) => b.no < a.no ? -1 : 1);
-    let h = subTitle('Inwarding', 'gate entry — GRN alag hota hai') + '<div class="toolbar"><span class="grow"></span>' + (edit ? newBtn('New inward', 'inw-new') : '') + '</div>';
-    if (INW_UI.form && edit) h += '<div class="panel" style="margin-bottom:12px">' + dlVendor() + dlMat('dlMatI') +
-      '<div class="row"><label>Date<input id="niDate" type="date" value="' + todayYmd() + '"></label><label>Vendor *<input id="niVen" list="dlVen"></label><label>PO no<input id="niPo" list="dlPoNo"></label><label>Material *<input id="niMat" list="dlMatI"></label><label>Qty *<input id="niQty" type="number" min="0" style="width:100px"></label><label style="flex:1">Remark<input id="niRem"></label><button class="btn primary" data-act="inw-save">Save</button><span id="niMsg" class="small"></span></div>' +
-      '<datalist id="dlPoNo">' + openPOs().map(p => '<option value="' + esc(p.no) + '">' + esc(p.vendor) + '</option>').join('') + '</datalist></div>';
-    h += '<div class="tbl-wrap"><table><tr><th>No</th><th>Date</th><th>Vendor</th><th>PO</th><th>Material</th><th class="num">Qty</th><th>Swatch match</th><th>Remark</th></tr>' +
-      (rows.length ? rows.map(i => '<tr><td><b>' + esc(i.no) + '</b></td><td class="nowrap">' + fmtD(i.date) + '</td><td>' + esc(i.vendor) + '</td><td>' + esc(i.po_no || '') + '</td><td>' + esc(i.material) + '</td><td class="num">' + qtyFmt(i.qty) + '</td><td><span class="st ' + (i.swatch_match === 'Pass' ? 'Done' : i.swatch_match === 'Fail' ? 'Late' : 'Pending') + '">' + (i.swatch_match || 'Pending') + '</span></td><td class="small">' + esc(i.remark || '') + '</td></tr>').join('') : '<tr><td colspan="8" class="empty">No inward entries</td></tr>') + '</table></div>';
+    const rows = Store.all('inwards').slice().sort((a2, b2) => b2.no < a2.no ? -1 : 1);
+    let h = subTitle('NEW GATE ENTRY', 'inwarding — GRN alag hota hai') + '<div class="toolbar"><span class="grow"></span>' + (edit ? newBtn('New gate entry', 'inw-new') : '') + '</div>';
+    if (INW_UI.form && edit) {
+      const bt = INW_UI.bt || 'Invoice'; const isFoc = bt === 'FOC', isSample = bt === 'Sample';
+      h += '<div class="panel" style="margin-bottom:12px">' + dlVendor() + dlMat('dlMatI') +
+        '<div class="row"><label>Bill Type *' + seg('inwBt', BILL_TYPES, bt) + '</label></div>' +
+        '<div class="row" style="margin-top:8px"><label>Vendor Name *<input id="niVen" list="dlVen"></label>' +
+        (isSample ? '<label>Concern Person *<input id="niPerson" list="dlUsers"><datalist id="dlUsers">' + Store.all('users').map(u => '<option value="' + esc(u.name) + '">').join('') + '</datalist></label>'
+          : '<label>PO Number *<input id="niPo" list="dlPoNo"><datalist id="dlPoNo">' + openPOs().map(p => '<option value="' + esc(p.no) + '">' + esc(p.vendor) + '</option>').join('') + '</datalist></label>') +
+        '<label>' + bt + ' Number' + (isFoc ? '' : ' *') + '<input id="niNum" placeholder="' + (isFoc ? '(optional)' : bt.toUpperCase() + '-XXXX') + '"></label>' +
+        '<label>' + bt + ' Date' + (isFoc ? '' : ' *') + '<input id="niBillDate" type="date"></label>' +
+        '<label>Inwarding Date *<input id="niDate" type="date" value="' + todayYmd() + '"></label></div>' +
+        '<div class="row" style="margin-top:8px"><label>Material *<input id="niMat" list="dlMatI"></label><label>Invoice Qty *<input id="niQty" type="number" min="0" style="width:100px"></label>' +
+        '<label>QC Report Number (If Any)<input id="niQc"></label>' + imgField('niPhoto', 'Attach ' + bt + ' Photo', !isFoc) + '<span id="niPhotoTag"></span>' + imgField('niQcPhoto', 'Attach QC Report Photo') + '<span id="niQcTag"></span>' +
+        '<label style="flex:1">Remark<input id="niRem"></label><button class="btn primary" data-act="inw-save">Save</button><span id="niMsg" class="small"></span></div>' +
+        '<div class="muted small" style="margin-top:4px">Inward By: ' + esc(ME.name) + ' (auto)</div></div>';
+    }
+    h += '<h2>PREVIOUS GATE ENTRY LOGS</h2><div class="tbl-wrap"><table><tr><th>Timestamp</th><th>Bill</th><th>Vendor</th><th>PO Number</th><th>Invoice No</th><th>Invoice Date</th><th class="num">Aging (Days)</th><th>Material</th><th class="num">Invoice Qty</th><th>Photo</th><th>Swatch match</th><th>Remark</th></tr>' +
+      (rows.length ? rows.map(i => '<tr><td class="nowrap">' + fmtD(i.date) + '</td><td>' + esc(i.bill_type || 'Invoice') + '</td><td>' + esc(i.vendor) + '</td><td>' + esc(i.po_no || (i.bill_type === 'Sample' ? 'SAMPLE: ' + (i.person || '') : '')) + '</td><td>' + esc(i.bill_no || '') + '</td><td class="nowrap">' + fmtD(i.bill_date) + '</td><td class="num">' + Math.max(0, Math.floor((Date.now() - new Date(i.date)) / 86400000)) + '</td><td>' + esc(i.material) + '</td><td class="num">' + qtyFmt(i.qty) + '</td><td>' + photoThumb(i.photo) + '</td><td><span class="st ' + (i.swatch_match === 'Pass' ? 'Done' : i.swatch_match === 'Fail' ? 'Late' : 'Pending') + '">' + (i.swatch_match || 'Pending') + '</span></td><td class="small">' + esc(i.remark || '') + '</td></tr>').join('') : '<tr><td colspan="12" class="empty">No gate entries</td></tr>') + '</table></div>';
     setMain(h);
+    onSeg(e => { if (e.target.dataset.seg === 'inwBt') { INW_UI.bt = e.detail; VIEWS.inward.render(); } });
+    const m = $('#main');
+    m.addEventListener('change', e => {
+      if (e.target.id === 'niPhoto') readImg(e.target.files[0], src => { INW_UI.photo = src; $('#niPhotoTag').innerHTML = photoThumb(src); });
+      if (e.target.id === 'niQcPhoto') readImg(e.target.files[0], src => { INW_UI.qcPhoto = src; $('#niQcTag').innerHTML = photoThumb(src); });
+    });
   }
 };
-ACTIONS['inw-new'] = () => { INW_UI.form = !INW_UI.form; VIEWS.inward.render(); };
+ACTIONS['inw-new'] = () => { INW_UI.form = !INW_UI.form; INW_UI.photo = ''; INW_UI.qcPhoto = ''; VIEWS.inward.render(); };
 ACTIONS['inw-save'] = () => {
   if (!requirePerm('store', 'edit')) return;
+  const bt = INW_UI.bt || 'Invoice'; const isFoc = bt === 'FOC', isSample = bt === 'Sample';
   const ven = $('#niVen').value.trim(); const m = matBy($('#niMat').value); const qty = num($('#niQty').value);
-  if (!ven || !m || qty <= 0) { $('#niMsg').innerHTML = '<span class="late-txt">Vendor, material (master wala) aur qty chahiye.</span>'; return; }
-  const i = Store.put('inwards', { id: uid(), no: nextNo('inwards', 'INW'), date: $('#niDate').value || todayYmd(), vendor: ven, po_no: $('#niPo').value.trim(), material: m.code, uom: m.uom, qty, remark: $('#niRem').value.trim(), swatch_match: '', by: ME.name });
-  audit('inward.create', i.no, ven + ' · ' + m.code + ' × ' + qty); INW_UI.form = false; flash(esc(i.no) + ' saved — swatch matching pending.'); VIEWS.inward.render();
+  const billNo = $('#niNum').value.trim(); const billDate = $('#niBillDate').value; const po = isSample ? '' : ($('#niPo') ? $('#niPo').value.trim() : '');
+  const err = !ven ? 'Vendor chahiye.' : !m ? 'Material (master wala) chahiye.' : qty <= 0 ? 'Invoice qty chahiye.'
+    : (!isSample && !po) ? 'PO Number chahiye.' : (isSample && !$('#niPerson').value.trim()) ? 'Concern Person chahiye.'
+    : (!isFoc && !billNo) ? bt + ' Number chahiye.' : (!isFoc && !billDate) ? bt + ' Date chahiye.'
+    : (!isFoc && !INW_UI.photo) ? bt + ' photo attach karo.' : '';
+  if (err) { $('#niMsg').innerHTML = '<span class="late-txt">' + esc(err) + '</span>'; return; }
+  if (billNo && Store.all('inwards').some(x => norm(x.vendor) === norm(ven) && norm(x.bill_no) === norm(billNo))) { $('#niMsg').innerHTML = '<span class="late-txt">Is vendor ki ye ' + bt + ' number pehle entry ho chuki hai (duplicate guard).</span>'; return; }
+  const i = Store.put('inwards', { id: uid(), no: nextNo('inwards', 'INW'), date: $('#niDate').value || todayYmd(), bill_type: bt, vendor: ven, po_no: po, person: isSample ? $('#niPerson').value.trim() : '', bill_no: billNo, bill_date: billDate, material: m.code, uom: m.uom, qty, qc_no: $('#niQc').value.trim(), photo: INW_UI.photo || '', qc_photo: INW_UI.qcPhoto || '', remark: $('#niRem').value.trim(), swatch_match: '', by: ME.name });
+  audit('inward.create', i.no, bt + ' · ' + ven + ' · ' + m.code + ' × ' + qty); INW_UI.form = false;
+  flash(esc(i.no) + ' saved — swatch matching pending.'); VIEWS.inward.render();
 };
 
 VIEWS.swatchmatch = {
@@ -368,9 +556,9 @@ VIEWS.grn = {
     let h = subTitle('GRN', 'PO ke against receiving') + '<div class="tbl-wrap"><table><tr><th>PO</th><th>Vendor</th><th>Expected</th><th class="num">Pending qty</th><th></th></tr>' +
       (pos.length ? pos.map(p => {
         let row = '<tr><td><b>' + esc(p.no) + '</b></td><td>' + esc(p.vendor) + '</td><td class="nowrap ' + (p.expected < todayYmd() ? 'late-txt' : '') + '">' + fmtD(p.expected) + '</td><td class="num">' + qtyFmt(poPending(p)) + '</td><td class="right">' + (edit ? '<button class="btn sm ' + (GRN_UI.open === p.id ? '' : 'primary') + '" data-act="grn-open" data-id="' + esc(p.id) + '">' + (GRN_UI.open === p.id ? 'Close' : 'Make GRN') + '</button>' : '') + '</td></tr>';
-        if (GRN_UI.open === p.id) row += '<tr class="inline-form"><td colspan="5"><table style="max-width:880px;margin:6px 0"><tr><th>Material</th><th class="num">PO pending</th><th class="num">Invoice qty</th><th class="num">Accept (GRN)</th><th class="num">Reject</th><th class="num">Short</th><th class="num">Excess</th></tr>' +
-          p.lines.map((l, i) => { const pen = Math.max(0, num(l.qty) - num(l.received)); return '<tr data-i="' + i + '" data-pen="' + pen + '"><td>' + esc(l.material) + '</td><td class="num">' + qtyFmt(pen) + '</td><td><input class="qty" type="number" min="0" step="any" data-gi value="' + (pen || '') + '"' + (pen ? '' : ' disabled') + '></td><td><input class="qty" type="number" min="0" step="any" data-ga value="' + (pen || '') + '"' + (pen ? '' : ' disabled') + '></td><td><input class="qty" type="number" min="0" step="any" data-gr value="0"' + (pen ? '' : ' disabled') + '></td><td class="num muted" data-gs>—</td><td class="num muted" data-gx>—</td></tr>'; }).join('') +
-          '</table><div class="row"><label>Invoice / challan no *<input id="grnInv"></label><label>Date<input id="grnDate" type="date" value="' + todayYmd() + '"></label><button class="btn primary" data-act="grn-save" data-id="' + esc(p.id) + '">Save GRN</button><span id="grnMsg" class="small"></span></div><div class="muted small" style="margin-top:4px">Accept = stock · Reject = rejection stock (RTV) · <b>Short</b> = invoice mein hai par aaya nahi (Debit Note auto-task) · <b>Excess</b> = PO pending se zyada bill hua</div></td></tr>';
+        if (GRN_UI.open === p.id) row += '<tr class="inline-form"><td colspan="5"><table style="max-width:880px;margin:6px 0"><tr><th>Material</th><th>JC</th><th class="num">PO Pending</th><th class="num">JC Qty</th><th class="num">Inv Qty</th><th class="num">GRN Qty</th><th class="num">Reject</th><th class="num">Short</th><th class="num">Excess</th><th>Rack</th></tr>' +
+          p.lines.map((l, i) => { const pen = Math.max(0, num(l.qty) - num(l.received)); const mt = matBy(l.material) || {}; const jq = l.jc_no ? (((jcBy(l.jc_no) || {}).lines || []).find(x => norm(x.material) === norm(l.material)) || {}).required : ''; return '<tr data-i="' + i + '" data-pen="' + pen + '"><td>' + esc(l.material) + '</td><td class="small">' + esc(l.jc_no || '') + '</td><td class="num">' + qtyFmt(pen) + '</td><td class="num muted">' + (jq ? qtyFmt(jq) : '—') + '</td><td><input class="qty" type="number" min="0" step="any" data-gi value="' + (pen || '') + '"' + (pen ? '' : ' disabled') + '></td><td><input class="qty" type="number" min="0" step="any" data-ga value="' + (pen || '') + '"' + (pen ? '' : ' disabled') + '></td><td><input class="qty" type="number" min="0" step="any" data-gr value="0"' + (pen ? '' : ' disabled') + '></td><td class="num muted" data-gs>—</td><td class="num muted" data-gx>—</td><td><input data-grack value="' + esc(mt.rack || '') + '" style="width:60px"></td></tr>'; }).join('') +
+          '</table><div class="row"><label>Invoice / challan no *<input id="grnInv" list="dlGrnInv"><datalist id="dlGrnInv">' + Store.all('inwards').filter(iw => norm(iw.vendor) === norm(p.vendor) && iw.bill_no && iw.swatch_match !== 'Fail').map(iw => '<option value="' + esc(iw.bill_no) + '">' + esc(iw.no) + '</option>').join('') + '</datalist></label><label>Date<input id="grnDate" type="date" value="' + todayYmd() + '"></label><button class="btn primary" data-act="grn-save" data-id="' + esc(p.id) + '">Save GRN</button><span id="grnMsg" class="small"></span></div><div class="row" id="grnWhyBox" style="display:none;margin-top:4px"><label style="flex:1">Reject reason *<input id="grnWhy"></label></div><div class="muted small" style="margin-top:4px">Accept = stock · Reject = rejection stock (RTV) · <b>Short</b> = invoice mein hai par aaya nahi (Debit Note auto-task) · <b>Excess</b> = PO pending se zyada bill hua</div></td></tr>';
         return row;
       }).join('') : '<tr><td colspan="5" class="empty">Koi open PO nahi — pehle Purchase Order banao</td></tr>') + '</table></div>';
     const gs = Store.all('grns').slice().sort((a, b) => b.no < a.no ? -1 : 1).slice(0, 15);
@@ -388,7 +576,7 @@ function grnCalcRow(tr) {
   $('[data-gs]', tr).textContent = short ? qtyFmt(short) : '—';
   return { inv, acc, rej, excess, short };
 }
-document.addEventListener('input', e => { const tr = e.target.closest('tr[data-pen]'); if (tr && (e.target.dataset.gi != null || e.target.dataset.ga != null || e.target.dataset.gr != null)) grnCalcRow(tr); });
+document.addEventListener('input', e => { const tr = e.target.closest('tr[data-pen]'); if (tr && (e.target.dataset.gi != null || e.target.dataset.ga != null || e.target.dataset.gr != null)) { grnCalcRow(tr); const anyRej = $$('tr[data-pen]').some(t => num(($('[data-gr]', t) || {}).value) > 0); const box = $('#grnWhyBox'); if (box) box.style.display = anyRej ? '' : 'none'; } });
 ACTIONS['grn-save'] = el => {
   if (!requirePerm('store', 'edit')) return;
   const p = Store.get('purchase_orders', el.dataset.id);
@@ -401,13 +589,16 @@ ACTIONS['grn-save'] = el => {
   }
   const inv = $('#grnInv').value.trim();
   if (!inv) { $('#grnMsg').innerHTML = '<span class="late-txt">Invoice / challan no zaroori hai.</span>'; return; }
+  const totRejPre = rows.reduce((x, r) => x + r.rej, 0);
+  const why = ($('#grnWhy') || { value: '' }).value.trim();
+  if (totRejPre > 0 && !why) { $('#grnMsg').innerHTML = '<span class="late-txt">Reject reason likhna zaroori hai.</span>'; return; }
   if (Store.all('grns').some(g => norm(g.vendor) === norm(p.vendor) && norm(g.invoice) === norm(inv))) { $('#grnMsg').innerHTML = '<span class="late-txt">Is vendor ki ye invoice pehle GRN ho chuki hai (duplicate guard).</span>'; return; }
   const failedInward = Store.all('inwards').find(iw => norm(iw.vendor) === norm(p.vendor) && norm(iw.po_no) === norm(p.no) && iw.swatch_match === 'Fail');
   if (failedInward) { $('#grnMsg').innerHTML = '<span class="late-txt">' + esc(failedInward.no) + ' ka swatch FAIL hai — Merchant se sort hone tak is PO ki GRN block hai.</span>'; return; }
   rows.forEach(r => { const pl = p.lines[r.i]; pl.received = num(pl.received) + r.acc + r.rej; pl.rejected = num(pl.rejected) + r.rej; });
   Store.put('purchase_orders', p);
-  const lines = rows.map(r => ({ material: r.material, inv_qty: r.inv, accepted: r.acc, rejected: r.rej, short: r.short, excess: r.excess }));
-  const g = Store.put('grns', { id: uid(), no: fyNo('grns', 'GRN', 4), date: $('#grnDate').value || todayYmd(), po_id: p.id, po_no: p.no, vendor: p.vendor, invoice: inv, lines, by: ME.name });
+  const lines = rows.map(r => { const tr = $$('tr[data-pen]')[r.i] || $$('tr[data-pen]').find(t => +t.dataset.i === r.i); return { material: r.material, jc_no: p.lines[r.i].jc_no || '', inv_qty: r.inv, accepted: r.acc, rejected: r.rej, short: r.short, excess: r.excess, rack: tr ? ($('[data-grack]', tr) || { value: '' }).value.trim() : '' }; });
+  const g = Store.put('grns', { id: uid(), no: fyNo('grns', 'GRN', 4), date: $('#grnDate').value || todayYmd(), po_id: p.id, po_no: p.no, vendor: p.vendor, invoice: inv, reject_reason: why, lines, by: ME.name });
   const totRej = rows.reduce((x, r) => x + r.rej, 0), totShort = rows.reduce((x, r) => x + r.short, 0), totExcess = rows.reduce((x, r) => x + r.excess, 0);
   // Auto tasks (purane IMS jaisa): short/reject -> Debit Note (Accounts) + RTV (Store); har GRN -> Tally Entry agle din.
   if (totRej > 0 || totShort > 0) {
@@ -450,16 +641,18 @@ VIEWS.issuance = {
     h += '<div class="toolbar" style="margin-top:14px"><h2 style="margin:0">Direct issue / return</h2>' +
       (edit ? '<button class="btn sm" data-act="iss-new">' + (ISS_UI.form ? 'Close' : '+ Issue material') + '</button><button class="btn sm" data-act="ret-new">' + (ISS_UI.ret ? 'Close' : '+ Material return') + '</button>' : '') + '</div>';
     if (ISS_UI.form && edit) h += '<div class="panel" style="margin-bottom:10px">' + dlMat('dlMatIs') + '<datalist id="dlJc2">' + Store.all('job_cards').filter(j => j.status !== 'Closed').map(j => '<option value="' + esc(j.no) + '">').join('') + '</datalist>' +
-      '<div class="row"><label>Material *<input id="isMat" list="dlMatIs"></label><label>Qty *<input id="isQty" type="number" min="0" style="width:100px"></label><label>To JC<input id="isJc" list="dlJc2"></label><label>To dept<input id="isDept" list="dlDept"><datalist id="dlDept">' + ['Production', 'Development', 'Merchant', 'Dispatch'].map(d => '<option>' + d + '</option>').join('') + '</datalist></label>' +
-      '<label>Source' + seg('isSrc', [{ v: 'AUTO', l: 'Auto (reserved→open)' }, { v: 'RSJW', l: 'JC reserved' }, { v: 'OPEN', l: 'Open stock' }], 'AUTO') + '</label><button class="btn primary" data-act="iss-save">Request issue</button><span id="isMsg" class="small"></span></div></div>';
+      '<div class="row"><label>Material *<input id="isMat" list="dlMatIs"></label><label>Issue Qty *<input id="isQty" type="number" min="0" style="width:100px"></label><label>Job Card<input id="isJc" list="dlJc2"></label>' +
+      '<label>Issued To * <span class="muted small">(Person / Department)</span><input id="isTo" list="dlDept"><datalist id="dlDept">' + ['Production', 'Development', 'Merchant', 'Dispatch'].map(d => '<option>' + d + '</option>').join('') + '</datalist></label>' +
+      '<label>Issue Type' + seg('isTyp', ['Regular', 'Sample'], 'Regular') + '</label>' +
+      '<label>Issue Source' + seg('isSrc', [{ v: 'AUTO', l: 'Auto (reserved→open)' }, { v: 'RSJW', l: 'RESERVED STOCK' }, { v: 'OPEN', l: 'OPEN STOCK' }], 'AUTO') + '</label><button class="btn primary" data-act="iss-save">Request issue</button><span id="isMsg" class="small"></span></div></div>';
     if (ISS_UI.ret && edit) h += '<div class="panel" style="margin-bottom:10px">' + dlMat('dlMatRt') + '<datalist id="dlJc3">' + Store.all('job_cards').map(j => '<option value="' + esc(j.no) + '">').join('') + '</datalist>' +
-      '<div class="row"><label>JC *<input id="rtJc" list="dlJc3"></label><label>Material *<input id="rtMat" list="dlMatRt"></label><label>Qty *<input id="rtQty" type="number" min="0" style="width:100px"></label><label style="flex:1">Remark<input id="rtRem"></label><button class="btn primary" data-act="ret-save">Return to stock</button><span id="rtMsg" class="small"></span></div>' +
+      '<div class="row"><label>Job Card *<input id="rtJc" list="dlJc3"></label><label>Material *<input id="rtMat" list="dlMatRt"></label><label>Return Qty *<input id="rtQty" type="number" min="0" style="width:100px"></label><label>Returned By *<input id="rtBy" value="' + esc(ME.name) + '"></label><label style="flex:1">Remark <span class="muted small">(Optional)</span><input id="rtRem"></label><button class="btn primary" data-act="ret-save">Return to stock</button><span id="rtMsg" class="small"></span></div>' +
       '<div class="muted small">Wapas open stock mein jayega. Issued se zyada return nahi ho sakta.</div></div>';
 
     // 4) history
     const iss = Store.all('issues').filter(i => i.status !== 'Pending').slice().sort((a2, b2) => (b2.at || '') < (a2.at || '') ? -1 : 1).slice(0, 15);
-    h += '<div class="tbl-wrap"><table><tr><th>No</th><th>Date</th><th>Type</th><th>Material</th><th class="num">Qty</th><th>To / From</th><th>Req</th><th>Status</th><th>By / Approved</th></tr>' +
-      (iss.length ? iss.map(i => '<tr><td><b>' + esc(i.no) + '</b></td><td class="nowrap">' + fmtD(i.date) + '</td><td>' + (i.type === 'return' ? 'Return' : 'Issue') + '</td><td>' + esc(i.material) + '</td><td class="num">' + qtyFmt(i.qty) + '</td><td>' + esc(i.to_jc || i.to_dept || '') + '</td><td>' + esc(i.req_no || '') + '</td><td><span class="st ' + (i.status === 'Approved' ? 'Done' : 'Cancelled') + '">' + esc(i.status || 'Approved') + '</span></td><td class="small">' + esc(i.by) + (i.approved_by ? ' → ' + esc(i.approved_by) : '') + '</td></tr>').join('') : '<tr><td colspan="9" class="empty">No issues yet</td></tr>') + '</table></div>';
+    h += '<div class="tbl-wrap"><table><tr><th>No</th><th>DATE</th><th>TYPE</th><th>ITEM</th><th class="num">QUANTITY</th><th>SOURCE TYPE</th><th>JOB CARD</th><th>ISSUED TO</th><th>ISSUE TYPE</th><th>REQ</th><th>STATUS</th><th>ISSUED BY</th></tr>' +
+      (iss.length ? iss.map(i => '<tr><td><b>' + esc(i.no) + '</b></td><td class="nowrap">' + fmtD(i.date) + '</td><td>' + (i.type === 'return' ? 'Return' : 'Issue') + '</td><td>' + esc(i.material) + '</td><td class="num">' + qtyFmt(i.qty) + '</td><td>' + esc(i.source || 'AUTO') + '</td><td>' + esc(i.to_jc || '') + '</td><td>' + esc(i.to_dept || '') + '</td><td>' + esc(i.issue_type || 'Regular') + '</td><td>' + esc(i.req_no || '') + '</td><td><span class="st ' + (i.status === 'Approved' ? 'Done' : 'Cancelled') + '">' + esc(i.status || 'Approved') + '</span></td><td class="small">' + esc(i.by) + (i.approved_by ? ' → ' + esc(i.approved_by) : '') + '</td></tr>').join('') : '<tr><td colspan="12" class="empty">No issues yet</td></tr>') + '</table></div>';
     setMain(h);
   }
 };
@@ -472,7 +665,9 @@ ACTIONS['iss-save'] = () => {
   if (src === 'RSJW' && (!jc || reservedOf(m.code, jc) < qty)) { $('#isMsg').innerHTML = '<span class="late-txt">' + (jc ? 'Is JC ka reserved sirf ' + qtyFmt(reservedOf(m.code, jc)) + ' hai.' : 'JC reserved se issue ke liye JC chahiye.') + '</span>'; return; }
   const avail = src === 'OPEN' ? openStockOf(m.code) : src === 'RSJW' ? reservedOf(m.code, jc) : (openStockOf(m.code) + (jc ? reservedOf(m.code, jc) : 0));
   if (qty > avail) { $('#isMsg').innerHTML = '<span class="late-txt">Available sirf ' + qtyFmt(avail) + ' hai (' + src + ').</span>'; return; }
-  const i = Store.put('issues', { id: uid(), no: nextNo('issues', 'ISS'), date: todayYmd(), material: m.code, qty, source: src, to_jc: jc, to_dept: $('#isDept').value.trim(), status: 'Pending', by: ME.name, at: nowIso() });
+  const to = $('#isTo').value.trim();
+  if (!to) { $('#isMsg').innerHTML = '<span class="late-txt">Issued To (person/department) chahiye.</span>'; return; }
+  const i = Store.put('issues', { id: uid(), no: nextNo('issues', 'ISS'), date: todayYmd(), material: m.code, qty, source: src, to_jc: segVal($('[data-seg="isTyp"]')) === 'Sample' ? 'SAMPLE' : jc, to_dept: to, issue_type: segVal($('[data-seg="isTyp"]')) || 'Regular', status: 'Pending', by: ME.name, at: nowIso() });
   audit('issue.request', i.no, m.code + ' × ' + qty + ' (' + src + ')'); ISS_UI.form = false;
   flash(esc(i.no) + ' request bhej di — approval ke baad stock katega.'); VIEWS.issuance.render();
 };
@@ -518,7 +713,7 @@ ACTIONS['ret-save'] = () => {
   if (!jc || !m || qty <= 0) { $('#rtMsg').innerHTML = '<span class="late-txt">JC, material aur qty chahiye.</span>'; return; }
   const net = issuedToJc(jc, m.code);
   if (qty > net) { $('#rtMsg').innerHTML = '<span class="late-txt">Is JC ko net issued sirf ' + qtyFmt(net) + ' hai — usse zyada return nahi hota.</span>'; return; }
-  const i = Store.put('issues', { id: uid(), no: nextNo('issues', 'ISS'), date: todayYmd(), type: 'return', material: m.code, qty, to_jc: jc, status: 'Approved', by: ME.name, approved_by: ME.name, at: nowIso(), remark: $('#rtRem').value.trim() });
+  const i = Store.put('issues', { id: uid(), no: nextNo('issues', 'ISS'), date: todayYmd(), type: 'return', material: m.code, qty, to_jc: jc, status: 'Approved', by: ($('#rtBy') ? $('#rtBy').value.trim() : ME.name) || ME.name, approved_by: ME.name, at: nowIso(), remark: $('#rtRem').value.trim() });
   audit('issue.return', i.no, m.code + ' × ' + qty + ' ← ' + jc); ISS_UI.ret = false; flash('Return ho gaya — open stock badh gaya.'); VIEWS.issuance.render();
 };
 ACTIONS['req-reject'] = el => { const r = Store.get('requisitions', el.dataset.id); r.status = 'Rejected'; Store.put('requisitions', r); audit('req.reject', r.no, ''); VIEWS.issuance.render(); };
@@ -546,110 +741,230 @@ VIEWS.rejstock = {
 };
 
 const RTV_UI = { form: false };
+const RTV_REASONS = ['Rejection Return', 'Excess Return', 'Quality Issue', 'Wrong Material', 'Damaged'];
 VIEWS.rtv = {
   mod: 'store', render() {
     const edit = can('store', 'edit');
     const { rej } = stockMaps();
-    let h = subTitle('RTV', 'Return to Vendor — rejection stock se') + '<div class="toolbar"><span class="grow"></span>' + (edit ? newBtn('New RTV', 'rtv-new') : '') + '</div>';
-    if (RTV_UI.form && edit) h += '<div class="panel" style="margin-bottom:12px">' + dlVendor() + '<datalist id="dlRejM">' + Object.entries(rej).filter(([, q]) => q > 0).map(([k, q]) => '<option value="' + esc((matBy(k) || { code: k }).code) + '">' + qtyFmt(q) + ' available</option>').join('') + '</datalist>' +
-      '<div class="row"><label>Material *<input id="rvMat" list="dlRejM"></label><label>Qty *<input id="rvQty" type="number" min="0" style="width:100px"></label><label>Vendor *<input id="rvVen" list="dlVen"></label><label style="flex:1">Reason<input id="rvWhy"></label><button class="btn primary" data-act="rtv-save">Save</button><span id="rvMsg" class="small"></span></div></div>';
-    const rows = Store.all('rtvs').slice().sort((a, b) => b.no < a.no ? -1 : 1);
-    h += '<div class="tbl-wrap"><table><tr><th>No</th><th>Date</th><th>Vendor</th><th>Material</th><th class="num">Qty</th><th>Reason</th><th>By</th></tr>' +
-      (rows.length ? rows.map(r => '<tr><td><b>' + esc(r.no) + '</b></td><td class="nowrap">' + fmtD(r.date) + '</td><td>' + esc(r.vendor) + '</td><td>' + esc(r.material) + '</td><td class="num">' + qtyFmt(r.qty) + '</td><td class="small">' + esc(r.reason || '') + '</td><td>' + esc(r.by) + '</td></tr>').join('') : '<tr><td colspan="7" class="empty">No RTVs</td></tr>') + '</table></div>';
+    let h = subTitle('Rejection RTV — Return To Vendor') + '<div class="toolbar"><span class="grow"></span>' + (edit ? newBtn('New RTV', 'rtv-new') : '') + '</div>';
+    if (RTV_UI.form && edit) {
+      // vendor-wise rejection sources from GRNs
+      const srcRows = [];
+      Store.all('grns').forEach(g => g.lines.forEach(l => { if (num(l.rejected) > 0) srcRows.push({ vendor: g.vendor, material: l.material, invoice: g.invoice, date: g.date, qty: num(l.rejected) }); }));
+      const returned = {};
+      Store.all('rtvs').forEach(r => { const k = norm(r.vendor + '|' + r.material); returned[k] = (returned[k] || 0) + num(r.qty); });
+      const avail = srcRows.map(r => { const k = norm(r.vendor + '|' + r.material); const take = Math.min(r.qty, Math.max(0, r.qty - (returned[k] || 0))); returned[k] = Math.max(0, (returned[k] || 0) - r.qty); return Object.assign({}, r, { avail: take }); }).filter(r => r.avail > 0);
+      const vendors = Array.from(new Set(avail.map(r => r.vendor)));
+      const sel = RTV_UI.vendor || vendors[0] || '';
+      h += '<div class="panel" style="margin-bottom:12px"><div class="row">' +
+        '<label>Vendor *<select id="rvVen">' + (vendors.length ? vendors.map(v => '<option' + (v === sel ? ' selected' : '') + '>' + esc(v) + ' (' + avail.filter(r => r.vendor === v).length + ')</option>').join('') : '<option value="">Koi rejection stock nahi</option>') + '</select></label>' +
+        '<label>Reason<select id="rvWhy">' + RTV_REASONS.map(x => '<option>' + x + '</option>').join('') + '</select></label>' +
+        '<label>Vehicle No<input id="rvVeh" placeholder="HR-26-XX-1234"></label><label>Driver Name<input id="rvDrv"></label><label style="flex:1">Remarks<input id="rvRem" placeholder="Optional remarks (NRGP me print hoga)"></label></div>' +
+        '<table style="margin-top:8px;max-width:820px"><tr><th>#</th><th>Item</th><th>Code</th><th>Invoice</th><th>UOM</th><th>Date</th><th class="num">Rejected Qty</th><th class="num" style="width:110px">Return Qty</th></tr>' +
+        avail.filter(r => r.vendor === sel).map((r, i) => '<tr data-rvrow data-mat="' + esc(r.material) + '" data-inv="' + esc(r.invoice) + '" data-max="' + r.avail + '"><td class="muted">' + (i + 1) + '</td><td>' + esc((matBy(r.material) || {}).name || '') + '</td><td>' + esc(r.material) + '</td><td>' + esc(r.invoice) + '</td><td>' + esc((matBy(r.material) || {}).uom || '') + '</td><td class="nowrap">' + fmtD(r.date) + '</td><td class="num late-txt">' + qtyFmt(r.avail) + '</td><td><input class="qty right" type="number" min="0" max="' + r.avail + '" step="any" data-rvq value="' + r.avail + '"></td></tr>').join('') +
+        '</table><div class="toolbar" style="margin-top:10px"><button class="btn primary" data-act="rtv-save">Create RTV &amp; Generate NRGP</button><span id="rvMsg" class="small"></span></div></div>';
+    }
+    const rows = Store.all('rtvs').slice().sort((a2, b2) => b2.no < a2.no ? -1 : 1);
+    h += '<div class="tbl-wrap"><table><tr><th>NRGP</th><th>Date</th><th>Vendor</th><th>Item</th><th>Code</th><th class="num">Qty</th><th>Invoice</th><th>Reason</th><th>Vehicle</th><th>By</th><th></th></tr>' +
+      (rows.length ? rows.map(r => '<tr><td><b>' + esc(r.no) + '</b></td><td class="nowrap">' + fmtD(r.date) + '</td><td>' + esc(r.vendor) + '</td><td>' + esc((matBy(r.material) || {}).name || '') + '</td><td>' + esc(r.material) + '</td><td class="num">' + qtyFmt(r.qty) + '</td><td>' + esc(r.invoice || '') + '</td><td class="small">' + esc(r.reason || '') + '</td><td>' + esc(r.vehicle || '') + '</td><td>' + esc(r.by) + '</td><td class="right"><button class="btn sm ghost" data-act="nrgp-print" data-id="' + esc(r.id) + '">NRGP</button></td></tr>').join('') : '<tr><td colspan="11" class="empty">No RTVs</td></tr>') + '</table></div>';
     setMain(h);
+    const v = $('#rvVen'); if (v) v.addEventListener('change', e => { RTV_UI.vendor = e.target.value.replace(/ \(\d+\)$/, ''); VIEWS.rtv.render(); });
   }
 };
-ACTIONS['rtv-new'] = () => { RTV_UI.form = !RTV_UI.form; VIEWS.rtv.render(); };
+ACTIONS['rtv-new'] = () => { RTV_UI.form = !RTV_UI.form; RTV_UI.vendor = null; VIEWS.rtv.render(); };
 ACTIONS['rtv-save'] = () => {
   if (!requirePerm('store', 'edit')) return;
-  const m = matBy($('#rvMat').value); const qty = num($('#rvQty').value); const ven = $('#rvVen').value.trim();
-  const avail = m ? (stockMaps().rej[norm(m.code)] || 0) : 0;
-  if (!m || qty <= 0 || !ven) { $('#rvMsg').innerHTML = '<span class="late-txt">Material, qty aur vendor chahiye.</span>'; return; }
-  if (qty > avail + 1e-9) { $('#rvMsg').innerHTML = '<span class="late-txt">Rejection stock sirf ' + qtyFmt(avail) + ' hai.</span>'; return; }
-  const r = Store.put('rtvs', { id: uid(), no: nextNo('rtvs', 'RTV'), date: todayYmd(), vendor: ven, material: m.code, qty, reason: $('#rvWhy').value.trim(), by: ME.name });
-  audit('rtv.create', r.no, m.code + ' × ' + qty + ' → ' + ven); RTV_UI.form = false; flash(esc(r.no) + ' saved.'); VIEWS.rtv.render();
+  const ven = ($('#rvVen').value || '').replace(/ \(\d+\)$/, '');
+  const rows = $$('tr[data-rvrow]').map(tr => ({ material: tr.dataset.mat, invoice: tr.dataset.inv, qty: num($('[data-rvq]', tr).value), max: num(tr.dataset.max) })).filter(r => r.qty > 0);
+  if (!ven || !rows.length) { $('#rvMsg').innerHTML = '<span class="late-txt">Vendor aur return qty chahiye.</span>'; return; }
+  const over = rows.find(r => r.qty > r.max + 1e-9);
+  if (over) { $('#rvMsg').innerHTML = '<span class="late-txt">' + esc(over.material) + ': rejected qty se zyada return nahi hota.</span>'; return; }
+  const why = $('#rvWhy').value, veh = $('#rvVeh').value.trim(), drv = $('#rvDrv').value.trim(), rem = $('#rvRem').value.trim();
+  const ids = rows.map(r => Store.put('rtvs', { id: uid(), no: fyNo('rtvs', 'NRGP', 4), date: todayYmd(), vendor: ven, material: r.material, uom: (matBy(r.material) || {}).uom || '', qty: r.qty, invoice: r.invoice, reason: why, vehicle: veh, driver: drv, remarks: rem, by: ME.name }).id);
+  audit('rtv.create', Store.get('rtvs', ids[0]).no, ven + ' · ' + rows.map(r => r.material + '×' + r.qty).join(', ') + ' · ' + why);
+  RTV_UI.form = false; flash(rows.length + ' item ka RTV ban gaya — NRGP print karo.'); VIEWS.rtv.render();
+  ACTIONS['nrgp-print']({ dataset: { id: ids[0] } });
+};
+ACTIONS['nrgp-print'] = el => {
+  const r = Store.get('rtvs', el.dataset.id); if (!r) return;
+  const sib = Store.all('rtvs').filter(x => x.vendor === r.vendor && x.date === r.date && x.reason === r.reason && x.vehicle === r.vehicle);
+  const v = vendorBy(r.vendor) || {};
+  const w = window.open('');
+  w.document.write('<html><head><title>' + esc(r.no) + '</title><style>body{font:13px/1.5 system-ui;margin:30px;color:#111}table{border-collapse:collapse;width:100%;margin:12px 0}th,td{border:1px solid #999;padding:5px 8px;text-align:left}h2{margin:0}small{color:#555}</style></head><body>' +
+    '<div style="display:flex;justify-content:space-between"><div><h2>' + esc(settings().company || '') + '</h2><small>' + esc(settings().address || '') + (settings().gstin ? ' · GSTIN ' + esc(settings().gstin) : '') + '</small></div>' +
+    '<div style="text-align:right"><h2>Non-Returnable Gate Pass (NRGP)</h2><small>Ref: ' + esc(r.no) + ' · ' + fmtD(r.date) + '</small></div></div>' +
+    '<p><b>Vendor:</b> ' + esc(r.vendor) + (v.address ? ', ' + esc(v.address) : '') + (v.gstin ? '<br>GSTIN: ' + esc(v.gstin) : '') + (v.mobile ? ' · Mob: ' + esc(v.mobile) : '') + '</p>' +
+    '<table><tr><th>S.No</th><th>Item Description</th><th>Item Code</th><th>Invoice Ref</th><th>UOM</th><th>Qty</th></tr>' +
+    sib.map((x, i) => '<tr><td>' + (i + 1) + '</td><td>' + esc((matBy(x.material) || {}).name || '') + '</td><td>' + esc(x.material) + '</td><td>' + esc(x.invoice || '') + '</td><td>' + esc(x.uom) + '</td><td>' + qtyFmt(x.qty) + '</td></tr>').join('') +
+    '<tr><td colspan="5" style="text-align:right"><b>Total Quantity:</b></td><td><b>' + qtyFmt(sib.reduce((s2, x) => s2 + num(x.qty), 0)) + '</b></td></tr></table>' +
+    '<p>Reason / Purpose: ' + esc(r.reason || '') + '<br>Vehicle No: ' + esc(r.vehicle || '') + '<br>Driver Name: ' + esc(r.driver || '') + '<br>Remarks: ' + esc(r.remarks || '') + '</p>' +
+    '<p><small>Declaration: Goods are being returned to the vendor and are non-returnable against this gate pass.</small></p>' +
+    '<p style="margin-top:40px">Prepared By: ' + esc(r.by) + ' _____________ &nbsp;&nbsp;&nbsp; Authorised Signatory _____________</p>' +
+    '<script>window.print()</' + 'script></body></html>');
 };
 
 VIEWS.materials = {
   mod: 'masters', render() {
     masterView({
       col: 'materials', mod: 'masters', title: 'Materials', view: VIEWS.materials, sort: 'code', paste: true,
-      cols: [{ k: 'code', l: 'Code', w: 120, upper: true, ph: 'MAT-001' }, { k: 'name', l: 'Material name', ph: 'e.g. EVA Sheet 10mm' }, { k: 'group', l: 'Group', w: 130 }, { k: 'uom', l: 'UOM', w: 80, upper: true }, { k: 'min_level', l: 'Min level', type: 'number', w: 90 }, { k: 'rack', l: 'Rack', w: 80, upper: true }],
+      cols: [{ k: 'code', l: 'Item Code', w: 100, upper: true, ph: 'auto' }, { k: 'name', l: 'Item Name', ph: 'Item name' },
+        { k: 'group', l: 'Category', opts: () => [''].concat(ITEM_CATS).map(v => ({ v, l: v || '—' })) },
+        { k: 'uom', l: 'UOM', opts: () => UOMS.map(v => ({ v, l: v })) },
+        { k: 'price', l: 'Price ₹', type: 'number', w: 90 }, { k: 'rack', l: 'Rack No.', w: 80, upper: true },
+        { k: 'gst', l: 'GST %', type: 'number', w: 70 }, { k: 'hsn', l: 'HSN', w: 90 },
+        { k: 'min_level', l: 'Min level', type: 'number', w: 80 }],
       defaults: { uom: 'PCS' },
-      validate: d => uniq('materials', 'code', 'Code')(d),
+      beforeAdd: d => { if (!String(d.code || '').trim()) d.code = itemCodeAuto(d.group); },
+      validate: d => (!String(d.name || '').trim() ? 'Item name is required.' : Store.all('materials').some(x => x.id !== d.id && d.code && norm(x.code) === norm(d.code)) ? 'Code exists.' : ''),
       inUse: d => (Store.all('purchase_orders').some(p => p.lines.some(l => norm(l.material) === norm(d.code))) || Store.all('issues').some(i => norm(i.material) === norm(d.code))) ? 'Material use ho chuka hai — delete nahi hoga.' : ''
     });
   }
 };
 
 /* ================= DEVELOPMENT: BOM ================= */
-const BOM_UI = {};
 VIEWS.bom = {
   mod: 'development', render() {
     const edit = can('development', 'edit');
     if (!edit) { go('boms'); return; }
-    let h = subTitle('Make BOM') + '<div class="panel">' + dlMat('dlMatB') + dlVendor() + '<datalist id="dlArtB">' + Store.all('items').map(i => '<option value="' + esc(i.code) + '">' + esc(i.name) + '</option>').join('') + '</datalist>' +
-      '<div class="row"><label>Article *<input id="nbArt" list="dlArtB"></label><label>Colour<input id="nbCol" placeholder="blank = all colours"></label></div>' +
-      '<table style="margin-top:10px;max-width:640px"><tr><th>Material</th><th style="width:70px">UOM</th><th class="num" style="width:120px">Qty per pair</th><th style="width:170px">Supplier</th><th style="width:30px"></th></tr><tbody id="nbLines"><tr><td><input data-nb="mat" list="dlMatB"></td><td class="muted" data-uom></td><td><input data-nb="qty" type="number" min="0" step="any" class="right"></td><td><input data-nb="sup" list="dlVen"></td><td><button class="btn ghost sm" data-act="bom-line-del">×</button></td></tr></tbody></table><a class="small" data-act="bom-line">+ material</a>' +
-      '<div class="toolbar" style="margin-top:10px"><button class="btn primary" data-act="bom-save">Save as Final</button><span id="nbMsg" class="small"></span></div>' +
-      '<div class="muted small">Same article ka dobara BOM banaya toh naya version ban jaata hai; MRS hamesha latest final version uthata hai.</div></div>';
+    const brands = Store.all('customers').map(c => c.name);
+    let h = subTitle('DEVELOPMENT BOM') + '<div class="panel">' + dlMat('dlMatB') + dlVendor() +
+      '<datalist id="dlArtB">' + Store.all('items').map(i => '<option value="' + esc(i.code) + '">' + esc(i.name) + '</option>').join('') + '</datalist>' +
+      '<datalist id="dlBrandB">' + brands.map(x => '<option value="' + esc(x) + '">').join('') + '</datalist>' +
+      '<datalist id="dlCatJc2">' + ITEM_CATS.map(x => '<option>' + x + '</option>').join('') + '</datalist><datalist id="dlCatB">' + fieldOptions('category').map(x => '<option value="' + esc(x) + '">').join('') + '</datalist>' +
+      '<div class="row"><label>Brand *<input id="nbBrand" list="dlBrandB"></label><label>Article Name *<input id="nbArt" list="dlArtB"></label><label>Style Name<input id="nbStyle"></label><label>Colour Wise<input id="nbCol" placeholder="blank = all colours"></label>' +
+      '<label>Gender<select id="nbGen"><option value=""></option>' + GENDERS.map(g => '<option>' + g + '</option>').join('') + '</select></label><label>Category<input id="nbCat" list="dlCatB"></label></div>' +
+      '<div class="row" style="margin-top:8px"><label>Size Run<input id="nbRun" placeholder="e.g. 6X10"></label><label>Last (Mould No)<input id="nbMould"></label>' + imgField('nbPhoto', 'Photo') + '<span id="nbPhotoTag"></span><label style="flex:1">Remark<input id="nbRem" style="text-transform:uppercase;color:var(--late)"></label></div>' +
+      '<div class="toolbar" style="margin-top:10px"><a class="small" data-act="bom-line">+ Add Row</a><a class="small" data-act="bom-paste-t">Bulk Paste</a>' +
+      '<label class="small" style="flex-direction:row;align-items:center;gap:4px">Copy items from <select id="nbCopy"><option value="">—</option>' + Store.all('boms').map(x => '<option value="' + esc(x.id) + '">' + esc(x.article + (x.colour ? ' · ' + x.colour : '') + ' v' + x.version) + '</option>').join('') + '</select></label><span class="grow"></span><span id="nbRmc" class="small"></span></div>' +
+      '<div id="nbPasteBox" class="hidden"><textarea id="nbPaste" rows="4" class="mono" placeholder="Section[TAB]Category[TAB]Item Name[TAB]Norms[TAB]Price[TAB]Supplier[TAB]Remark — ek line ek item"></textarea> <button class="btn sm" data-act="bom-paste-go">Import</button></div>' +
+      '<div class="tbl-wrap"><table id="nbTable"><tr><th>Sr</th><th style="width:110px">Section</th><th style="width:140px">Category</th><th>Item Name</th><th style="width:90px">Item Code</th><th style="width:60px">UOM</th><th class="num" style="width:90px">Norms</th><th class="num" style="width:90px">Price</th><th class="num" style="width:90px">Cost</th><th style="width:150px">Supplier</th><th style="width:130px">Remark</th><th style="width:30px"></th></tr>' +
+      '</table></div>' +
+      '<div class="toolbar" style="margin-top:10px"><button class="btn primary" data-act="bom-save">Save BOM</button><span id="nbMsg" class="small"></span></div></div>';
     setMain(h);
+    $('#nbTable').insertAdjacentHTML('beforeend', bomRow());
+    const m = $('#main'); window.NBF = { photo: '' };
+    m.addEventListener('input', e => { if (e.target.closest('#nbTable')) bomRecalc(); });
+    m.addEventListener('change', e => {
+      if (e.target.dataset.nb === 'mat') { const mt = Store.all('materials').find(x => norm(x.name) === norm(e.target.value) || norm(x.code) === norm(e.target.value)); const tr = e.target.closest('tr'); if (mt) { e.target.value = mt.name; $('[data-nb-code]', tr).textContent = mt.code; $('[data-nb-uom]', tr).textContent = mt.uom; const pr = $('[data-nb="price"]', tr); if (!pr.value) pr.value = mt.price || ''; const c = $('[data-nb="cat"]', tr); if (!c.value) c.value = mt.group || ''; } bomRecalc(); }
+      if (e.target.id === 'nbPhoto') readImg(e.target.files[0], src => { NBF.photo = src; $('#nbPhotoTag').innerHTML = photoThumb(src); });
+      if (e.target.id === 'nbCopy' && e.target.value) { const src = Store.get('boms', e.target.value); $$('#nbTable tr[data-bline]').forEach(tr => tr.remove()); src.lines.forEach(l => $('#nbTable').insertAdjacentHTML('beforeend', bomRow(l))); bomRecalc(); }
+    });
   }
 };
-ACTIONS['bom-line'] = () => $('#nbLines').insertAdjacentHTML('beforeend', '<tr><td><input data-nb="mat" list="dlMatB"></td><td class="muted" data-uom></td><td><input data-nb="qty" type="number" min="0" step="any" class="right"></td><td><input data-nb="sup" list="dlVen"></td><td><button class="btn ghost sm" data-act="bom-line-del">×</button></td></tr>');
-ACTIONS['bom-line-del'] = el => el.closest('tr').remove();
-document.addEventListener('change', e => { if (e.target.dataset.nb === 'mat') { const m = matBy(e.target.value); if (m) { e.target.value = m.code; $('[data-uom]', e.target.closest('tr')).textContent = m.uom; } } });
+function bomRow(l) {
+  l = l || {}; const m = matBy(l.material) || {};
+  return '<tr data-bline><td class="muted" data-sr></td><td><input data-nb="section" value="' + esc(l.section || '') + '"></td><td><input data-nb="cat" list="dlCatJc2" value="' + esc(l.category || m.group || '') + '"></td><td><input data-nb="mat" list="dlMatB" value="' + esc(m.name || '') + '"></td><td class="muted" data-nb-code>' + esc(l.material || '') + '</td><td class="muted" data-nb-uom>' + esc(l.uom || '') + '</td>' +
+    '<td><input data-nb="qty" type="number" min="0" step="any" class="right" value="' + esc(l.qty || '') + '"></td><td><input data-nb="price" type="number" min="0" step="any" class="right" value="' + esc(l.price || '') + '"></td><td class="num muted" data-nb-cost>0</td><td><input data-nb="sup" list="dlVen" value="' + esc(l.supplier || '') + '"></td><td><input data-nb="rem" value="' + esc(l.remark || '') + '"></td><td><button class="btn ghost sm" data-act="bom-line-del">×</button></td></tr>';
+}
+function bomRecalc() {
+  let rmc = 0;
+  $$('#nbTable tr[data-bline]').forEach((tr, i) => { $('[data-sr]', tr).textContent = i + 1; const c = num($('[data-nb="qty"]', tr).value) * num($('[data-nb="price"]', tr).value); $('[data-nb-cost]', tr).textContent = c ? money(c) : '0'; rmc += c; });
+  $('#nbRmc').innerHTML = rmc ? '<b>Total RMC/Pair: ₹' + money(rmc) + '</b>' : '';
+}
+ACTIONS['bom-line'] = () => { $('#nbTable').insertAdjacentHTML('beforeend', bomRow()); bomRecalc(); };
+ACTIONS['bom-line-del'] = el => { el.closest('tr').remove(); bomRecalc(); };
+ACTIONS['bom-paste-t'] = () => $('#nbPasteBox').classList.toggle('hidden');
+ACTIONS['bom-paste-go'] = () => {
+  let ok = 0, bad = [];
+  $('#nbPaste').value.split(/\r?\n/).map(x => x.split('\t')).filter(r => r.join('').trim()).forEach(r => {
+    const hasSec = r.length >= 3;
+    const nameIdx = hasSec ? 2 : 0;
+    const m = Store.all('materials').find(x => norm(x.name) === norm(r[nameIdx]) || norm(x.code) === norm(r[nameIdx]));
+    if (!m) { bad.push(r[nameIdx]); return; }
+    $('#nbTable').insertAdjacentHTML('beforeend', bomRow({ section: hasSec ? r[0] : '', category: hasSec ? r[1] : m.group, material: m.code, uom: m.uom, qty: r[hasSec ? 3 : 1] || '', price: r[hasSec ? 4 : 2] || m.price || '', supplier: r[hasSec ? 5 : 3] || '', remark: r[hasSec ? 6 : 4] || '' })); ok++;
+  });
+  $('#nbPasteBox').classList.add('hidden'); bomRecalc();
+  flash(ok + ' items import hue.' + (bad.length ? ' Match nahi hue: ' + esc(bad.join(', ')) : ''), bad.length ? 'err' : '');
+};
 ACTIONS['bom-save'] = () => {
   if (!requirePerm('development', 'edit')) return;
-  const art = $('#nbArt').value.trim().toUpperCase();
-  const lines = $$('#nbLines tr').map(tr => { const m = matBy($('[data-nb="mat"]', tr).value); return m ? { material: m.code, uom: m.uom, qty: num($('[data-nb="qty"]', tr).value), supplier: $('[data-nb="sup"]', tr).value.trim() } : null; }).filter(l => l && l.qty > 0);
-  if (!art || !lines.length) { $('#nbMsg').innerHTML = '<span class="late-txt">Article aur kam se kam ek material line (master wala) chahiye.</span>'; return; }
-  const ver = Store.all('boms').filter(b => norm(b.article) === norm(art)).reduce((m, b) => Math.max(m, b.version), 0) + 1;
-  const b = Store.put('boms', { id: uid(), article: art, colour: $('#nbCol').value.trim(), version: ver, lines, status: 'Final', by: ME.name, at: nowIso() });
-  audit('bom.create', art + ' v' + ver, lines.length + ' materials'); flash('BOM saved: ' + esc(art) + ' v' + ver + '.'); go('boms');
+  const brand = $('#nbBrand').value.trim(); const artIn = $('#nbArt').value.trim().toUpperCase();
+  const art = (Store.all('items').find(i => norm(i.code) === norm(artIn) || norm(i.name) === norm(artIn)) || { code: artIn }).code;
+  const style = $('#nbStyle').value.trim(), col = $('#nbCol').value.trim(), gen = $('#nbGen').value, cat = $('#nbCat').value.trim();
+  const lines = $$('#nbTable tr[data-bline]').map(tr => {
+    const m = Store.all('materials').find(x => norm(x.name) === norm($('[data-nb="mat"]', tr).value) || norm(x.code) === norm($('[data-nb="mat"]', tr).value));
+    return m ? { section: $('[data-nb="section"]', tr).value.trim(), category: $('[data-nb="cat"]', tr).value.trim() || m.group || '', material: m.code, uom: m.uom, qty: num($('[data-nb="qty"]', tr).value), price: num($('[data-nb="price"]', tr).value), supplier: $('[data-nb="sup"]', tr).value.trim(), remark: $('[data-nb="rem"]', tr).value.trim() } : null;
+  }).filter(l => l && l.qty > 0);
+  if (!brand || !art || !lines.length) { $('#nbMsg').innerHTML = '<span class="late-txt">Brand, Article aur kam se kam ek item line (Norms > 0) chahiye.</span>'; return; }
+  const dupKey = lines.map(l => norm(l.section + '|' + l.material)).filter((x, i, a2) => a2.indexOf(x) !== i);
+  if (dupKey.length) { $('#nbMsg').innerHTML = '<span class="late-txt">Same Section + Item do baar hai — hatao.</span>'; return; }
+  const ver = Store.all('boms').filter(b2 => norm(b2.article) === norm(art) && norm(b2.brand || '') === norm(brand) && norm(b2.style || '') === norm(style) && norm(b2.colour || '') === norm(col)).reduce((mx, b2) => Math.max(mx, b2.version), 0) + 1;
+  const b2 = Store.put('boms', { id: uid(), brand, article: art, style, colour: col, gender: gen, category: cat, size_run: $('#nbRun').value.trim(), mould_no: $('#nbMould').value.trim(), photo: (window.NBF || {}).photo || '', remark: $('#nbRem').value.trim().toUpperCase(), version: ver, lines, status: 'Final', by: ME.name, at: nowIso() });
+  audit('bom.create', art + ' v' + ver, brand + (col ? ' · ' + col : '') + ' · ' + lines.length + ' items · RMC ₹' + money(lines.reduce((s2, l) => s2 + l.qty * l.price, 0)));
+  flash('BOM saved: ' + esc(art) + ' v' + ver + (ver > 1 ? ' (naya version)' : '') + '.'); go('boms');
 };
 VIEWS.boms = {
   mod: 'development', render() {
-    const byArt = {};
-    Store.all('boms').forEach(b => { const k = norm(b.article); if (!byArt[k] || byArt[k].version < b.version) byArt[k] = b; });
-    const rows = Object.values(byArt).sort((a, b) => a.article.localeCompare(b.article));
-    setMain(subTitle('Created BOMs', 'latest version per article') + '<div class="toolbar"><span class="grow"></span>' + (can('development', 'edit') ? '<a class="btn primary" href="#/bom">+ Make BOM</a>' : '') + '</div>' +
-      '<div class="tbl-wrap"><table><tr><th>Article</th><th>Colour</th><th>Version</th><th>Materials (per pair)</th><th>By</th><th>Date</th></tr>' +
-      (rows.length ? rows.map(b => '<tr><td><b>' + esc(b.article) + '</b></td><td>' + esc(b.colour || 'All') + '</td><td>v' + b.version + '</td><td class="small">' + b.lines.map(l => esc(l.material) + ' × ' + l.qty + ' ' + esc(l.uom)).join('<br>') + '</td><td>' + esc(b.by) + '</td><td class="nowrap">' + fmtD(b.at) + '</td></tr>').join('') : '<tr><td colspan="6" class="empty">Koi BOM nahi bana</td></tr>') + '</table></div>');
+    const byKey = {};
+    Store.all('boms').forEach(b2 => { const k = norm(b2.article + '|' + (b2.brand || '') + '|' + (b2.style || '') + '|' + (b2.colour || '')); if (!byKey[k] || byKey[k].version < b2.version) byKey[k] = b2; });
+    const rows = Object.values(byKey).sort((a2, b3) => a2.article.localeCompare(b3.article));
+    setMain(subTitle('Created BOMs', 'latest version per article+brand+style+colour') + '<div class="toolbar"><span class="grow"></span>' + (can('development', 'edit') ? '<a class="btn primary" href="#/bom">+ Make BOM</a>' : '') + '</div>' +
+      '<div class="tbl-wrap"><table><tr><th>Photo</th><th>Brand</th><th>Article</th><th>Style</th><th>Colour</th><th>Gender</th><th>Ver</th><th>Items (Norms × Price → Cost)</th><th class="num">RMC/Pair ₹</th><th>By</th><th>Date</th></tr>' +
+      (rows.length ? rows.map(b2 => '<tr><td>' + photoThumb(b2.photo) + '</td><td>' + esc(b2.brand || '') + '</td><td><b>' + esc(b2.article) + '</b></td><td>' + esc(b2.style || '') + '</td><td>' + esc(b2.colour || 'All') + '</td><td>' + esc(b2.gender || '') + '</td><td>v' + b2.version + '</td><td class="small">' + b2.lines.map(l => esc(l.material) + ' × ' + l.qty + (l.price ? ' @ ₹' + l.price : '') + (l.supplier ? ' <span class="muted">(' + esc(l.supplier) + ')</span>' : '')).join('<br>') + '</td><td class="num">' + money(b2.lines.reduce((s2, l) => s2 + num(l.qty) * num(l.price || 0), 0)) + '</td><td>' + esc(b2.by) + '</td><td class="nowrap">' + fmtD(b2.at) + '</td></tr>').join('') : '<tr><td colspan="11" class="empty">Koi BOM nahi bana</td></tr>') + '</table></div>');
   }
 };
 
 /* ================= PRODUCTION ================= */
 const REQ_UI = { form: false };
+function staleReqs() { return Store.all('requisitions').filter(r => r.status === 'Pending' && (Date.now() - new Date(r.date + 'T00:00')) > 24 * 3600000); }
 VIEWS.requisition = {
   mod: 'production', render() {
     const edit = can('production', 'edit');
-    let h = subTitle('Requisition Slip', 'store se material mangwane ke liye') + '<div class="toolbar"><span class="grow"></span>' + (edit ? newBtn('New requisition', 'req-new') : '') + '</div>';
+    let h = subTitle('Requisition Slip', 'JC ke pending materials store se mangwao');
     const stale = staleReqs();
     if (stale.length) h += '<div class="panel" style="border-left:3px solid var(--late);margin-bottom:10px"><b>' + stale.length + ' slip 24h+ se pending</b> — jab tak Store issue/reject nahi karta, nayi slip nahi banegi (Manager/Admin exempt). <a href="#/issuance">Issuance →</a></div>';
-    if (REQ_UI.form && edit) h += '<div class="panel" style="margin-bottom:12px">' + dlMat('dlMatR') + '<datalist id="dlJc">' + Store.all('job_cards').filter(j => j.status !== 'Closed').map(j => '<option value="' + esc(j.no) + '">' + esc(j.article) + '</option>').join('') + '</datalist>' +
-      '<div class="row"><label>Job card<input id="nrJc" list="dlJc"></label><label>Dept<input id="nrDept" value="Production"></label></div>' +
-      '<table style="margin-top:8px;max-width:560px"><tr><th>Material</th><th class="num" style="width:120px">Qty</th><th style="width:30px"></th></tr><tbody id="nrLines"><tr><td><input data-nr="mat" list="dlMatR"></td><td><input data-nr="qty" type="number" min="0" step="any" class="right"></td><td><button class="btn ghost sm" data-act="req-line-del">×</button></td></tr></tbody></table><a class="small" data-act="req-line">+ material</a>' +
-      '<div class="toolbar" style="margin-top:10px"><button class="btn primary" data-act="req-save">Submit</button><span id="nrMsg" class="small"></span></div></div>';
-    const rows = Store.all('requisitions').slice().sort((a, b) => b.no < a.no ? -1 : 1);
-    h += '<div class="tbl-wrap"><table><tr><th>Req</th><th>Date</th><th>JC / Dept</th><th>Materials</th><th>Status</th><th>By</th></tr>' +
-      (rows.length ? rows.map(r => '<tr><td><b>' + esc(r.no) + '</b></td><td class="nowrap">' + fmtD(r.date) + '</td><td>' + esc(r.jc_no || r.dept) + '</td><td class="small">' + r.lines.map(l => esc(l.material) + ' × ' + qtyFmt(l.qty)).join('<br>') + '</td><td><span class="st ' + (r.status === 'Issued' ? 'Done' : r.status === 'Rejected' ? 'Late' : 'Pending') + '">' + r.status + '</span>' + (r.issued_by ? '<div class="muted small">' + esc(r.issued_by) + '</div>' : '') + '</td><td>' + esc(r.by) + '</td></tr>').join('') : '<tr><td colspan="6" class="empty">No requisitions</td></tr>') + '</table></div>';
+    h += '<div class="toolbar"><span class="grow"></span>' + (edit ? newBtn('New requisition', 'req-new') : '') + '</div>';
+    if (REQ_UI.form && edit) {
+      h += '<div class="panel" style="margin-bottom:12px">' + dlMat('dlMatR') + '<datalist id="dlJc">' + Store.all('job_cards').filter(j => j.status !== 'Closed').map(j => '<option value="' + esc(j.no) + '">' + esc(j.article) + '</option>').join('') + '</datalist>' +
+        '<div class="row"><label>Job Card *<input id="nrJc" list="dlJc"></label><label>Requested By<input value="' + esc(ME.name) + '" readonly></label><button class="btn sm" data-act="req-fill">Fill All Pending Qty</button></div>' +
+        '<div class="tbl-wrap" style="margin-top:8px"><table id="nrTable" style="max-width:820px"><tr><th>#</th><th>Item Name</th><th>UOM</th><th class="num">Req Qty</th><th class="num">Stock</th><th>Coverage</th><th class="num" style="width:120px">Requisition Qty</th><th style="width:30px"></th></tr></table></div>' +
+        '<a class="small" data-act="req-extra">+ Add Extra Item</a>' +
+        '<div class="toolbar" style="margin-top:10px"><button class="btn primary" data-act="req-save">Generate Requisition Slip</button><span id="nrMsg" class="small"></span></div></div>';
+    }
+    const rows = Store.all('requisitions').slice().sort((a2, b2) => b2.no < a2.no ? -1 : 1);
+    h += '<div class="tbl-wrap"><table><tr><th>Req</th><th>Date</th><th>JC / Dept</th><th>Materials (req → issued)</th><th>Status</th><th>By</th></tr>' +
+      (rows.length ? rows.map(r => '<tr><td><b>' + esc(r.no) + '</b></td><td class="nowrap">' + fmtD(r.date) + '</td><td>' + esc(r.jc_no || r.dept) + '</td><td class="small">' + r.lines.map(l => esc(l.material) + ' × ' + qtyFmt(l.qty) + (l.extra ? ' <span class="muted">(extra)</span>' : '')).join('<br>') + '</td><td><span class="st ' + (r.status === 'Issued' ? 'Done' : r.status === 'Rejected' ? 'Late' : 'Pending') + '">' + r.status + '</span>' + (r.issued_by ? '<div class="muted small">' + esc(r.issued_by) + '</div>' : '') + '</td><td>' + esc(r.by) + '</td></tr>').join('') : '<tr><td colspan="6" class="empty">No requisitions</td></tr>') + '</table></div>';
     setMain(h);
+    const m = $('#main');
+    m.addEventListener('change', e => { if (e.target.id === 'nrJc') reqFillJc(); if (e.target.dataset.nr === 'mat') { const mt = matBy(e.target.value); if (mt) { e.target.value = mt.code; const tr = e.target.closest('tr'); $('[data-nr-uom]', tr).textContent = mt.uom; } } });
   }
 };
+function reqCoverage(reqQty, stock) { return stock >= reqQty ? '<span class="st Done">Covered</span>' : stock > 0 ? '<span class="st Pending">' + qtyFmt(stock) + ' only</span>' : '<span class="st Late">No stock</span>'; }
+function reqFillJc() {
+  const j = jcBy($('#nrJc').value); const t = $('#nrTable');
+  $$('#nrTable tr[data-rrow]').forEach(tr => tr.remove());
+  if (!j) return;
+  (j.lines || []).forEach((l, i) => {
+    const pend = Math.max(0, num(l.required) - issuedToJc(j.no, l.material));
+    if (pend <= 0.0001) return;
+    const stk = stockOf(l.material); const cap = Math.min(pend, stk);
+    t.insertAdjacentHTML('beforeend', '<tr data-rrow data-mat="' + esc(l.material) + '" data-cap="' + cap + '"><td class="muted">' + (i + 1) + '</td><td>' + esc((matBy(l.material) || {}).name || l.material) + ' <span class="muted small">' + esc(l.material) + '</span></td><td>' + esc(l.uom) + '</td><td class="num">' + qtyFmt(pend) + '</td><td class="num">' + qtyFmt(stk) + '</td><td>' + reqCoverage(pend, stk) + '</td><td><input class="qty right" type="number" min="0" max="' + cap + '" step="any" data-rq' + (stk <= 0 ? ' disabled' : '') + '></td><td></td></tr>');
+  });
+  if (!$$('#nrTable tr[data-rrow]').length) t.insertAdjacentHTML('beforeend', '<tr data-rrow><td colspan="8" class="empty">Is JC ka sab material issue ho chuka hai 🎉</td></tr>');
+}
+ACTIONS['req-fill'] = () => { $$('#nrTable tr[data-rrow] [data-rq]').forEach(inp => { inp.value = inp.closest('tr').dataset.cap; }); };
+ACTIONS['req-extra'] = () => { $('#nrTable').insertAdjacentHTML('beforeend', '<tr data-rrow data-extra="1"><td class="muted">+</td><td><input data-nr="mat" list="dlMatR" placeholder="Item"></td><td class="muted" data-nr-uom></td><td class="num muted">extra</td><td class="num muted">extra</td><td></td><td><input class="qty right" type="number" min="0" step="any" data-rq></td><td><button class="btn ghost sm" data-act="req-extra-del">×</button></td></tr>'); };
+ACTIONS['req-extra-del'] = el => el.closest('tr').remove();
 ACTIONS['req-new'] = () => { REQ_UI.form = !REQ_UI.form; VIEWS.requisition.render(); };
-ACTIONS['req-line'] = () => $('#nrLines').insertAdjacentHTML('beforeend', '<tr><td><input data-nr="mat" list="dlMatR"></td><td><input data-nr="qty" type="number" min="0" step="any" class="right"></td><td><button class="btn ghost sm" data-act="req-line-del">×</button></td></tr>');
-ACTIONS['req-line-del'] = el => el.closest('tr').remove();
-document.addEventListener('change', e => { if (e.target.dataset.nr === 'mat') { const m = matBy(e.target.value); if (m) e.target.value = m.code; } });
-function staleReqs() { return Store.all('requisitions').filter(r => r.status === 'Pending' && (Date.now() - new Date(r.date + 'T00:00')) > 24 * 3600000); }
 ACTIONS['req-save'] = () => {
   if (!requirePerm('production', 'edit')) return;
   const stale = staleReqs();
   if (stale.length && !canApprove()) { $('#nrMsg').innerHTML = '<span class="late-txt">' + esc(stale[0].no) + ' 24 ghante se pending hai — pehle Store se issue/reject karwao, tabhi nayi slip banegi.</span>'; return; }
-  const lines = $$('#nrLines tr').map(tr => { const m = matBy($('[data-nr="mat"]', tr).value); return m ? { material: m.code, qty: num($('[data-nr="qty"]', tr).value) } : null; }).filter(l => l && l.qty > 0);
-  if (!lines.length) { $('#nrMsg').innerHTML = '<span class="late-txt">Kam se kam ek material line chahiye.</span>'; return; }
-  const r = Store.put('requisitions', { id: uid(), no: nextNo('requisitions', 'RQ'), date: todayYmd(), jc_no: $('#nrJc').value.trim(), dept: $('#nrDept').value.trim() || 'Production', lines, status: 'Pending', by: ME.name });
-  audit('req.create', r.no, lines.map(l => l.material + '×' + l.qty).join(', ')); REQ_UI.form = false; flash(esc(r.no) + ' submitted — Store issuance mein dikhega.'); VIEWS.requisition.render();
+  const jc = $('#nrJc').value.trim();
+  if (!jcBy(jc)) { $('#nrMsg').innerHTML = '<span class="late-txt">Sahi Job Card chuno.</span>'; return; }
+  const lines = [];
+  let overCap = '';
+  $$('#nrTable tr[data-rrow]').forEach(tr => {
+    const q = num(($('[data-rq]', tr) || {}).value); if (q <= 0) return;
+    if (tr.dataset.extra) { const mt = matBy($('[data-nr="mat"]', tr).value); if (mt) lines.push({ material: mt.code, qty: Math.min(q, stockOf(mt.code)), extra: true }); return; }
+    if (q > num(tr.dataset.cap) + 1e-9) overCap = tr.dataset.mat;
+    lines.push({ material: tr.dataset.mat, qty: Math.min(q, num(tr.dataset.cap)) });
+  });
+  if (overCap) { $('#nrMsg').innerHTML = '<span class="late-txt">' + esc(overCap) + ': qty cap (pending/stock) se zyada thi — cap pe laga di.</span>'; }
+  if (!lines.length) { $('#nrMsg').innerHTML = '<span class="late-txt">Kisi item ki requisition qty dalo.</span>'; return; }
+  const r = Store.put('requisitions', { id: uid(), no: nextNo('requisitions', 'REQ'), date: todayYmd(), jc_no: jc, dept: 'Production', lines, status: 'Pending', by: ME.name });
+  audit('req.create', r.no, jc + ' · ' + lines.map(l => l.material + '×' + l.qty).join(', ')); REQ_UI.form = false;
+  flash('<b>' + esc(r.no) + '</b> ban gayi — Store ki issuance screen par pahunch gayi.'); VIEWS.requisition.render();
 };
 
 VIEWS.prodtracker = {
@@ -796,7 +1111,7 @@ VIEWS.vendors = {
   mod: 'purchase', render() {
     masterView({
       col: 'vendors', mod: 'purchase', title: 'Vendors', view: VIEWS.vendors, sort: 'name', paste: true,
-      cols: [{ k: 'name', l: 'Vendor name', ph: 'Vendor name' }, { k: 'gstin', l: 'GSTIN', w: 160, upper: true }, { k: 'address', l: 'Address' }, { k: 'mobile', l: 'Mobile', w: 120 }, { k: 'email', l: 'Email', w: 180 }],
+      cols: [{ k: 'name', l: 'Vendor Name', ph: 'e.g. ABC Textiles' }, { k: 'address', l: 'Address' }, { k: 'state', l: 'State', w: 130 }, { k: 'gstin', l: 'GST No', w: 160, upper: true }, { k: 'email', l: 'Email ID', w: 180 }, { k: 'mobile', l: 'Mobile No.', w: 120 }],
       validate: d => uniq('vendors', 'name', 'Vendor')(d),
       inUse: d => Store.all('purchase_orders').some(p => norm(p.vendor) === norm(d.name)) ? 'Vendor ke POs hain — delete nahi hoga.' : ''
     });
