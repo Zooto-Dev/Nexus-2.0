@@ -59,6 +59,94 @@ function autoTask(title, doer, dueDays) {
   const due = new Date(Date.now() + (dueDays || 0) * 86400000); if (due.getDay() === 0) due.setDate(due.getDate() + 1); // Sunday -> Monday
   Store.put('checklist', { id: uid(), title, doer, freq: 'Once', due: ymdOf(due), done: {}, active: true, by: 'auto', auto: true });
 }
+// Standard letterhead document printer — har report iska use karta hai
+function printDoc(o) {
+  const w = window.open('');
+  w.document.write('<html><head><title>' + esc(o.ref || o.title) + '</title><style>' +
+    'body{font:12.5px/1.5 "Segoe UI",system-ui,sans-serif;color:#111;margin:34px}' +
+    '.hd{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2.5px solid #16202b;padding-bottom:10px;margin-bottom:14px}' +
+    '.hd h1{margin:0;font-size:19px}.hd small{color:#555}.hd .doc{text-align:right}.hd .doc b{font-size:15px;text-transform:uppercase;letter-spacing:.06em}' +
+    '.meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:2px 26px;margin:10px 0 14px}' +
+    '.meta div{padding:2.5px 0;border-bottom:1px dotted #ccc}.meta span{color:#666;font-size:11px;text-transform:uppercase;letter-spacing:.04em;display:inline-block;min-width:92px}' +
+    'table{border-collapse:collapse;width:100%;margin:10px 0}th,td{border:1px solid #8a8f96;padding:5px 9px;text-align:left}' +
+    'th{background:#eef1f5;font-size:11px;text-transform:uppercase;letter-spacing:.04em}td.n,th.n{text-align:right}' +
+    'tfoot td{font-weight:700;background:#f6f8fa}.note{color:#555;font-size:11.5px;margin-top:8px}' +
+    '.sig{display:flex;justify-content:space-between;margin-top:52px}.sig div{border-top:1px solid #333;padding:4px 26px 0;font-size:11.5px;color:#333}' +
+    '@media print{body{margin:12mm}}</style></head><body>' +
+    '<div class="hd"><div><h1>' + esc(settings().company || 'Nexus 2.0') + '</h1><small>' + esc(settings().address || '') + (settings().gstin ? ' · GSTIN ' + esc(settings().gstin) : '') + '</small></div>' +
+    '<div class="doc"><b>' + esc(o.title) + '</b><br><small>' + esc(o.ref || '') + (o.date ? ' · ' + fmtD(o.date) : '') + '</small></div></div>' +
+    (o.meta && o.meta.length ? '<div class="meta">' + o.meta.filter(x => x[1] !== undefined && x[1] !== '').map(x => '<div><span>' + esc(x[0]) + '</span> <b>' + esc(x[1]) + '</b></div>').join('') + '</div>' : '') +
+    o.body +
+    (o.note ? '<p class="note">' + esc(o.note) + '</p>' : '') +
+    '<div class="sig"><div>Prepared By' + (o.by ? ': ' + esc(o.by) : '') + '</div><div>Checked By</div><div>Authorised Signatory</div></div>' +
+    '<script>window.print()</' + 'script></body></html>');
+  w.document.close();
+}
+function pTable(heads, rows, foot) {
+  return '<table><thead><tr>' + heads.map(h => '<th' + (h[1] === 'n' ? ' class="n"' : '') + '>' + esc(h[0] || h) + '</th>').join('') + '</tr></thead><tbody>' +
+    rows.map(r => '<tr>' + r.map((c, i) => '<td' + ((heads[i] && heads[i][1]) === 'n' ? ' class="n"' : '') + '>' + c + '</td>').join('') + '</tr>').join('') + '</tbody>' +
+    (foot ? '<tfoot><tr>' + foot.map((c, i) => '<td' + ((heads[i] && heads[i][1]) === 'n' ? ' class="n"' : '') + '>' + c + '</td>').join('') + '</tr></tfoot>' : '') + '</table>';
+}
+ACTIONS['print-jc'] = el => {
+  const j = Store.get('job_cards', el.dataset.id); if (!j) return;
+  const sizes = (j.sizes || []);
+  printDoc({
+    title: 'Job Card', ref: j.no, date: j.at, by: j.by,
+    meta: [['Order No', j.order_no], ['Brand', j.brand], ['Article', j.article], ['Style', j.style], ['Colour', j.colour], ['Gender', j.gender], ['Category', j.category], ['Order Qty', qtyFmt(j.qty)], ['Swatch', j.swatch_status], ['Status', j.status]],
+    body: (j.photo ? '<img src="' + j.photo + '" style="max-height:110px;border:1px solid #ccc;border-radius:4px;margin-bottom:6px">' : '') +
+      (sizes.length ? '<h3 style="margin:10px 0 0;font-size:13px">Sizes</h3>' + pTable([['Size'], ['Act. Order', 'n'], ['Extra (2%)', 'n']], sizes.map(x => [esc(x.size), qtyFmt(x.act), qtyFmt(x.extra)]), ['Total', qtyFmt(sizes.reduce((a, x) => a + num(x.act), 0)), qtyFmt(sizes.reduce((a, x) => a + num(x.extra), 0))]) : '') +
+      '<h3 style="margin:12px 0 0;font-size:13px">Material Requirements (BOM)</h3>' +
+      pTable([['#'], ['Section'], ['Category'], ['Item Name'], ['Code'], ['UOM'], ['Norms', 'n'], ['Req. Qty', 'n'], ['Supplier']],
+        (j.lines || []).map((l, i) => [i + 1, esc(l.section || ''), esc(l.category || ''), esc((matBy(l.material) || {}).name || ''), esc(l.material), esc(l.uom), l.norms, qtyFmt(l.required), esc(l.supplier || '')])),
+    note: j.remarks ? 'Remarks: ' + j.remarks : ''
+  });
+};
+ACTIONS['print-bom'] = el => {
+  const b = Store.get('boms', el.dataset.id); if (!b) return;
+  const rmc = b.lines.reduce((a, l) => a + num(l.qty) * num(l.price || 0), 0);
+  printDoc({
+    title: 'Bill of Materials', ref: b.article + ' · v' + b.version, date: b.at, by: b.by,
+    meta: [['Brand', b.brand], ['Article', b.article], ['Style', b.style], ['Colour', b.colour || 'All'], ['Gender', b.gender], ['Category', b.category], ['Size Run', b.size_run], ['Last (Mould No)', b.mould_no]],
+    body: (b.photo ? '<img src="' + b.photo + '" style="max-height:110px;border:1px solid #ccc;border-radius:4px;margin-bottom:6px">' : '') +
+      pTable([['#'], ['Section'], ['Category'], ['Item Name'], ['Code'], ['UOM'], ['Norms', 'n'], ['Price', 'n'], ['Cost', 'n'], ['Supplier'], ['Remark']],
+        b.lines.map((l, i) => [i + 1, esc(l.section || ''), esc(l.category || ''), esc((matBy(l.material) || {}).name || ''), esc(l.material), esc(l.uom), l.qty, money(l.price || 0), money(num(l.qty) * num(l.price || 0)), esc(l.supplier || ''), esc(l.remark || '')]),
+        ['', '', '', '', '', '', '', 'Total RMC/Pair', money(rmc), '', '']),
+    note: b.remark ? 'Remark: ' + b.remark : ''
+  });
+};
+ACTIONS['print-grn'] = el => {
+  const g = Store.get('grns', el.dataset.id); if (!g) return;
+  const t = k => g.lines.reduce((a, l) => a + num(l[k] || 0), 0);
+  printDoc({
+    title: 'Goods Receipt Note', ref: g.no, date: g.date, by: g.by,
+    meta: [['Vendor', g.vendor], ['PO Number', g.po_no], ['Invoice No', g.invoice], ['GRN Date', fmtD(g.date)]],
+    body: pTable([['#'], ['Item Name'], ['Code'], ['JC'], ['Inv Qty', 'n'], ['GRN Qty', 'n'], ['Reject', 'n'], ['Short', 'n'], ['Excess', 'n'], ['Rack']],
+      g.lines.map((l, i) => [i + 1, esc((matBy(l.material) || {}).name || ''), esc(l.material), esc(l.jc_no || ''), qtyFmt(l.inv_qty || 0), qtyFmt(l.accepted), qtyFmt(l.rejected), qtyFmt(l.short || 0), qtyFmt(l.excess || 0), esc(l.rack || '')]),
+      ['', 'Total', '', '', qtyFmt(t('inv_qty')), qtyFmt(t('accepted')), qtyFmt(t('rejected')), qtyFmt(t('short')), qtyFmt(t('excess')), '']),
+    note: (g.reject_reason ? 'Reject reason: ' + g.reject_reason + '. ' : '') + 'Accepted qty stock mein add ho chuki hai; reject rejection-stock mein hai.'
+  });
+};
+ACTIONS['print-req'] = el => {
+  const r = Store.all('requisitions').find(x => x.id === el.dataset.id || norm(x.no) === norm(el.dataset.id)); if (!r) return;
+  printDoc({
+    title: 'Requisition Slip', ref: r.no, date: r.date, by: r.by,
+    meta: [['Job Card', r.jc_no], ['Department', r.dept], ['Requested By', r.by], ['Status', r.status], ['Issued By', r.issued_by || '']],
+    body: pTable([['#'], ['Item Name'], ['Code'], ['UOM'], ['Req Qty', 'n'], ['Issued Qty', 'n']],
+      r.lines.map((l, i) => { const m = matBy(l.material) || {}; const issued = Store.all('issues').filter(x => x.status === 'Approved' && norm(x.req_no || '') === norm(r.no) && norm(x.material) === norm(l.material)).reduce((a, x) => a + num(x.qty), 0); return [i + 1, esc(m.name || '') + (l.extra ? ' (extra)' : ''), esc(l.material), esc(m.uom || ''), qtyFmt(l.qty), qtyFmt(issued)]; }),
+      ['', 'Total', '', '', qtyFmt(r.lines.reduce((a, l) => a + num(l.qty), 0)), ''])
+  });
+};
+ACTIONS['print-iss'] = el => {
+  const i = Store.get('issues', el.dataset.id); if (!i) return;
+  const m = matBy(i.material) || {};
+  printDoc({
+    title: i.type === 'return' ? 'Material Return Slip' : 'Material Issuance Report', ref: i.no, date: i.date, by: i.by,
+    meta: [['Job Card', i.to_jc || ''], ['Issued To', i.to_dept || ''], ['Issue Type', i.issue_type || 'Regular'], ['Source', i.source || 'AUTO'], ['Requisition', i.req_no || ''], ['Status', i.status || 'Approved'], ['Approved By', i.approved_by || '']],
+    body: pTable([['#'], ['Item Name'], ['Code'], ['UOM'], ['Qty', 'n']], [[1, esc(m.name || ''), esc(i.material), esc(m.uom || ''), qtyFmt(i.qty)]], ['', 'Total', '', '', qtyFmt(i.qty)]),
+    note: i.remark ? 'Remark: ' + i.remark : ''
+  });
+};
+
 function newBtn(label, act) { return '<button class="btn primary" data-act="' + act + '">+ ' + label + '</button>'; }
 function subTitle(t, extra) { return '<h1>' + t + (extra ? ' <span class="muted small">' + extra + '</span>' : '') + '</h1>'; }
 
@@ -151,12 +239,12 @@ ACTIONS['po-reject'] = el => {
   audit('po.reject', p.no, p.vendor); flash(esc(p.no) + ' rejected.'); VIEWS.po.render();
 };
 function poForm() {
-  return '<div class="panel" style="margin-bottom:12px">' + dlVendor() + dlMat('dlMatPo') +
+  return '<div class="card"><div class="card-h"><b>New Purchase Order</b><span class="muted small">' + fyNo('purchase_orders', 'PO', 3) + ' · save hote hi approval mein jayega</span></div><div class="card-b">' + dlVendor() + dlMat('dlMatPo') +
     '<div class="row"><label>Mode' + seg('poMode', [{ v: 'jc', l: 'JC requirement se' }, { v: 'manual', l: 'Manual' }], PO_UI.mode || 'jc') + '</label>' +
     '<label>Vendor *<input id="npVen" list="dlVen"></label><label>PO date<input id="npDate" type="date" value="' + todayYmd() + '"></label><label>Expected delivery *<input id="npExp" type="date"></label><label style="flex:1">Remarks<input id="npRem"></label></div>' +
     '<div id="npHint" class="muted small" style="margin:6px 0"></div>' +
     '<table style="margin-top:4px"><tr id="npHead"></tr><tbody id="npLines"></tbody></table><a class="small" data-act="po-line" id="npAdd">+ material</a>' +
-    '<div class="toolbar" style="margin-top:10px"><button class="btn primary" data-act="po-save">Save PO</button><button class="btn" data-act="po-new">Close</button><span id="npMsg" class="small"></span></div></div>';
+    '</div><div class="card-f"><button class="btn primary" data-act="po-save">Save PO</button><button class="btn" data-act="po-new">Close</button><span id="npMsg" class="small"></span></div></div>';
 }
 function poFormSetup() {
   const mode = PO_UI.mode || 'jc';
@@ -317,11 +405,12 @@ function jcDetail(j) {
     L.map(l => { const issd = issuedToJc(j.no, l.material); const pen = Math.max(0, num(l.required) - num(l.po_raised)); const m = matBy(l.material) || {}; return '<tr><td class="small">' + esc(l.section || '') + '</td><td class="small">' + esc(l.category || m.group || '') + '</td><td>' + esc(m.name || '') + '</td><td>' + esc(l.material) + '</td><td>' + esc(l.uom) + '</td><td class="num">' + l.norms + '</td><td class="num">' + qtyFmt(l.required) + '</td><td class="small">' + esc(l.supplier || '') + '</td><td class="num">' + qtyFmt(l.po_raised) + '</td><td class="num muted">' + qtyFmt(transitOf(l.material)) + '</td><td class="num">' + qtyFmt(reservedOf(l.material, j.no)) + '</td><td class="num">' + qtyFmt(issd) + '</td><td class="num ' + (pen ? 'late-txt' : '') + '">' + (pen ? qtyFmt(pen) : '—') + '</td></tr>'; }).join('') + '</table>'
     : '<span class="muted small">BOM nahi mila tha — Development se BOM banwa ke JC dobara banao.</span>';
   if (j.remarks) h += '<div class="small"><b>Remarks:</b> ' + esc(j.remarks) + '</div>';
+  h += '<div class="toolbar noprint" style="margin:8px 0 2px"><button class="btn sm" data-act="print-jc" data-id="' + esc(j.id) + '">Print Job Card</button></div>';
   return h;
 }
 function jcForm() {
   const orders = Store.all('orders').filter(o => orderState(o).open);
-  return '<div class="panel" style="margin-bottom:12px"><datalist id="dlOrdJc">' + orders.map(o => '<option value="' + esc(o.no) + '">' + esc(o.customer_name) + '</option>').join('') + '</datalist>' +
+  return '<div class="card"><div class="card-h"><b>New Job Card</b><span class="muted small">' + jcNo() + ' · order chuno, sizes check karo, BOM auto aayega</span></div><div class="card-b"><datalist id="dlOrdJc">' + orders.map(o => '<option value="' + esc(o.no) + '">' + esc(o.customer_name) + '</option>').join('') + '</datalist>' +
     '<div class="row"><label>Order *<input id="jfOrd" list="dlOrdJc" placeholder="Select order..."></label><label>Article line *<select id="jfLine" disabled><option value="">—</option></select></label><label>JC No<input value="' + esc(jcNo()) + '" readonly style="width:90px"></label></div>' +
     '<div class="grid2" style="margin-top:10px"><div><h2 style="margin-top:0">Order details</h2><table class="kv" id="jfDetails"><tr><td class="muted">Pehle order aur article chuno</td></tr></table>' +
     '<div class="row" style="margin-top:8px">' + imgField('jfPhoto', 'Product Image') + '<span id="jfPhotoTag" class="muted small"></span></div></div>' +
@@ -332,7 +421,7 @@ function jcForm() {
     '<div id="jfPasteBox" class="hidden" style="margin-bottom:6px"><textarea id="jfPaste" rows="4" class="mono" placeholder="Ek line par ek item name (ya Name[TAB]Norms[TAB]Supplier)"></textarea> <button class="btn sm" data-act="jcf-paste-go">Import</button></div>' +
     dlMat('dlMatJc') + dlVendor() +
     '<div class="tbl-wrap"><table id="jfBom"><tr><th>#</th><th style="width:120px">Section</th><th style="width:130px">Category</th><th>Item Name</th><th style="width:90px">Item Code</th><th style="width:60px">Uom</th><th class="num" style="width:80px">Stock</th><th class="num" style="width:90px">Norms</th><th class="num" style="width:90px">Req.Qty</th><th style="width:150px">Supplier</th><th style="width:30px"></th></tr></table></div>' +
-    '<div class="toolbar" style="margin-top:10px"><button class="btn primary" data-save data-act="jc-save">Submit Job Card</button><button class="btn" data-act="jc-new">Close</button><span id="njMsg" class="small"></span></div></div>';
+    '</div><div class="card-f"><button class="btn primary" data-save data-act="jc-save">Submit Job Card</button><button class="btn" data-act="jc-new">Close</button><span id="njMsg" class="small"></span></div></div>';
 }
 function jcfSizeRow(size, act) {
   return '<tr data-szrow><td><input data-sz="size" placeholder="Size" value="' + esc(size || '') + '" style="width:90px"></td><td><input data-sz="act" type="number" min="0" class="right" value="' + esc(act || '') + '" style="width:90px"></td><td class="num" data-sz-ext>0</td><td><button class="btn ghost sm" data-act="jcf-size-del">×</button></td></tr>';
@@ -490,8 +579,8 @@ VIEWS.inward = {
     let h = subTitle('NEW GATE ENTRY', 'inwarding — GRN alag hota hai') + '<div class="toolbar"><span class="grow"></span>' + (edit ? newBtn('New gate entry', 'inw-new') : '') + '</div>';
     if (INW_UI.form && edit) {
       const bt = INW_UI.bt || 'Invoice'; const isFoc = bt === 'FOC', isSample = bt === 'Sample';
-      h += '<div class="panel" style="margin-bottom:12px">' + dlVendor() + dlMat('dlMatI') +
-        '<div class="row"><label>Bill Type *' + seg('inwBt', BILL_TYPES, bt) + '</label></div>' +
+      h += '<div class="card"><div class="card-h"><b>New Gate Entry</b><span class="muted small">material factory mein aaya — pehla step</span></div><div class="card-b">' + dlVendor() + dlMat('dlMatI') +
+        '<div class="toolbar" style="margin-bottom:14px">' + seg('inwBt', BILL_TYPES, bt) + '</div>' +
         '<div class="row" style="margin-top:8px"><label>Vendor Name *<input id="niVen" list="dlVen"></label>' +
         (isSample ? '<label>Concern Person *<input id="niPerson" list="dlUsers"><datalist id="dlUsers">' + Store.all('users').map(u => '<option value="' + esc(u.name) + '">').join('') + '</datalist></label>'
           : '<label>PO Number *<input id="niPo" list="dlPoNo"><datalist id="dlPoNo">' + openPOs().map(p => '<option value="' + esc(p.no) + '">' + esc(p.vendor) + '</option>').join('') + '</datalist></label>') +
@@ -501,7 +590,7 @@ VIEWS.inward = {
         '<div class="row" style="margin-top:8px"><label>Material *<input id="niMat" list="dlMatI"></label><label>Invoice Qty *<input id="niQty" type="number" min="0" style="width:100px"></label>' +
         '<label>QC Report Number (If Any)<input id="niQc"></label>' + imgField('niPhoto', 'Attach ' + bt + ' Photo', !isFoc) + '<span id="niPhotoTag"></span>' + imgField('niQcPhoto', 'Attach QC Report Photo') + '<span id="niQcTag"></span>' +
         '<label style="flex:1">Remark<input id="niRem"></label><button class="btn primary" data-act="inw-save">Save</button><span id="niMsg" class="small"></span></div>' +
-        '<div class="muted small" style="margin-top:4px">Inward By: ' + esc(ME.name) + ' (auto)</div></div>';
+        '</div><div class="card-f"><span class="muted small">Inward By: ' + esc(ME.name) + ' (auto)</span></div></div>';
     }
     h += '<h2>PREVIOUS GATE ENTRY LOGS</h2><div class="tbl-wrap"><table><tr><th>Timestamp</th><th>Bill</th><th>Vendor</th><th>PO Number</th><th>Invoice No</th><th>Invoice Date</th><th class="num">Aging (Days)</th><th>Material</th><th class="num">Invoice Qty</th><th>Photo</th><th>Swatch match</th><th>Remark</th></tr>' +
       (rows.length ? rows.map(i => '<tr><td class="nowrap">' + fmtD(i.date) + '</td><td>' + esc(i.bill_type || 'Invoice') + '</td><td>' + esc(i.vendor) + '</td><td>' + esc(i.po_no || (i.bill_type === 'Sample' ? 'SAMPLE: ' + (i.person || '') : '')) + '</td><td>' + esc(i.bill_no || '') + '</td><td class="nowrap">' + fmtD(i.bill_date) + '</td><td class="num">' + Math.max(0, Math.floor((Date.now() - new Date(i.date)) / 86400000)) + '</td><td>' + esc(i.material) + '</td><td class="num">' + qtyFmt(i.qty) + '</td><td>' + photoThumb(i.photo) + '</td><td><span class="st ' + (i.swatch_match === 'Pass' ? 'Done' : i.swatch_match === 'Fail' ? 'Late' : 'Pending') + '">' + (i.swatch_match || 'Pending') + '</span></td><td class="small">' + esc(i.remark || '') + '</td></tr>').join('') : '<tr><td colspan="12" class="empty">No gate entries</td></tr>') + '</table></div>';
@@ -562,8 +651,8 @@ VIEWS.grn = {
         return row;
       }).join('') : '<tr><td colspan="5" class="empty">Koi open PO nahi — pehle Purchase Order banao</td></tr>') + '</table></div>';
     const gs = Store.all('grns').slice().sort((a, b) => b.no < a.no ? -1 : 1).slice(0, 15);
-    h += '<h2>Recent GRNs</h2><div class="tbl-wrap"><table><tr><th>GRN</th><th>Date</th><th>PO</th><th>Vendor</th><th class="num">Accepted</th><th class="num">Rej + Short</th><th>By</th></tr>' +
-      (gs.length ? gs.map(g => '<tr><td><b>' + esc(g.no) + '</b></td><td class="nowrap">' + fmtD(g.date) + '</td><td>' + esc(g.po_no) + '</td><td>' + esc(g.vendor) + '</td><td class="num">' + qtyFmt(g.lines.reduce((s, l) => s + num(l.accepted), 0)) + '</td><td class="num late-txt">' + qtyFmt(g.lines.reduce((s, l) => s + num(l.rejected) + num(l.short || 0), 0)) + '</td><td>' + esc(g.by) + '</td></tr>').join('') : '<tr><td colspan="7" class="empty">No GRNs yet</td></tr>') + '</table></div>';
+    h += '<h2>Recent GRNs</h2><div class="tbl-wrap"><table><tr><th>GRN</th><th>Date</th><th>PO</th><th>Vendor</th><th class="num">Accepted</th><th class="num">Rej + Short</th><th>By</th><th></th></tr>' +
+      (gs.length ? gs.map(g => '<tr><td><b>' + esc(g.no) + '</b></td><td class="nowrap">' + fmtD(g.date) + '</td><td>' + esc(g.po_no) + '</td><td>' + esc(g.vendor) + '</td><td class="num">' + qtyFmt(g.lines.reduce((s, l) => s + num(l.accepted), 0)) + '</td><td class="num late-txt">' + qtyFmt(g.lines.reduce((s, l) => s + num(l.rejected) + num(l.short || 0), 0)) + '</td><td>' + esc(g.by) + '</td><td class="right"><button class="btn sm ghost" data-act="print-grn" data-id="' + esc(g.id) + '">Print</button></td></tr>').join('') : '<tr><td colspan="8" class="empty">No GRNs yet</td></tr>') + '</table></div>';
     setMain(h);
   }
 };
@@ -651,8 +740,8 @@ VIEWS.issuance = {
 
     // 4) history
     const iss = Store.all('issues').filter(i => i.status !== 'Pending').slice().sort((a2, b2) => (b2.at || '') < (a2.at || '') ? -1 : 1).slice(0, 15);
-    h += '<div class="tbl-wrap"><table><tr><th>No</th><th>DATE</th><th>TYPE</th><th>ITEM</th><th class="num">QUANTITY</th><th>SOURCE TYPE</th><th>JOB CARD</th><th>ISSUED TO</th><th>ISSUE TYPE</th><th>REQ</th><th>STATUS</th><th>ISSUED BY</th></tr>' +
-      (iss.length ? iss.map(i => '<tr><td><b>' + esc(i.no) + '</b></td><td class="nowrap">' + fmtD(i.date) + '</td><td>' + (i.type === 'return' ? 'Return' : 'Issue') + '</td><td>' + esc(i.material) + '</td><td class="num">' + qtyFmt(i.qty) + '</td><td>' + esc(i.source || 'AUTO') + '</td><td>' + esc(i.to_jc || '') + '</td><td>' + esc(i.to_dept || '') + '</td><td>' + esc(i.issue_type || 'Regular') + '</td><td>' + esc(i.req_no || '') + '</td><td><span class="st ' + (i.status === 'Approved' ? 'Done' : 'Cancelled') + '">' + esc(i.status || 'Approved') + '</span></td><td class="small">' + esc(i.by) + (i.approved_by ? ' → ' + esc(i.approved_by) : '') + '</td></tr>').join('') : '<tr><td colspan="12" class="empty">No issues yet</td></tr>') + '</table></div>';
+    h += '<div class="tbl-wrap"><table><tr><th>No</th><th>DATE</th><th>TYPE</th><th>ITEM</th><th class="num">QUANTITY</th><th>SOURCE TYPE</th><th>JOB CARD</th><th>ISSUED TO</th><th>ISSUE TYPE</th><th>REQ</th><th>STATUS</th><th>ISSUED BY</th><th></th></tr>' +
+      (iss.length ? iss.map(i => '<tr><td><b>' + esc(i.no) + '</b></td><td class="nowrap">' + fmtD(i.date) + '</td><td>' + (i.type === 'return' ? 'Return' : 'Issue') + '</td><td>' + esc(i.material) + '</td><td class="num">' + qtyFmt(i.qty) + '</td><td>' + esc(i.source || 'AUTO') + '</td><td>' + esc(i.to_jc || '') + '</td><td>' + esc(i.to_dept || '') + '</td><td>' + esc(i.issue_type || 'Regular') + '</td><td>' + esc(i.req_no || '') + '</td><td><span class="st ' + (i.status === 'Approved' ? 'Done' : 'Cancelled') + '">' + esc(i.status || 'Approved') + '</span></td><td class="small">' + esc(i.by) + (i.approved_by ? ' → ' + esc(i.approved_by) : '') + '</td><td class="right"><button class="btn sm ghost" data-act="print-iss" data-id="' + esc(i.id) + '">Print</button></td></tr>').join('') : '<tr><td colspan="13" class="empty">No issues yet</td></tr>') + '</table></div>';
     setMain(h);
   }
 };
@@ -756,13 +845,13 @@ VIEWS.rtv = {
       const avail = srcRows.map(r => { const k = norm(r.vendor + '|' + r.material); const take = Math.min(r.qty, Math.max(0, r.qty - (returned[k] || 0))); returned[k] = Math.max(0, (returned[k] || 0) - r.qty); return Object.assign({}, r, { avail: take }); }).filter(r => r.avail > 0);
       const vendors = Array.from(new Set(avail.map(r => r.vendor)));
       const sel = RTV_UI.vendor || vendors[0] || '';
-      h += '<div class="panel" style="margin-bottom:12px"><div class="row">' +
+      h += '<div class="card"><div class="card-h"><b>New RTV</b><span class="muted small">rejection stock vendor ko wapas — NRGP print hoga</span></div><div class="card-b"><div class="row">' +
         '<label>Vendor *<select id="rvVen">' + (vendors.length ? vendors.map(v => '<option' + (v === sel ? ' selected' : '') + '>' + esc(v) + ' (' + avail.filter(r => r.vendor === v).length + ')</option>').join('') : '<option value="">Koi rejection stock nahi</option>') + '</select></label>' +
         '<label>Reason<select id="rvWhy">' + RTV_REASONS.map(x => '<option>' + x + '</option>').join('') + '</select></label>' +
         '<label>Vehicle No<input id="rvVeh" placeholder="HR-26-XX-1234"></label><label>Driver Name<input id="rvDrv"></label><label style="flex:1">Remarks<input id="rvRem" placeholder="Optional remarks (NRGP me print hoga)"></label></div>' +
         '<table style="margin-top:8px;max-width:820px"><tr><th>#</th><th>Item</th><th>Code</th><th>Invoice</th><th>UOM</th><th>Date</th><th class="num">Rejected Qty</th><th class="num" style="width:110px">Return Qty</th></tr>' +
         avail.filter(r => r.vendor === sel).map((r, i) => '<tr data-rvrow data-mat="' + esc(r.material) + '" data-inv="' + esc(r.invoice) + '" data-max="' + r.avail + '"><td class="muted">' + (i + 1) + '</td><td>' + esc((matBy(r.material) || {}).name || '') + '</td><td>' + esc(r.material) + '</td><td>' + esc(r.invoice) + '</td><td>' + esc((matBy(r.material) || {}).uom || '') + '</td><td class="nowrap">' + fmtD(r.date) + '</td><td class="num late-txt">' + qtyFmt(r.avail) + '</td><td><input class="qty right" type="number" min="0" max="' + r.avail + '" step="any" data-rvq value="' + r.avail + '"></td></tr>').join('') +
-        '</table><div class="toolbar" style="margin-top:10px"><button class="btn primary" data-act="rtv-save">Create RTV &amp; Generate NRGP</button><span id="rvMsg" class="small"></span></div></div>';
+        '</table></div><div class="card-f"><button class="btn primary" data-act="rtv-save">Create RTV &amp; Generate NRGP</button><span id="rvMsg" class="small"></span></div></div>';
     }
     const rows = Store.all('rtvs').slice().sort((a2, b2) => b2.no < a2.no ? -1 : 1);
     h += '<div class="tbl-wrap"><table><tr><th>NRGP</th><th>Date</th><th>Vendor</th><th>Item</th><th>Code</th><th class="num">Qty</th><th>Invoice</th><th>Reason</th><th>Vehicle</th><th>By</th><th></th></tr>' +
@@ -801,6 +890,7 @@ ACTIONS['nrgp-print'] = el => {
     '<p><small>Declaration: Goods are being returned to the vendor and are non-returnable against this gate pass.</small></p>' +
     '<p style="margin-top:40px">Prepared By: ' + esc(r.by) + ' _____________ &nbsp;&nbsp;&nbsp; Authorised Signatory _____________</p>' +
     '<script>window.print()</' + 'script></body></html>');
+  w.document.close();
 };
 
 VIEWS.materials = {
@@ -827,7 +917,7 @@ VIEWS.bom = {
     const edit = can('development', 'edit');
     if (!edit) { go('boms'); return; }
     const brands = Store.all('customers').map(c => c.name);
-    let h = subTitle('DEVELOPMENT BOM') + '<div class="panel">' + dlMat('dlMatB') + dlVendor() +
+    let h = subTitle('Development BOM') + '<div class="card"><div class="card-h"><b>New BOM</b><span class="muted small">article + brand ka master recipe — JC isi se banta hai</span></div><div class="card-b">' + dlMat('dlMatB') + dlVendor() +
       '<datalist id="dlArtB">' + Store.all('items').map(i => '<option value="' + esc(i.code) + '">' + esc(i.name) + '</option>').join('') + '</datalist>' +
       '<datalist id="dlBrandB">' + brands.map(x => '<option value="' + esc(x) + '">').join('') + '</datalist>' +
       '<datalist id="dlCatJc2">' + ITEM_CATS.map(x => '<option>' + x + '</option>').join('') + '</datalist><datalist id="dlCatB">' + fieldOptions('category').map(x => '<option value="' + esc(x) + '">').join('') + '</datalist>' +
@@ -839,7 +929,7 @@ VIEWS.bom = {
       '<div id="nbPasteBox" class="hidden"><textarea id="nbPaste" rows="4" class="mono" placeholder="Section[TAB]Category[TAB]Item Name[TAB]Norms[TAB]Price[TAB]Supplier[TAB]Remark — ek line ek item"></textarea> <button class="btn sm" data-act="bom-paste-go">Import</button></div>' +
       '<div class="tbl-wrap"><table id="nbTable"><tr><th>Sr</th><th style="width:110px">Section</th><th style="width:140px">Category</th><th>Item Name</th><th style="width:90px">Item Code</th><th style="width:60px">UOM</th><th class="num" style="width:90px">Norms</th><th class="num" style="width:90px">Price</th><th class="num" style="width:90px">Cost</th><th style="width:150px">Supplier</th><th style="width:130px">Remark</th><th style="width:30px"></th></tr>' +
       '</table></div>' +
-      '<div class="toolbar" style="margin-top:10px"><button class="btn primary" data-act="bom-save">Save BOM</button><span id="nbMsg" class="small"></span></div></div>';
+      '</div><div class="card-f"><button class="btn primary" data-act="bom-save">Save BOM</button><span id="nbMsg" class="small"></span></div></div>';
     setMain(h);
     $('#nbTable').insertAdjacentHTML('beforeend', bomRow());
     const m = $('#main'); window.NBF = { photo: '' };
@@ -899,8 +989,8 @@ VIEWS.boms = {
     Store.all('boms').forEach(b2 => { const k = norm(b2.article + '|' + (b2.brand || '') + '|' + (b2.style || '') + '|' + (b2.colour || '')); if (!byKey[k] || byKey[k].version < b2.version) byKey[k] = b2; });
     const rows = Object.values(byKey).sort((a2, b3) => a2.article.localeCompare(b3.article));
     setMain(subTitle('Created BOMs', 'latest version per article+brand+style+colour') + '<div class="toolbar"><span class="grow"></span>' + (can('development', 'edit') ? '<a class="btn primary" href="#/bom">+ Make BOM</a>' : '') + '</div>' +
-      '<div class="tbl-wrap"><table><tr><th>Photo</th><th>Brand</th><th>Article</th><th>Style</th><th>Colour</th><th>Gender</th><th>Ver</th><th>Items (Norms × Price → Cost)</th><th class="num">RMC/Pair ₹</th><th>By</th><th>Date</th></tr>' +
-      (rows.length ? rows.map(b2 => '<tr><td>' + photoThumb(b2.photo) + '</td><td>' + esc(b2.brand || '') + '</td><td><b>' + esc(b2.article) + '</b></td><td>' + esc(b2.style || '') + '</td><td>' + esc(b2.colour || 'All') + '</td><td>' + esc(b2.gender || '') + '</td><td>v' + b2.version + '</td><td class="small">' + b2.lines.map(l => esc(l.material) + ' × ' + l.qty + (l.price ? ' @ ₹' + l.price : '') + (l.supplier ? ' <span class="muted">(' + esc(l.supplier) + ')</span>' : '')).join('<br>') + '</td><td class="num">' + money(b2.lines.reduce((s2, l) => s2 + num(l.qty) * num(l.price || 0), 0)) + '</td><td>' + esc(b2.by) + '</td><td class="nowrap">' + fmtD(b2.at) + '</td></tr>').join('') : '<tr><td colspan="11" class="empty">Koi BOM nahi bana</td></tr>') + '</table></div>');
+      '<div class="tbl-wrap"><table><tr><th>Photo</th><th>Brand</th><th>Article</th><th>Style</th><th>Colour</th><th>Gender</th><th>Ver</th><th>Items (Norms × Price → Cost)</th><th class="num">RMC/Pair ₹</th><th>By</th><th>Date</th><th></th></tr>' +
+      (rows.length ? rows.map(b2 => '<tr><td>' + photoThumb(b2.photo) + '</td><td>' + esc(b2.brand || '') + '</td><td><b>' + esc(b2.article) + '</b></td><td>' + esc(b2.style || '') + '</td><td>' + esc(b2.colour || 'All') + '</td><td>' + esc(b2.gender || '') + '</td><td>v' + b2.version + '</td><td class="small">' + b2.lines.map(l => esc(l.material) + ' × ' + l.qty + (l.price ? ' @ ₹' + l.price : '') + (l.supplier ? ' <span class="muted">(' + esc(l.supplier) + ')</span>' : '')).join('<br>') + '</td><td class="num">' + money(b2.lines.reduce((s2, l) => s2 + num(l.qty) * num(l.price || 0), 0)) + '</td><td>' + esc(b2.by) + '</td><td class="nowrap">' + fmtD(b2.at) + '</td><td class="right"><button class="btn sm ghost" data-act="print-bom" data-id="' + esc(b2.id) + '">Print</button></td></tr>').join('') : '<tr><td colspan="12" class="empty">Koi BOM nahi bana</td></tr>') + '</table></div>');
   }
 };
 
@@ -915,15 +1005,15 @@ VIEWS.requisition = {
     if (stale.length) h += '<div class="panel" style="border-left:3px solid var(--late);margin-bottom:10px"><b>' + stale.length + ' slip 24h+ se pending</b> — jab tak Store issue/reject nahi karta, nayi slip nahi banegi (Manager/Admin exempt). <a href="#/issuance">Issuance →</a></div>';
     h += '<div class="toolbar"><span class="grow"></span>' + (edit ? newBtn('New requisition', 'req-new') : '') + '</div>';
     if (REQ_UI.form && edit) {
-      h += '<div class="panel" style="margin-bottom:12px">' + dlMat('dlMatR') + '<datalist id="dlJc">' + Store.all('job_cards').filter(j => j.status !== 'Closed').map(j => '<option value="' + esc(j.no) + '">' + esc(j.article) + '</option>').join('') + '</datalist>' +
+      h += '<div class="card"><div class="card-h"><b>New Requisition Slip</b><span class="muted small">JC chuno — pending material khud aa jayega</span></div><div class="card-b">' + dlMat('dlMatR') + '<datalist id="dlJc">' + Store.all('job_cards').filter(j => j.status !== 'Closed').map(j => '<option value="' + esc(j.no) + '">' + esc(j.article) + '</option>').join('') + '</datalist>' +
         '<div class="row"><label>Job Card *<input id="nrJc" list="dlJc"></label><label>Requested By<input value="' + esc(ME.name) + '" readonly></label><button class="btn sm" data-act="req-fill">Fill All Pending Qty</button></div>' +
         '<div class="tbl-wrap" style="margin-top:8px"><table id="nrTable" style="max-width:820px"><tr><th>#</th><th>Item Name</th><th>UOM</th><th class="num">Req Qty</th><th class="num">Stock</th><th>Coverage</th><th class="num" style="width:120px">Requisition Qty</th><th style="width:30px"></th></tr></table></div>' +
         '<a class="small" data-act="req-extra">+ Add Extra Item</a>' +
-        '<div class="toolbar" style="margin-top:10px"><button class="btn primary" data-act="req-save">Generate Requisition Slip</button><span id="nrMsg" class="small"></span></div></div>';
+        '</div><div class="card-f"><button class="btn primary" data-act="req-save">Generate Requisition Slip</button><span id="nrMsg" class="small"></span></div></div>';
     }
     const rows = Store.all('requisitions').slice().sort((a2, b2) => b2.no < a2.no ? -1 : 1);
-    h += '<div class="tbl-wrap"><table><tr><th>Req</th><th>Date</th><th>JC / Dept</th><th>Materials (req → issued)</th><th>Status</th><th>By</th></tr>' +
-      (rows.length ? rows.map(r => '<tr><td><b>' + esc(r.no) + '</b></td><td class="nowrap">' + fmtD(r.date) + '</td><td>' + esc(r.jc_no || r.dept) + '</td><td class="small">' + r.lines.map(l => esc(l.material) + ' × ' + qtyFmt(l.qty) + (l.extra ? ' <span class="muted">(extra)</span>' : '')).join('<br>') + '</td><td><span class="st ' + (r.status === 'Issued' ? 'Done' : r.status === 'Rejected' ? 'Late' : 'Pending') + '">' + r.status + '</span>' + (r.issued_by ? '<div class="muted small">' + esc(r.issued_by) + '</div>' : '') + '</td><td>' + esc(r.by) + '</td></tr>').join('') : '<tr><td colspan="6" class="empty">No requisitions</td></tr>') + '</table></div>';
+    h += '<div class="tbl-wrap"><table><tr><th>Req</th><th>Date</th><th>JC / Dept</th><th>Materials (req → issued)</th><th>Status</th><th>By</th><th></th></tr>' +
+      (rows.length ? rows.map(r => '<tr><td><b>' + esc(r.no) + '</b></td><td class="nowrap">' + fmtD(r.date) + '</td><td>' + esc(r.jc_no || r.dept) + '</td><td class="small">' + r.lines.map(l => esc(l.material) + ' × ' + qtyFmt(l.qty) + (l.extra ? ' <span class="muted">(extra)</span>' : '')).join('<br>') + '</td><td><span class="st ' + (r.status === 'Issued' ? 'Done' : r.status === 'Rejected' ? 'Late' : 'Pending') + '">' + r.status + '</span>' + (r.issued_by ? '<div class="muted small">' + esc(r.issued_by) + '</div>' : '') + '</td><td>' + esc(r.by) + '</td><td class="right"><button class="btn sm ghost" data-act="print-req" data-id="' + esc(r.id) + '">Print Slip</button></td></tr>').join('') : '<tr><td colspan="7" class="empty">No requisitions</td></tr>') + '</table></div>';
     setMain(h);
     const m = $('#main');
     m.addEventListener('change', e => { if (e.target.id === 'nrJc') reqFillJc(); if (e.target.dataset.nr === 'mat') { const mt = matBy(e.target.value); if (mt) { e.target.value = mt.code; const tr = e.target.closest('tr'); $('[data-nr-uom]', tr).textContent = mt.uom; } } });
