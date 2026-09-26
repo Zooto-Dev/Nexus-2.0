@@ -67,7 +67,7 @@ function netReqRows(vendor, excludePo) {
   Store.all('job_cards').filter(j => j.status !== 'Closed').forEach(j => (j.lines || []).forEach(l => {
     const bal = Math.max(0, num(l.required) - issuedToJc(j.no, l.material));
     if (bal <= 0.0001) return;
-    const r = row(l.material); r.demand += bal; r.jcs.push({ jc: j.no, bal }); if (l.supplier) r.suppliers.add(l.supplier);
+    const r = row(l.material); r.demand += bal; r.jcs.push({ jc: j.no, bal, supplier: l.supplier || '', brand: j.brand || '', article: j.article || '', colour: j.colour || '' }); if (l.supplier) r.suppliers.add(l.supplier);
   }));
   Store.all('materials').filter(m => num(m.min_level) > 0).forEach(m => row(m.code));
   const src = Store.all('sourcing');
@@ -527,10 +527,10 @@ VIEWS.netreq = {
     const toOrder = rows.filter(r => r.net > 0);
     setMain(subTitle('Net Requirement', 'JC requirement − stock − open PO + min level') +
       '<div class="toolbar"><span class="small"><b>' + toOrder.length + '</b> item(s) to order</span><span class="grow"></span>' + (can('purchase', 'edit') ? '<a class="btn primary" data-act="netreq-po">+ New PO</a>' : '') + '</div>' +
-      '<div class="tbl-wrap"><table><tr><th>Item Code</th><th>Item Name</th><th>UOM</th><th>Supplier</th><th>Job Cards (balance)</th><th class="num">JC Requirement</th><th class="num">Stock</th><th class="num">Open PO</th><th class="num">Min Level</th><th class="num">Net Requirement</th></tr>' +
-      (rows.length ? rows.map(r => '<tr' + (r.net > 0 ? '' : ' class="muted"') + '><td><b>' + esc(r.material) + '</b></td><td>' + esc(r.name) + '</td><td>' + esc(r.uom) + '</td><td>' + esc(Array.from(r.suppliers).join(', ')) + '</td><td class="small">' + r.jcs.map(x => esc(x.jc) + ': ' + qtyFmt(x.bal)).join(' \u00b7 ') + '</td>' +
-        '<td class="num">' + qtyFmt(r.demand) + '</td><td class="num">' + qtyFmt(r.stock) + '</td><td class="num">' + qtyFmt(r.openPo) + '</td><td class="num">' + (r.min ? qtyFmt(r.min) : '') + '</td><td class="num"><b' + (r.net > 0 ? ' class="late-txt"' : '') + '>' + qtyFmt(r.net) + '</b></td></tr>').join('')
-        : '<tr><td colspan="10" class="empty">No open JC requirement</td></tr>') + '</table></div>');
+      '<div class="tbl-wrap"><table><tr><th>Item Code</th><th>Item Name</th><th>UOM</th><th>JC No</th><th>Brand</th><th>Article</th><th>Colour</th><th>Supplier</th><th class="num">JC Balance</th><th class="num">Total JC Requirement</th><th class="num">Stock</th><th class="num">Open PO</th><th class="num">Min Level</th><th class="num">Net Requirement</th></tr>' +
+      (rows.length ? rows.map(r => (r.jcs.length ? r.jcs : [{ jc: '', bal: 0, supplier: Array.from(r.suppliers)[0] || '' }]).map((x, i) => '<tr class="' + (i === 0 ? 'bomfirst' : '') + (r.net > 0 ? '' : ' muted') + '"><td><b>' + esc(r.material) + '</b></td><td>' + esc(r.name) + '</td><td>' + esc(r.uom) + '</td><td>' + esc(x.jc) + '</td><td>' + esc(x.brand || '') + '</td><td>' + esc(x.article || '') + '</td><td>' + esc(x.colour || '') + '</td><td>' + esc(x.supplier || '') + '</td><td class="num">' + (x.jc ? qtyFmt(x.bal) : '') + '</td>' +
+        '<td class="num">' + qtyFmt(r.demand) + '</td><td class="num">' + qtyFmt(r.stock) + '</td><td class="num">' + qtyFmt(r.openPo) + '</td><td class="num">' + (r.min ? qtyFmt(r.min) : '') + '</td><td class="num"><b' + (r.net > 0 ? ' class="late-txt"' : '') + '>' + qtyFmt(r.net) + '</b></td></tr>').join('')).join('')
+        : '<tr><td colspan="14" class="empty">No open JC requirement</td></tr>') + '</table></div>');
   }
 };
 ACTIONS['netreq-po'] = () => { PO_UI.form = true; PO_UI.mode = 'jc'; go('po'); };
