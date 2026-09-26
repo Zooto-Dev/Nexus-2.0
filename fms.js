@@ -51,21 +51,29 @@ function rowsToCond(join, rows) {
 }
 function condEditor(key, cond) {
   const rs = condToRows(cond);
-  if (!rs) return '<div class="condbox" data-cond="' + key + '" data-json="1"><textarea rows="3" class="mono" data-cjson>' + esc(JSON.stringify(cond)) + '</textarea><div class="muted small">Advanced condition (JSON)</div></div>';
+  if (!rs) return '<div class="condbox" data-cond="' + key + '" data-json="1"><textarea rows="3" class="mono" data-cjson>' + esc(JSON.stringify(cond)) + '</textarea></div>';
   const flds = bldFields(['select', 'text', 'number']);
-  return '<div class="condbox" data-cond="' + key + '">' + (rs.rows.length > 1 ? '<div style="margin-bottom:4px">' + seg('cjoin', [{ v: 'all', l: 'All match' }, { v: 'any', l: 'Any matches' }], rs.join) + '</div>' : '') +
-    rs.rows.map(r => '<div class="row condrow" style="margin-bottom:4px;align-items:center"><select data-cf>' + flds.map(f => '<option value="' + esc(f.key) + '"' + (f.key === r.field ? ' selected' : '') + '>' + esc(f.label) + '</option>').join('') + '</select>' +
-      seg('cop', [{ v: 'in', l: 'is' }, { v: 'notIn', l: 'is not' }, { v: 'empty', l: 'empty' }], r.op) +
-      (r.op === 'empty' ? '' : '<input data-cv style="flex:1;min-width:100px" placeholder="value1, value2" value="' + esc(r.values.join(', ')) + '" list="dlo_' + esc(r.field) + '">') +
-      '<button class="btn ghost sm" data-act="cond-del">×</button></div>').join('') +
-    '<a class="small" data-act="cond-add" data-cond="' + key + '">+ condition</a>' +
-    flds.map(f => '<datalist id="dlo_' + esc(f.key) + '">' + fieldOpts(f.key).map(o => '<option value="' + esc(o) + '">').join('') + '</datalist>').join('') + '</div>';
+  return '<div class="condbox" data-cond="' + key + '">' +
+    (rs.rows.length > 1 ? '<select data-cjoin class="qsel"><option value="all"' + (rs.join === 'all' ? ' selected' : '') + '>All of these</option><option value="any"' + (rs.join === 'any' ? ' selected' : '') + '>Any one of these</option></select>' : '') +
+    rs.rows.map(r => {
+      const opts = fieldOpts(r.field);
+      return '<div class="condrow"><div class="qline"><select data-cf>' + flds.map(f => '<option value="' + esc(f.key) + '"' + (f.key === r.field ? ' selected' : '') + '>' + esc(f.label) + '</option>').join('') + '</select>' +
+        '<select data-cop><option value="in"' + (r.op === 'in' ? ' selected' : '') + '>is</option><option value="notIn"' + (r.op === 'notIn' ? ' selected' : '') + '>is not</option><option value="empty"' + (r.op === 'empty' ? ' selected' : '') + '>is empty</option></select>' +
+        '<button class="btn ghost sm" data-act="cond-del">×</button></div>' +
+        (r.op === 'empty' ? '' : opts.length
+          ? '<div class="chips">' + opts.map(o => '<label class="chip"><input type="checkbox" data-cvv value="' + esc(o) + '"' + (r.values.includes(o) ? ' checked' : '') + '>' + esc(o) + '</label>').join('') + '</div>'
+          : '<input data-cv value="' + esc(r.values.join(', ')) + '">') + '</div>';
+    }).join('') +
+    '<a class="small" data-act="cond-add" data-cond="' + key + '">+ and</a></div>';
 }
 function readCond(box) {
   if (!box) return undefined;
   if (box.dataset.json) { try { const t = $('[data-cjson]', box).value.trim(); return t ? JSON.parse(t) : undefined; } catch (e) { return { __bad: true }; } }
-  const join = segVal($('[data-seg="cjoin"]', box)) || 'all';
-  return rowsToCond(join, $$('.condrow', box).map(r => ({ field: $('[data-cf]', r).value, op: segVal($('[data-seg="cop"]', r)) || 'in', values: ($('[data-cv]', r) ? $('[data-cv]', r).value : '').split(',').map(s => s.trim()).filter(Boolean) })));
+  const j = $('[data-cjoin]', box); const join = j ? j.value : 'all';
+  return rowsToCond(join, $$('.condrow', box).map(r => {
+    const vv = $$('[data-cvv]', r); const cv = $('[data-cv]', r);
+    return { field: $('[data-cf]', r).value, op: $('[data-cop]', r).value || 'in', values: vv.length ? vv.filter(x => x.checked).map(x => x.value) : (cv ? cv.value.split(',').map(s => s.trim()).filter(Boolean) : []) };
+  }));
 }
 
 /* ---------- view ---------- */
@@ -104,6 +112,10 @@ function bldSeg(e) {
 }
 function bldInput(e) {
   if (!e.target.closest('#bEd')) return;
+  if (e.type === 'change' && e.target.value === '__new') {
+    const n = (prompt('New name') || '').trim().toUpperCase();
+    if (n) { const o = document.createElement('option'); o.textContent = n; e.target.insertBefore(o, e.target.lastElementChild); e.target.value = n; } else e.target.value = '';
+  }
   bldCollect(); if (!bldMarkDirty()) bldSide();
   if (e.type === 'change' && e.target.matches('select')) bldEditor();
 }
@@ -162,71 +174,117 @@ function bldChart(spec, order) {
 
 /* ---------- editor ---------- */
 function curStep() { return B.draft.steps.find(s => s.id === B.sel); }
+const START_OPTS = [{ v: 'afterStep', l: 'When another step is done' }, { v: 'instanceStart', l: 'As soon as the order is punched' }, { v: 'beforeDate', l: 'Some days before a date' }, { v: 'external', l: 'On a date' }, { v: 'afterDate', l: 'Some days after a date' }];
+const WHO_OPTS = [{ v: 'fixed', l: 'One fixed person' }, { v: 'field', l: 'Person from the order (e.g. brand merchant)' }, { v: 'lookup', l: 'Depends on brand (doer table)' }, { v: 'byCondition', l: 'Depends on category / other field' }];
+const opt = (list, cur) => list.map(o => '<option value="' + esc(o.v) + '"' + (o.v === cur ? ' selected' : '') + '>' + esc(o.l) + '</option>').join('');
+function allPeople() {
+  const d = B.draft; const set = new Set(doerNames());
+  d.steps.forEach(s => { const x = s.doer || {}; if (x.name) set.add(x.name); if (x.default) set.add(x.default); (x.rules || []).forEach(r => r.name && set.add(r.name)); });
+  Object.values(d.doerTables || {}).forEach(t => Object.values(t).forEach(v => v && set.add(v)));
+  return Array.from(set).filter(Boolean).sort();
+}
+function personSel(k, cur, attr) {
+  const ppl = allPeople(); if (cur && !ppl.includes(cur)) ppl.push(cur);
+  return '<select ' + (attr || 'data-k') + '="' + k + '"><option value="">— choose —</option>' + ppl.map(p => '<option' + (p === cur ? ' selected' : '') + '>' + esc(p) + '</option>').join('') + '<option value="__new">+ New name…</option></select>';
+}
+function isSimpleRule(r) { return r && r.when && r.when.field && Array.isArray(r.when.in) && Object.keys(r.when).length === 2; }
+function startLine(t, others, dateFields, j) {
+  let h = '<select data-t="type">' + opt(START_OPTS, t.type) + '</select>';
+  if (t.type === 'afterStep') h += '<select data-t="step"><option value="">— choose step —</option>' + others.map(o => '<option value="' + esc(o.id) + '"' + (o.id === t.step ? ' selected' : '') + '>' + esc(o.name) + '</option>').join('') + '</select>';
+  if (['beforeDate', 'afterDate', 'external'].includes(t.type)) h += '<select data-t="field"><option value="">— choose date —</option>' + dateFields.map(f => '<option value="' + esc(f.key) + '"' + (f.key === t.field ? ' selected' : '') + '>' + esc(f.label) + '</option>').join('') + '</select>';
+  return h;
+}
 function bldEditor() {
   const el = $('#bEd'); const s = curStep(); if (!el) return;
-  if (!s) { el.innerHTML = '<div class="muted">Select a step.</div>'; return; }
+  if (!s) { el.innerHTML = ''; return; }
   const edit = can('builder', 'edit'); const others = B.draft.steps.filter(x => x.id !== s.id);
   const dateFields = bldFields(['date', 'datetime']).filter(f => f.key !== 'created_at');
   const doer = typeof s.doer === 'string' ? { type: 'fixed', name: s.doer } : (s.doer || { type: 'fixed', name: '' });
   const trig = (Array.isArray(s.trigger) ? s.trigger : [s.trigger]).filter(Boolean);
   const tat = s.tat || { value: 1, unit: 'days' };
-  let h = '<datalist id="dlDoers">' + doerNames().map(n => '<option value="' + esc(n) + '">').join('') + '</datalist>';
-  h += '<label>Step name<input data-k="name" value="' + esc(s.name) + '"></label><div class="muted small" style="margin:-4px 0 8px">id: <span class="mono">' + esc(s.id) + '</span></div>';
-  h += '<label>What to do (shown to doer)<textarea data-k="what" rows="2">' + esc(s.what || '') + '</textarea></label>';
-  h += '<div class="sub"><b>Doer</b> ' + seg('doerType', [{ v: 'fixed', l: 'Person / team' }, { v: 'field', l: 'From order field' }, { v: 'lookup', l: 'From table' }, { v: 'byCondition', l: 'By rule' }], doer.type) + '<div style="margin-top:6px">';
-  if (doer.type === 'fixed') h += '<input data-k="doerName" list="dlDoers" value="' + esc(doer.name || '') + '" placeholder="Doer name (linked to users)" style="width:100%">';
-  else if (doer.type === 'field') h += '<div class="row"><label>Field<select data-k="doerField">' + bldFields().map(f => '<option value="' + esc(f.key) + '"' + (f.key === doer.field ? ' selected' : '') + '>' + esc(f.label) + '</option>').join('') + '</select></label><label>Default<input data-k="doerDefault" list="dlDoers" value="' + esc(doer.default || '') + '"></label></div>';
-  else if (doer.type === 'lookup') h += '<div class="row"><label>Table<input data-k="doerTable" list="dlTables" value="' + esc(doer.table || '') + '"></label><label>By field<select data-k="doerBy">' + bldFields().map(f => '<option value="' + esc(f.key) + '"' + (f.key === doer.by ? ' selected' : '') + '>' + esc(f.label) + '</option>').join('') + '</select></label><label>Default<input data-k="doerDefault" list="dlDoers" value="' + esc(doer.default || '') + '"></label></div><datalist id="dlTables">' + Object.keys(B.draft.doerTables || {}).map(t => '<option value="' + esc(t) + '">').join('') + '</datalist>';
-  else h += '<textarea data-k="doerRules" rows="3" class="mono">' + esc(JSON.stringify(doer.rules || [], null, 0)) + '</textarea><label>Default<input data-k="doerDefault" list="dlDoers" value="' + esc(doer.default || '') + '"></label><div class="muted small">Rules: [{"when":{"field":"category","in":["X"]},"name":"DOER"}]</div>';
-  h += '</div></div>';
-  h += '<div class="sub"><b>Applies to</b> ' + seg('appliesMode', [{ v: 'always', l: 'Every order' }, { v: 'when', l: 'Only when…' }], s.applies ? 'when' : 'always') + (s.applies ? '<div style="margin-top:6px">' + condEditor('applies', s.applies) + '</div>' : '') + '</div>';
-  h += '<div class="sub"><b>Starts</b> ';
-  trig.forEach((t, j) => {
-    h += '<div class="cand" data-j="' + j + '">' + seg('trigType', TRIG_TYPES, t.type) + (trig.length > 1 ? ' <button class="btn ghost sm" data-act="cand-del" data-j="' + j + '">×</button>' : '') + '<div class="row" style="margin-top:6px">';
-    if (t.type === 'afterStep') h += '<label>Step<select data-t="step"><option value="">—</option>' + others.map(o => '<option value="' + esc(o.id) + '"' + (o.id === t.step ? ' selected' : '') + '>' + esc(o.name) + '</option>').join('') + '</select></label>';
-    if (['beforeDate', 'afterDate', 'external'].includes(t.type)) h += '<label>Date field<select data-t="field"><option value="">—</option>' + dateFields.map(f => '<option value="' + esc(f.key) + '"' + (f.key === t.field ? ' selected' : '') + '>' + esc(f.label) + '</option>').join('') + '</select></label>';
-    h += '<label>TAT here (optional)<input data-t="tatv" type="number" step="any" min="0" value="' + esc(t.tat ? t.tat.value : '') + '" placeholder="step TAT"></label></div>';
-    h += '<div style="margin-top:4px"><label style="flex-direction:row;align-items:center;gap:6px"><input type="checkbox" data-t="useWhen"' + (t.when ? ' checked' : '') + '> Only if…</label>' + (t.when ? condEditor('cand-' + j, t.when) : '') + '</div>';
-    if (j < trig.length - 1) h += '<label style="flex-direction:row;align-items:center;gap:6px;margin-top:4px"><input type="checkbox" data-t="orNext"' + (t.orNext ? ' checked' : '') + '> If that step is not done yet, use the next line</label>';
-    h += '</div>';
+  const multi = trig.length > 1;
+  let h = '<div class="q"><div class="qh">1. Step name</div><input data-k="name" value="' + esc(s.name) + '"><textarea data-k="what" rows="2" placeholder="What the doer must do">' + esc(s.what || '') + '</textarea></div>';
+  // who
+  h += '<div class="q"><div class="qh">2. Who does it?</div><select data-k="doerType">' + opt(WHO_OPTS, doer.type) + '</select>';
+  if (doer.type === 'fixed') h += personSel('doerName', doer.name);
+  else if (doer.type === 'field') h += '<select data-k="doerField">' + bldFields().map(f => '<option value="' + esc(f.key) + '"' + (f.key === doer.field ? ' selected' : '') + '>' + esc(f.label) + '</option>').join('') + '</select>';
+  else if (doer.type === 'lookup') h += '<select data-k="doerTable">' + Object.keys(B.draft.doerTables || {}).map(t => '<option' + (t === doer.table ? ' selected' : '') + '>' + esc(t) + '</option>').join('') + '</select>';
+  else {
+    const rules = doer.rules || [];
+    if (rules.every(isSimpleRule)) {
+      const selF = bldFields(['select']);
+      h += rules.map((r, i) => { const o = fieldOpts(r.when.field); return '<div class="drrow" data-i="' + i + '"><div class="qline"><span>If</span><select data-dr="field">' + selF.map(f => '<option value="' + esc(f.key) + '"' + (f.key === r.when.field ? ' selected' : '') + '>' + esc(f.label) + '</option>').join('') + '</select><span>→</span>' + personSel('name', r.name, 'data-dr') + '<button class="btn ghost sm" data-act="dr-del" data-i="' + i + '">×</button></div><div class="chips">' + o.map(v => '<label class="chip"><input type="checkbox" data-drv value="' + esc(v) + '"' + (r.when.in.includes(v) ? ' checked' : '') + '>' + esc(v) + '</label>').join('') + '</div></div>'; }).join('');
+      h += '<a class="small" data-act="dr-add">+ another rule</a><div class="qline"><span>Otherwise</span>' + personSel('doerDefault', doer.default) + '</div>';
+    } else h += '<textarea data-k="doerRules" rows="3" class="mono">' + esc(JSON.stringify(rules)) + '</textarea><div class="qline"><span>Otherwise</span>' + personSel('doerDefault', doer.default) + '</div>';
+  }
+  h += '</div>';
+  // which orders
+  h += '<div class="q"><div class="qh">3. For which orders?</div><select data-k="appliesMode"><option value="always">All orders</option><option value="when"' + (s.applies ? ' selected' : '') + '>Only some orders</option></select>' + (s.applies ? condEditor('applies', s.applies) : '') + '</div>';
+  // start
+  h += '<div class="q"><div class="qh">4. When does it start?</div><select data-k="startMode"><option value="one">Same for every order</option><option value="multi"' + (multi ? ' selected' : '') + '>Different for different orders</option></select>';
+  if (!multi) h += '<div class="cand" data-j="0"><div class="qcol">' + startLine(trig[0] || { type: 'afterStep' }, others, dateFields, 0) + '</div></div>';
+  else trig.forEach((t, j) => {
+    h += '<div class="cand" data-j="' + j + '"><div class="qline"><b>' + (j + 1) + '.</b><span class="grow"></span><button class="btn ghost sm" data-act="cand-del" data-j="' + j + '">×</button></div>' +
+      '<div class="qline"><span>Orders:</span><select data-t="useWhen"><option value="">All</option><option value="1"' + (t.when ? ' selected' : '') + '>Only some</option></select></div>' + (t.when ? condEditor('cand-' + j, t.when) : '') +
+      '<div class="qcol">' + startLine(t, others, dateFields, j) + '</div>' +
+      (j < trig.length - 1 && t.type === 'afterStep' ? '<label class="chip"><input type="checkbox" data-t="orNext"' + (t.orNext ? ' checked' : '') + '>If this step is not done yet, use the next line</label>' : '') + '</div>';
   });
-  h += '<a class="small" data-act="cand-add">+ another start rule</a></div>';
-  h += '<div class="sub"><b>TAT</b><div class="row" style="margin-top:6px"><label>Normal<input data-k="tatv" type="number" step="any" min="0" value="' + esc(tat.value) + '" style="width:80px"></label><label>Urgent<input data-k="tatu" type="number" step="any" min="0" value="' + esc(tat.urgent == null ? '' : tat.urgent) + '" style="width:80px" placeholder="same"></label><label>Unit' + seg('tatUnit', [{ v: 'days', l: 'Working days' }, { v: 'hours', l: 'Hours' }], tat.unit || 'days') + '</label></div></div>';
+  if (multi) h += '<a class="small" data-act="cand-add">+ another line</a>';
+  h += '</div>';
+  // time
+  const t0 = trig[0] || {}; const before = !multi && t0.type === 'beforeDate'; const onDate = !multi && t0.type === 'external';
+  if (!onDate) h += '<div class="q"><div class="qh">5. ' + (before ? 'How many days before?' : 'How much time?') + '</div><div class="qline"><input data-k="tatv" type="number" step="any" min="0" value="' + esc(tat.value) + '" style="width:80px"><select data-k="tatUnit"><option value="days">working days</option><option value="hours"' + (tat.unit === 'hours' ? ' selected' : '') + '>hours</option></select></div>' +
+    (before ? '' : '<div class="qline"><span>If urgent</span><input data-k="tatu" type="number" step="any" min="0" value="' + esc(tat.urgent == null ? '' : tat.urgent) + '" style="width:80px" placeholder="same"></div>') + '</div>';
+  // close
   const stt = s.status || { type: 'manual' }; const rule = FMS_RULES.find(r => r.id === stt.rule) || FMS_RULES[0];
   const capFields = bldFields(['date', 'datetime', 'text', 'number', 'select']).filter(f => f.source !== 'system');
-  h += '<div class="sub"><b>Closed by</b> ' + seg('statusType', [{ v: 'manual', l: 'Doer clicks Done' }, { v: 'auto', l: 'Automatically' }], stt.type) +
-    (stt.type === 'auto' ? '<div class="row" style="margin-top:6px"><label style="flex:1">When<select data-k="stRule">' + FMS_RULES.map(r => '<option value="' + r.id + '"' + (r.id === rule.id ? ' selected' : '') + '>' + esc(r.label) + '</option>').join('') + '</select></label>' +
-      (rule.param ? '<label>Field<select data-k="stField"><option value="">—</option>' + bldFields().map(f => '<option value="' + esc(f.key) + '"' + (f.key === stt.field ? ' selected' : '') + '>' + esc(f.label) + '</option>').join('') + '</select></label>' : '') + '</div>'
-      : '<div class="row" style="margin-top:6px"><label>On Done, ask for<select data-k="capField"><option value="">Nothing</option>' + capFields.map(f => '<option value="' + esc(f.key) + '"' + (s.capture && s.capture.field === f.key ? ' selected' : '') + '>' + esc(f.label) + '</option>').join('') + '</select></label></div>') + '</div>';
-  if (edit) h += '<div class="sub toolbar"><button class="btn sm" data-act="bld-move" data-d="-1">↑ Up</button><button class="btn sm" data-act="bld-move" data-d="1">↓ Down</button><span class="grow"></span><button class="btn sm danger" data-act="bld-del" data-confirm="Confirm delete">Delete step</button></div>';
+  h += '<div class="q"><div class="qh">' + (onDate ? '5' : '6') + '. How does it finish?</div><select data-k="statusType"><option value="manual">Doer clicks Done</option><option value="auto"' + (stt.type === 'auto' ? ' selected' : '') + '>Finishes by itself</option></select>' +
+    (stt.type === 'auto' ? '<div class="qline"><span>When</span><select data-k="stRule">' + FMS_RULES.map(r => '<option value="' + r.id + '"' + (r.id === rule.id ? ' selected' : '') + '>' + esc(r.label) + '</option>').join('') + '</select>' +
+      (rule.param ? '<select data-k="stField"><option value="">— choose —</option>' + bldFields().map(f => '<option value="' + esc(f.key) + '"' + (f.key === stt.field ? ' selected' : '') + '>' + esc(f.label) + '</option>').join('') + '</select>' : '') + '</div>'
+      : '<div class="qline"><span>On Done, ask for</span><select data-k="capField"><option value="">Nothing</option>' + capFields.map(f => '<option value="' + esc(f.key) + '"' + (s.capture && s.capture.field === f.key ? ' selected' : '') + '>' + esc(f.label) + '</option>').join('') + '</select></div>') + '</div>';
+  if (edit) h += '<div class="toolbar"><button class="btn sm" data-act="bld-move" data-d="-1">↑ Up</button><button class="btn sm" data-act="bld-move" data-d="1">↓ Down</button><span class="grow"></span><button class="btn sm danger" data-act="bld-del" data-confirm="Confirm delete">Delete step</button></div>';
   el.innerHTML = h;
-  if (!edit) $$('input,select,textarea,.seg', el).forEach(x => { if (x.classList.contains('seg')) x.setAttribute('data-locked', ''); else x.disabled = true; });
+  if (!edit) $$('input,select,textarea', el).forEach(x => { x.disabled = true; });
 }
 function bldCollect() {
   const s = curStep(); const el = $('#bEd'); if (!s || !el) return;
   const val = k => { const i = $('[data-k="' + k + '"]', el); return i ? i.value : undefined; };
-  s.name = val('name').trim(); const w = val('what').trim(); if (w) s.what = w; else delete s.what;
-  const dt = segVal($('[data-seg="doerType"]', el));
-  if (dt === 'fixed') s.doer = { type: 'fixed', name: (val('doerName') || '').trim().toUpperCase() };
-  else if (dt === 'field') s.doer = { type: 'field', field: val('doerField') || (s.doer && s.doer.field) || (bldFields()[0] || {}).key, default: (val('doerDefault') || '').trim().toUpperCase() || undefined };
-  else if (dt === 'lookup') s.doer = { type: 'lookup', table: (val('doerTable') || '').trim(), by: val('doerBy') || (bldFields()[0] || {}).key, default: (val('doerDefault') || '').trim() || undefined };
-  else { let rules = []; try { rules = JSON.parse(val('doerRules') || '[]'); } catch (e) { rules = (s.doer && s.doer.rules) || []; } s.doer = { type: 'byCondition', rules, default: (val('doerDefault') || '').trim() || undefined }; }
-  if (segVal($('[data-seg="appliesMode"]', el)) === 'when') { const c = readCond($('[data-cond="applies"]', el)); s.applies = c && !c.__bad ? c : (c && c.__bad ? s.applies : { field: (bldFields(['select'])[0] || {}).key, in: [] }); }
+  const person = v => (v || '').trim().toUpperCase();
+  s.name = (val('name') || '').trim(); const w = (val('what') || '').trim(); if (w) s.what = w; else delete s.what;
+  const old = typeof s.doer === 'string' ? { type: 'fixed', name: s.doer } : (s.doer || {}); const dt = val('doerType') || old.type || 'fixed';
+  if (dt === 'fixed') s.doer = { type: 'fixed', name: dt === old.type ? person(val('doerName')) : (old.name || '') };
+  else if (dt === 'field') s.doer = { type: 'field', field: val('doerField') || (old.type === 'field' && old.field) || (bldFields().find(f => f.key === 'brand_merchant') || bldFields()[0] || {}).key };
+  else if (dt === 'lookup') s.doer = { type: 'lookup', table: val('doerTable') || (old.type === 'lookup' && old.table) || Object.keys(B.draft.doerTables || {})[0] || '', by: (old.type === 'lookup' && old.by) || 'brand' };
+  else {
+    let rules;
+    if ($('[data-k="doerRules"]', el)) { try { rules = JSON.parse(val('doerRules') || '[]'); } catch (e) { rules = old.rules || []; } }
+    else if (old.type === 'byCondition') rules = $$('.drrow', el).map(r => ({ when: { field: $('[data-dr="field"]', r).value, in: $$('[data-drv]', r).filter(x => x.checked).map(x => x.value) }, name: person($('[data-dr="name"]', r).value) }));
+    else rules = [{ when: { field: (bldFields(['select'])[0] || {}).key, in: [] }, name: '' }];
+    s.doer = { type: 'byCondition', rules, default: dt === old.type ? (person(val('doerDefault')) || undefined) : undefined };
+  }
+  if (val('appliesMode') === 'when') { const c = readCond($('[data-cond="applies"]', el)); s.applies = c && !c.__bad ? c : (c && c.__bad ? s.applies : { field: (bldFields(['select'])[0] || {}).key, in: [] }); }
   else delete s.applies;
-  const cands = $$('.cand', el).map((c, j) => {
-    const t = { type: segVal($('[data-seg="trigType"]', c)) };
-    const st = $('[data-t="step"]', c), fd = $('[data-t="field"]', c);
-    if (t.type === 'afterStep') t.step = st ? st.value : ''; if (['beforeDate', 'afterDate', 'external'].includes(t.type)) t.field = fd ? fd.value : '';
-    const tv = $('[data-t="tatv"]', c).value; if (tv !== '') t.tat = { value: num(tv), unit: (s.tat || {}).unit || 'days' };
-    if ($('[data-t="useWhen"]', c).checked) { const cw = readCond($('[data-cond="cand-' + j + '"]', c)); t.when = cw && !cw.__bad ? cw : { field: (bldFields(['select'])[0] || {}).key, in: [] }; }
+  const prev = (Array.isArray(s.trigger) ? s.trigger : [s.trigger]).filter(Boolean);
+  let cands = $$('.cand', el).map((c, j) => {
+    const g = k => { const i = $('[data-t="' + k + '"]', c); return i ? i.value : undefined; };
+    const t = { type: g('type') || 'afterStep' }; const p = prev[j] || {};
+    if (t.type === 'afterStep') t.step = g('step') || ''; if (['beforeDate', 'afterDate', 'external'].includes(t.type)) t.field = g('field') || '';
+    if (p.tat && p.type === t.type) t.tat = p.tat;
+    if (g('useWhen')) { const cw = readCond($('[data-cond="cand-' + j + '"]', c)); t.when = cw && !cw.__bad ? cw : (p.when || { field: (bldFields(['select'])[0] || {}).key, in: [] }); }
     const on = $('[data-t="orNext"]', c); if (on && on.checked) t.orNext = true;
     return t;
   });
+  const mode = val('startMode');
+  if (mode === 'multi' && cands.length === 1) cands.push({ type: 'afterStep', step: '' });
+  if (mode === 'one' && cands.length > 1) cands = [cands[0]];
+  if (mode === 'one') delete cands[0].when;
   s.trigger = cands.length === 1 ? cands[0] : cands;
-  const tu = val('tatu'); s.tat = { value: num(val('tatv')), unit: segVal($('[data-seg="tatUnit"]', el)) || 'days' }; if (tu !== '' && tu != null) s.tat.urgent = num(tu);
-  if (segVal($('[data-seg="statusType"]', el)) === 'auto') { s.status = { type: 'auto', rule: val('stRule') || (s.status && s.status.rule) || FMS_RULES[0].id }; const sf = val('stField'); if (sf) s.status.field = sf; else if (s.status.rule === ((s.status && s.status.rule) || '') && s.status.field) s.status.field = s.status.field; delete s.capture; }
-  else { delete s.status; const cf = val('capField'); if (cf) s.capture = { field: cf }; else if (cf === '') delete s.capture; }
+  if ($('[data-k="tatv"]', el)) { const tu = val('tatu'); s.tat = { value: num(val('tatv')), unit: val('tatUnit') || 'days' }; if (tu !== '' && tu != null) s.tat.urgent = num(tu); else if (tu == null && s.tat.urgent != null) delete s.tat.urgent; }
+  if (val('statusType') === 'auto') { s.status = { type: 'auto', rule: val('stRule') || (s.status && s.status.rule) || FMS_RULES[0].id }; const sf = val('stField'); if (sf) s.status.field = sf; delete s.capture; }
+  else { delete s.status; const cf = val('capField'); if (cf) s.capture = { field: cf }; else delete s.capture; }
 }
+ACTIONS['dr-add'] = () => { bldCollect(); const s = curStep(); s.doer.rules = (s.doer.rules || []).concat([{ when: { field: (bldFields(['select'])[0] || {}).key, in: [] }, name: '' }]); if (!bldMarkDirty()) { bldEditor(); bldSide(); } };
+ACTIONS['dr-del'] = el => { bldCollect(); const s = curStep(); s.doer.rules.splice(+el.dataset.i, 1); if (!bldMarkDirty()) { bldEditor(); bldSide(); } };
 function bldEditAllowed() { return requirePerm('builder', 'edit'); }
 ACTIONS['bld-tab'] = el => { B.tab = el.dataset.t; VIEWS.builder.render(); };
 ACTIONS['bld-sel'] = el => { if ($('#bEd')) bldCollect(); B.sel = el.dataset.s; bldEditor(); bldSide(); };

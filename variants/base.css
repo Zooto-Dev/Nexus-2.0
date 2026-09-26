@@ -150,7 +150,7 @@ td input.right, input.right { text-align: right; }
 .trk .c-Done { color: var(--done); } .trk .c-NA { color: #c3c8cf; } .trk .c-Waiting { color: var(--wait); }
 .trk td:first-child, .trk th:first-child { position: sticky; left: 0; background: #fff; z-index: 2; }
 
-.bld { display: grid; grid-template-columns: 240px 360px minmax(0, 1fr); gap: 12px; align-items: start; }
+.bld { display: grid; grid-template-columns: 220px 420px minmax(0, 1fr); gap: 12px; align-items: start; }
 .steplist a { display: block; padding: 5px 9px; border-bottom: 1px solid var(--line2); color: var(--text); }
 .steplist a.on { background: var(--accent-bg); color: var(--accent); font-weight: 600; }
 .steplist .muted { font-size: 11px; }
@@ -310,3 +310,17 @@ tr.moqrow td { background: #fff8e6; }
 .grn-no{font-size:14px;margin-right:12px}.grn-no b{color:#0e6a73}
 label.attach{flex-direction:row!important;width:auto}
 .jckv td.k{white-space:nowrap}
+
+.ed .q { border: 1px solid var(--line2); border-radius: var(--r-s); padding: 10px; margin-bottom: 10px; display: flex; flex-direction: column; gap: 6px; }
+.ed .qh { font-weight: 600; }
+.ed .q > select, .ed .q > input, .ed .q > textarea { width: 100%; }
+.ed .qline { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.ed .qline select { flex: 1; min-width: 120px; }
+.ed .chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.ed .chip { flex-direction: row; align-items: center; gap: 4px; margin: 0; padding: 2px 8px; border: 1px solid var(--line2); border-radius: 12px; font-size: 12px; cursor: pointer; }
+.ed .cand, .ed .drrow, .ed .condrow { border: 1px dashed var(--line2); border-radius: var(--r-s); padding: 6px; display: flex; flex-direction: column; gap: 4px; margin: 0; }
+.ed .condbox { display: flex; flex-direction: column; gap: 6px; }
+.ed .qcol { display: flex; flex-direction: column; gap: 6px; }
+.ed .qcol select { width: 100%; }
+.ed .condrow .qline select { min-width: 70px; }
+.ed .condrow .qline { flex-wrap: nowrap; }
