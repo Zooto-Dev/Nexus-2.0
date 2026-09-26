@@ -280,3 +280,7 @@ td input.right, input.right { text-align: right; }
 td.wrap { white-space: normal; }
 .icl .jckv .k { width: 170px; white-space: nowrap; }
 .icl .jckv td { height: 30px; }
+
+/* PO: MOQ override row */
+tr.moqrow td { background: #fff8e6; }
+#npLines [data-jrem] { width: 100%; min-width: 110px; }
