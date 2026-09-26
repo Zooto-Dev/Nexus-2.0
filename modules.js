@@ -326,15 +326,15 @@ VIEWS.po = {
     let h = subTitle('Purchase Orders', 'GRN/followup only after approval') + '<div class="toolbar">' + seg('f', [{ v: 'appr', l: 'For approval' }, { v: 'open', l: 'Open' }, { v: 'done', l: 'Received' }, { v: 'cancel', l: 'Rejected/Cancelled' }, { v: 'all', l: 'All' }], PO_UI.f) +
       '<input id="poQ" placeholder="PO / vendor / material…" value="' + esc(PO_UI.q || '') + '"><span class="grow"></span>' + (edit ? newBtn('New PO', 'po-new') : '') + '</div>';
     if (PO_UI.form && edit) h += poForm();
-    h += '<div class="tbl-wrap"><table><tr><th>PO</th><th>Date</th><th>Vendor</th><th>Materials</th><th class="num">Qty</th><th class="num">Received</th><th>Expected</th><th>Status</th><th></th></tr>' +
+    h += '<div class="tbl-wrap"><table class="bomflat"><tr><th>PO No</th><th>PO Date</th><th>Vendor</th><th class="num">Sr</th><th>Item Name</th><th>Item Code</th><th>Brand</th><th>UOM</th><th class="num">Qty</th><th class="num">Received</th><th class="num">Pending</th><th>Expected</th><th>Status</th><th>Raised By</th><th>Approved By</th><th></th></tr>' +
       (rows.length ? rows.map(p => {
-        const oq = p.lines.reduce((s, l) => s + num(l.qty), 0), rq = p.lines.reduce((s, l) => s + num(l.received), 0); const st = poStatus(p);
-        let row = '<tr class="click" data-act="po-toggle" data-id="' + esc(p.id) + '"><td><b>' + esc(p.no) + '</b><div class="muted small">' + esc(p.created_by || '') + '</div></td><td class="nowrap">' + fmtD(p.date) + '</td><td>' + esc(p.vendor) + '</td><td class="small">' + p.lines.map(l => esc(l.material) + ' × ' + qtyFmt(l.qty)).join('<br>') + '</td><td class="num">' + qtyFmt(oq) + '</td><td class="num">' + qtyFmt(rq) + '</td><td class="nowrap">' + fmtD(p.expected) + '</td><td><span class="st ' + poStCls(st) + '">' + st + '</span>' + ((p.moq_log || []).length ? ' <span class="st Pending" title="Ordered above net requirement because of MOQ">MOQ +' + qtyFmt(p.moq_log.reduce((a, x) => a + num(x.extra), 0)) + '</span>' : '') + (p.approved_by ? '<div class="muted small">' + esc(p.approved_by) + '</div>' : '') + '</td>' +
-          '<td class="right nowrap">' + (st === 'Amend' && edit && (poOwn(p) || isSuperAdmin()) ? '<button class="btn sm primary" data-act="po-edit" data-id="' + esc(p.id) + '">Edit</button>' : '') +
-          (edit && (st === 'Open' || st === 'Pending Approval' || st === 'Amend') ? ' <button class="btn ghost sm danger" data-act="po-cancel" data-id="' + esc(p.id) + '" data-confirm="Cancel PO?">Cancel</button>' : '') + '</td></tr>';
-        if (PO_UI.open === p.id) row += '<tr class="inline-form"><td colspan="9">' + poDetail(p) + '</td></tr>';
+        const st = poStatus(p);
+        const act = (st === 'Amend' && edit && (poOwn(p) || isSuperAdmin()) ? '<button class="btn sm primary" data-act="po-edit" data-id="' + esc(p.id) + '">Edit</button>' : '') +
+          (edit && (st === 'Open' || st === 'Pending Approval' || st === 'Amend') ? ' <button class="btn ghost sm danger" data-act="po-cancel" data-id="' + esc(p.id) + '" data-confirm="Cancel PO?">Cancel</button>' : '');
+        let row = p.lines.map((l, i) => '<tr class="click' + (i === 0 ? ' bomfirst' : '') + '" data-act="po-toggle" data-id="' + esc(p.id) + '"><td><b>' + esc(p.no) + '</b></td><td>' + fmtD(p.date) + '</td><td>' + esc(p.vendor) + '</td><td class="num">' + (i + 1) + '</td><td>' + esc((matBy(l.material) || {}).name || '') + '</td><td>' + esc(l.material) + '</td><td>' + esc(l.brand || '') + '</td><td>' + esc(l.uom || '') + '</td><td class="num">' + qtyFmt(l.qty) + '</td><td class="num">' + qtyFmt(num(l.received)) + '</td><td class="num">' + qtyFmt(Math.max(0, num(l.qty) - num(l.received))) + '</td><td>' + fmtD(p.expected) + '</td><td><span class="st ' + poStCls(st) + '">' + st + '</span></td><td>' + esc(p.created_by || '') + '</td><td>' + esc(p.approved_by || '') + '</td><td class="right">' + (i === 0 ? act : '') + '</td></tr>').join('');
+        if (PO_UI.open === p.id) row += '<tr class="inline-form"><td colspan="16">' + poDetail(p) + '</td></tr>';
         return row;
-      }).join('') : '<tr><td colspan="9" class="empty">No purchase orders</td></tr>') + '</table></div>';
+      }).join('') : '<tr><td colspan="16" class="empty">No purchase orders</td></tr>') + '</table></div>';
     setMain(h);
     if (PO_UI.form && edit) poFormSetup();
     onSeg(e => { if (e.target.dataset.seg === 'poMode') { PO_UI.mode = e.detail; poFormSetup(); const v = vendorBy($('#npVen').value); if (v && e.detail === 'jc') poFillJc(v.name); return; } PO_UI.f = e.detail; VIEWS.po.render(); });
@@ -580,19 +580,19 @@ VIEWS.jobcards = {
     const rows = Store.all('job_cards').slice().sort((a2, b2) => b2.no < a2.no ? -1 : 1).filter(j => JC_UI.f === 'all' || (JC_UI.f === 'open' ? j.status !== 'Closed' : j.status === 'Closed'));
     let h = subTitle('Job Card', 'format: ZF-0001') + '<div class="toolbar">' + seg('f', [{ v: 'open', l: 'Open' }, { v: 'closed', l: 'Closed' }, { v: 'all', l: 'All' }], JC_UI.f) + '<span class="grow"></span>' + (edit ? newBtn('New job card', 'jc-new') : '') + '</div>';
     if (JC_UI.form && edit) h += jcForm();
-    h += '<div class="tbl-wrap"><table><tr><th>JC No</th><th>Order</th><th>Brand</th><th>Article / Style</th><th class="num">Qty</th><th>Material</th><th>Swatch</th><th>Corrections</th><th>Status</th><th></th></tr>' +
+    h += '<div class="tbl-wrap"><table class="bomflat"><tr><th>JC No</th><th>JC Date</th><th>Order</th><th>Brand</th><th>Article</th><th>Style</th><th>Colour</th><th class="num">Qty</th><th>Material</th><th>Swatch</th><th>Corrections</th><th>Status</th><th>By</th><th></th></tr>' +
       (rows.length ? rows.map(j => {
         const oc = (j.corrections || []).filter(x => !x.resolved).length;
         const L = j.lines || []; const req = L.reduce((s2, l) => s2 + num(l.required), 0);
         const iss = L.reduce((s2, l) => s2 + Math.min(num(l.required), issuedToJc(j.no, l.material)), 0);
         const ready = req ? Math.round(iss / req * 100) : null;
-        let row = '<tr class="click" data-act="jc-toggle" data-id="' + esc(j.id) + '"><td><b>' + esc(j.no) + '</b><div class="muted small">' + esc(j.by) + ' · ' + fmtD(j.at) + '</div></td><td>' + esc(j.order_no || '') + '</td><td>' + esc(j.brand) + '</td><td>' + esc(j.article) + (j.style ? ' · ' + esc(j.style) : '') + (j.colour ? ' <span class="muted">' + esc(j.colour) + '</span>' : '') + '</td><td class="num">' + qtyFmt(j.qty) + '</td>' +
+        let row = '<tr class="click" data-act="jc-toggle" data-id="' + esc(j.id) + '"><td><b>' + esc(j.no) + '</b></td><td>' + fmtD(j.at) + '</td><td>' + esc(j.order_no || '') + '</td><td>' + esc(j.brand) + '</td><td>' + esc(j.article) + '</td><td>' + esc(j.style || '') + '</td><td>' + esc(j.colour || '') + '</td><td class="num">' + qtyFmt(j.qty) + '</td>' +
           '<td>' + (ready == null ? '<span class="late-txt small">No BOM</span>' : '<span class="' + (ready >= 100 ? 'st Done' : 'small') + '">' + ready + '% issued</span>') + '</td>' +
           '<td><span class="st ' + (j.swatch_status === 'Approved' ? 'Done' : j.swatch_status === 'Rejected' ? 'Late' : 'Pending') + '">' + esc(j.swatch_status) + '</span></td><td>' + (oc ? '<span class="late-txt">' + oc + ' open</span>' : (j.corrections || []).length ? 'resolved' : '—') + '</td><td>' + stHtml(j.status === 'Closed' ? 'Done' : 'Pending').replace('>Done<', '>Closed<').replace('>Pending<', '>Open<') + '</td>' +
-          '<td class="right">' + (edit && j.status !== 'Closed' ? '<button class="btn sm" data-act="jc-close" data-id="' + esc(j.id) + '" data-confirm="Close JC?">Close</button>' : '') + '</td></tr>';
-        if (JC_UI.open === j.id) row += '<tr class="inline-form"><td colspan="10">' + jcDetail(j) + '</td></tr>';
+          '<td>' + esc(j.by || '') + '</td><td class="right">' + (edit && j.status !== 'Closed' ? '<button class="btn sm" data-act="jc-close" data-id="' + esc(j.id) + '" data-confirm="Close JC?">Close</button>' : '') + '</td></tr>';
+        if (JC_UI.open === j.id) row += '<tr class="inline-form"><td colspan="14">' + jcDetail(j) + '</td></tr>';
         return row;
-      }).join('') : '<tr><td colspan="10" class="empty">No job cards</td></tr>') + '</table></div>';
+      }).join('') : '<tr><td colspan="14" class="empty">No job cards</td></tr>') + '</table></div>';
     setMain(h);
     onSeg(e => {
       if (e.target.dataset.seg === 'f') { JC_UI.f = e.detail; VIEWS.jobcards.render(); return; }
@@ -839,13 +839,12 @@ VIEWS.issuance = {
       (appr ? '' : '');
 
     // 2) pending requisitions
-    h += '<h2>Pending requisitions</h2><div class="tbl-wrap"><table><tr><th>Req</th><th>Date</th><th>JC / Dept</th><th>Materials</th><th>Stock check</th>' + (edit ? '<th></th>' : '') + '</tr>' +
+    h += '<h2>Pending requisitions</h2><div class="tbl-wrap"><table class="bomflat"><tr><th>Req No</th><th>Date</th><th>JC / Dept</th><th class="num">Sr</th><th>Item Name</th><th>Item Code</th><th class="num">Qty</th><th class="num">In Stock</th><th>Stock Check</th><th>Raised By</th>' + (edit ? '<th></th>' : '') + '</tr>' +
       (reqs.length ? reqs.map(r => {
         const short = r.lines.filter(l => (stk[norm(l.material)] || 0) < num(l.qty));
-        return '<tr><td><b>' + esc(r.no) + '</b><div class="muted small">' + esc(r.by) + '</div></td><td class="nowrap">' + fmtD(r.date) + '</td><td>' + esc(r.jc_no || r.dept) + '</td><td class="small">' + r.lines.map(l => esc(l.material) + ' × ' + qtyFmt(l.qty)).join('<br>') + '</td>' +
-          '<td>' + (short.length ? '<span class="late-txt small">Short: ' + short.map(l => esc(l.material)).join(', ') + '</span>' : '<span class="st Done">OK</span>') + '</td>' +
-          (edit ? '<td class="right nowrap"><button class="btn sm primary" data-act="iss-req" data-id="' + esc(r.id) + '"' + (short.length ? ' disabled title="stock short"' : '') + '>Send for issue</button> <button class="btn sm ghost danger" data-act="req-reject" data-id="' + esc(r.id) + '" data-confirm="Reject?">Reject</button></td>' : '') + '</tr>';
-      }).join('') : '<tr><td colspan="6" class="empty">No pending requisitions</td></tr>') + '</table></div>';
+        return r.lines.map((l, i) => { const have = stk[norm(l.material)] || 0; return '<tr' + (i === 0 ? ' class="bomfirst"' : '') + '><td><b>' + esc(r.no) + '</b></td><td>' + fmtD(r.date) + '</td><td>' + esc(r.jc_no || r.dept) + '</td><td class="num">' + (i + 1) + '</td><td>' + esc((matBy(l.material) || {}).name || '') + '</td><td>' + esc(l.material) + '</td><td class="num">' + qtyFmt(l.qty) + '</td><td class="num">' + qtyFmt(have) + '</td><td>' + (have < num(l.qty) ? '<span class="st Late">Short</span>' : '<span class="st Done">OK</span>') + '</td><td>' + esc(r.by) + '</td>' +
+          (edit ? '<td class="right">' + (i === 0 ? '<button class="btn sm primary" data-act="iss-req" data-id="' + esc(r.id) + '"' + (short.length ? ' disabled title="stock short"' : '') + '>Send for issue</button> <button class="btn sm ghost danger" data-act="req-reject" data-id="' + esc(r.id) + '" data-confirm="Reject?">Reject</button>' : '') + '</td>' : '') + '</tr>'; }).join('');
+      }).join('') : '<tr><td colspan="11" class="empty">No pending requisitions</td></tr>') + '</table></div>';
 
     // 3) direct issue + return
     h += '<div class="toolbar" style="margin-top:14px"><h2 style="margin:0">Direct issue / return</h2>' +
@@ -1205,8 +1204,8 @@ VIEWS.boms = {
     Store.all('boms').forEach(b2 => { const k = norm(b2.article + '|' + (b2.brand || '') + '|' + (b2.style || '') + '|' + (b2.colour || '')); if (!byKey[k] || byKey[k].version < b2.version) byKey[k] = b2; });
     const rows = Object.values(byKey).sort((a2, b3) => a2.article.localeCompare(b3.article));
     setMain(subTitle('Created BOMs', 'latest version per article+brand+style+colour') + '<div class="toolbar"><span class="grow"></span>' + (can('development', 'edit') ? '<a class="btn primary" href="#/bom">+ Make BOM</a>' : '') + '</div>' +
-      '<div class="tbl-wrap"><table><tr><th>Photo</th><th>Brand</th><th>Article</th><th>Style</th><th>Colour</th><th>Gender</th><th>Ver</th><th>Items (Norms × Price → Cost)</th><th class="num">RMC/Pair ₹</th><th>By</th><th>Date</th><th></th></tr>' +
-      (rows.length ? rows.map(b2 => '<tr><td>' + photoThumb(b2.photo) + '</td><td>' + esc(b2.brand || '') + '</td><td><b>' + esc(b2.article) + '</b></td><td>' + esc(b2.style || '') + '</td><td>' + esc(b2.colour || 'All') + '</td><td>' + esc(b2.gender || '') + '</td><td>v' + b2.version + '</td><td class="small">' + b2.lines.map(l => esc(l.material) + ' × ' + l.qty + (l.price ? ' @ ₹' + l.price : '') + (l.supplier ? ' <span class="muted">(' + esc(l.supplier) + ')</span>' : '')).join('<br>') + '</td><td class="num">' + money(b2.lines.reduce((s2, l) => s2 + num(l.qty) * num(l.price || 0), 0)) + '</td><td>' + esc(b2.by) + '</td><td class="nowrap">' + fmtD(b2.at) + '</td><td class="right"><button class="btn sm ghost" data-act="print-bom" data-id="' + esc(b2.id) + '">Print</button></td></tr>').join('') : '<tr><td colspan="12" class="empty">No BOMs yet</td></tr>') + '</table></div>');
+      '<div class="tbl-wrap"><table class="bomflat"><tr><th>Brand</th><th>Article</th><th>Style</th><th>Colour</th><th>Gender</th><th>Ver</th><th class="num">Sr</th><th>Process</th><th>Section</th><th>Category</th><th>Item Name</th><th>Item Code</th><th>UOM</th><th class="num">Norms</th><th class="num">Price</th><th class="num">Cost</th><th>Supplier</th><th>Remark</th><th>Date</th><th></th></tr>' +
+      (rows.length ? rows.map(b2 => b2.lines.map((l, i) => '<tr' + (i === 0 ? ' class="bomfirst"' : '') + '><td>' + esc(b2.brand || '') + '</td><td><b>' + esc(b2.article) + '</b></td><td>' + esc(b2.style || '') + '</td><td>' + esc(b2.colour || '') + '</td><td>' + esc(b2.gender || '') + '</td><td>v' + b2.version + '</td><td class="num">' + (i + 1) + '</td><td>' + esc(l.process || '') + '</td><td>' + esc(l.section || '') + '</td><td>' + esc(l.category || '') + '</td><td>' + esc((matBy(l.material) || {}).name || '') + '</td><td>' + esc(l.material) + '</td><td>' + esc(l.uom || '') + '</td><td class="num">' + l.qty + '</td><td class="num">' + (l.price ? money(l.price) : '') + '</td><td class="num">' + (l.price ? money(num(l.qty) * num(l.price)) : '') + '</td><td>' + esc(l.supplier || '') + '</td><td>' + esc(l.remark || '') + '</td><td>' + fmtD(b2.at) + '</td><td class="right">' + (i === 0 ? '<button class="btn sm ghost" data-act="print-bom" data-id="' + esc(b2.id) + '">Print</button>' : '') + '</td></tr>').join('')).join('') : '<tr><td colspan="20" class="empty">No BOMs yet</td></tr>') + '</table></div>');
   }
 };
 
@@ -1228,8 +1227,8 @@ VIEWS.requisition = {
         '</div><div class="card-f"><button class="btn primary" data-act="req-save">Generate Requisition Slip</button><span id="nrMsg" class="small"></span></div></div>';
     }
     const rows = Store.all('requisitions').slice().sort((a2, b2) => b2.no < a2.no ? -1 : 1);
-    h += '<div class="tbl-wrap"><table><tr><th>Req</th><th>Date</th><th>JC / Dept</th><th>Materials (req → issued)</th><th>Status</th><th>By</th><th></th></tr>' +
-      (rows.length ? rows.map(r => '<tr><td><b>' + esc(r.no) + '</b></td><td class="nowrap">' + fmtD(r.date) + '</td><td>' + esc(r.jc_no || r.dept) + '</td><td class="small">' + r.lines.map(l => esc(l.material) + ' × ' + qtyFmt(l.qty) + (l.extra ? ' <span class="muted">(extra)</span>' : '')).join('<br>') + '</td><td><span class="st ' + (r.status === 'Issued' ? 'Done' : r.status === 'Rejected' ? 'Late' : 'Pending') + '">' + r.status + '</span>' + (r.issued_by ? '<div class="muted small">' + esc(r.issued_by) + '</div>' : '') + '</td><td>' + esc(r.by) + '</td><td class="right"><button class="btn sm ghost" data-act="print-req" data-id="' + esc(r.id) + '">Print Slip</button></td></tr>').join('') : '<tr><td colspan="7" class="empty">No requisitions</td></tr>') + '</table></div>';
+    h += '<div class="tbl-wrap"><table class="bomflat"><tr><th>Req No</th><th>Date</th><th>JC / Dept</th><th class="num">Sr</th><th>Item Name</th><th>Item Code</th><th class="num">Qty</th><th>Extra</th><th>Status</th><th>Raised By</th><th>Issued By</th><th></th></tr>' +
+      (rows.length ? rows.map(r => r.lines.map((l, i) => '<tr' + (i === 0 ? ' class="bomfirst"' : '') + '><td><b>' + esc(r.no) + '</b></td><td>' + fmtD(r.date) + '</td><td>' + esc(r.jc_no || r.dept) + '</td><td class="num">' + (i + 1) + '</td><td>' + esc((matBy(l.material) || {}).name || '') + '</td><td>' + esc(l.material) + '</td><td class="num">' + qtyFmt(l.qty) + '</td><td>' + (l.extra ? 'Yes' : '') + '</td><td><span class="st ' + (r.status === 'Issued' ? 'Done' : r.status === 'Rejected' ? 'Late' : 'Pending') + '">' + r.status + '</span></td><td>' + esc(r.by) + '</td><td>' + esc(r.issued_by || '') + '</td><td class="right">' + (i === 0 ? '<button class="btn sm ghost" data-act="print-req" data-id="' + esc(r.id) + '">Print Slip</button>' : '') + '</td></tr>').join('')).join('') : '<tr><td colspan="12" class="empty">No requisitions</td></tr>') + '</table></div>';
     setMain(h);
     const m = $('#main');
     m.addEventListener('change', e => { if (e.target.id === 'nrJc') reqFillJc(); if (e.target.dataset.nr === 'mat') { const mt = matBy(e.target.value); if (mt) { e.target.value = mt.code; const tr = e.target.closest('tr'); $('[data-nr-uom]', tr).textContent = mt.uom; } } });
