@@ -453,7 +453,6 @@ VIEWS.grn = {
       ];
       const right = iw ? [['Gate Entry', esc(iw.no)], ['Invoice Qty', '<b>' + qtyFmt(iw.qty) + '</b>'], ['Invoice Date', fmtD(iw.bill_date)], ['Invoice Photo', photoThumb(iw.photo)], ['Invoice Approved By', esc(iw.inv_by || '')]] : [];
       h += '<div class="card"><div class="card-b"><div class="inwform">' + kvTable(left) + (iw ? kvTable(right) : '<div></div>') + '</div>';
-      if (iw && (iw.grn_notes || []).length) h += '<h2>GRN notes</h2><div class="tbl-wrap"><table><tr><th class="num">Sr</th><th>Item name on invoice</th><th>Item Code</th><th>Item Name</th><th>Note</th></tr>' + iw.grn_notes.map((n, k) => '<tr><td class="num">' + (k + 1) + '</td><td>' + esc(n.inv_item) + '</td><td><b>' + esc(n.code) + '</b></td><td>' + esc((matBy(n.code) || {}).name || '') + '</td><td>' + esc(n.note || '') + '</td></tr>').join('') + '</table></div>';
       if (iw) {
         const tot = { inv: 0, rec: 0, rej: 0, short: 0, excess: 0, grn: 0, total: 0 };
         const body = U.rows.map((r, n) => { const l = p.lines[r.i]; const mt = matBy(l.material) || {}; const pen = Math.max(0, num(l.qty) - num(l.received)); const c = grnCalc(r, pen); Object.keys(tot).forEach(k => { tot[k] += c[k]; });
@@ -468,9 +467,10 @@ VIEWS.grn = {
         h += '</div><div class="card-f"><span class="grn-no">GRN No: <b>' + (match && !badRej ? esc(iw.grn_no || '') : '—') + '</b></span><span class="small muted">Invoice Qty ' + qtyFmt(iw.qty) + ' · Total ' + qtyFmt(tot.total) + '</span><span class="grow"></span><button class="btn primary" data-act="grn-save"' + (match && !badRej ? '' : ' disabled') + '>Save GRN</button><span id="grnMsg" class="small">' + (badRej ? '<span class="late-txt">Reject is more than the qty received against the PO.</span>' : '') + '</span></div></div>';
       } else h += '</div></div>';
     }
-    const gs = Store.all('grns').slice().sort((a, b) => b.no < a.no ? -1 : 1).slice(0, 20);
-    h += '<h2>Recent GRNs</h2><div class="tbl-wrap"><table><tr><th>GRN No</th><th>GRN Date</th><th>Inward</th><th>PO No</th><th>Vendor</th><th>Invoice No</th><th class="num">Sr</th><th>Item Code</th><th>Item Name</th><th class="num">Invoice Qty</th><th class="num">Received</th><th class="num">Short</th><th class="num">Reject</th><th class="num">GRN Qty</th><th class="num">Excess</th><th>Excess Status</th><th>Rack</th><th>By</th><th>Report</th></tr>' +
-      (gs.length ? gs.map(g => { const pend = (g.lines || []).some(l => l.excess_status === 'Pending'); return g.lines.map((l, i) => '<tr' + (i === 0 ? ' class="bomfirst"' : '') + '><td><b>' + esc(g.no) + '</b></td><td>' + fmtD(g.date) + '</td><td>' + esc(g.inward_no || '') + '</td><td>' + esc(g.po_no) + '</td><td>' + esc(g.vendor) + '</td><td>' + esc(g.invoice || '') + '</td><td class="num">' + (i + 1) + '</td><td>' + esc(l.material) + '</td><td>' + esc((matBy(l.material) || {}).name || '') + '</td><td class="num">' + qtyFmt(l.inv_qty || 0) + '</td><td class="num">' + qtyFmt(l.recv_qty != null ? l.recv_qty : num(l.accepted) + num(l.rejected)) + '</td><td class="num">' + qtyFmt(l.short || 0) + '</td><td class="num">' + qtyFmt(l.rejected || 0) + '</td><td class="num">' + qtyFmt(l.accepted || 0) + '</td><td class="num">' + qtyFmt(l.excess || 0) + '</td><td>' + (num(l.excess) > 0 ? '<span class="st ' + (l.excess_status === 'Approved' ? 'Done' : l.excess_status === 'Rejected' ? 'Late' : 'Pending') + '">' + esc(l.excess_status || 'Pending') + '</span>' : '') + '</td><td>' + esc(l.rack || '') + '</td><td>' + esc(g.by) + '</td><td>' + (i === 0 ? (pend ? '<span class="st Pending">Excess approval pending</span>' : '<button class="btn sm ghost" data-act="print-grn" data-id="' + esc(g.id) + '">Print</button>') : '') + '</td></tr>').join(''); }).join('') : '<tr><td colspan="19" class="empty">No GRNs yet</td></tr>') + '</table></div>';
+    const nl = ready.filter(i => (!U.ven || i.vendor === U.ven) && (!U.po || i.po_no === U.po) && (!U.inw || i.id === U.inw));
+    const notes = []; nl.forEach(i => (i.grn_notes || []).forEach((n, k) => notes.push({ i, n, k })));
+    h += '<h2>GRN notes</h2><div class="tbl-wrap"><table><tr><th>Gate Entry</th><th>GRN No</th><th>Vendor</th><th>PO No</th><th>Invoice No</th><th class="num">Sr</th><th>Item name on invoice</th><th>Item Code</th><th>Item Name</th><th>Note</th><th>Approved By</th></tr>' +
+      (notes.length ? notes.map(({ i, n, k }) => '<tr' + (k === 0 ? ' class="bomfirst"' : '') + '><td>' + esc(i.no) + '</td><td>' + esc(i.grn_no || '') + '</td><td>' + esc(i.vendor) + '</td><td>' + esc(i.po_no) + '</td><td>' + esc(i.bill_no) + '</td><td class="num">' + (k + 1) + '</td><td>' + esc(n.inv_item) + '</td><td><b>' + esc(n.code) + '</b></td><td>' + esc((matBy(n.code) || {}).name || '') + '</td><td>' + esc(n.note || '') + '</td><td>' + esc(i.inv_by || '') + '</td></tr>').join('') : '<tr><td colspan="11" class="empty">No GRN notes</td></tr>') + '</table></div>';
     const m = setMain(h);
     m.addEventListener('change', e => {
       const t = e.target;
@@ -509,7 +509,12 @@ ACTIONS['grn-save'] = () => {
   audit('grn.create', g.no, iw.no + ' · ' + p.no + ' · inv ' + iw.bill_no + ' · GRN ' + qtyFmt(calc.reduce((x, c) => x + c.grn, 0)) + (totRej ? ' / rej ' + qtyFmt(totRej) : '') + (totShort ? ' / short ' + qtyFmt(totShort) : '') + (totEx ? ' / excess ' + qtyFmt(totEx) : ''));
   Object.assign(U, { ven: '', po: '', inw: '', rows: [], why: '' });
   VIEWS.grn.render();
-  if (totEx > 0) flash(esc(g.no) + ' saved — stock updated. Excess ' + qtyFmt(totEx) + ' sent for approval; GRN report after the decision.');
+  if (totEx > 0) {
+    const to = String(settings().alert_excess_email || '').trim();
+    const body = 'GRN ' + g.no + ' · ' + p.vendor + ' · PO ' + p.no + ' · Invoice ' + iw.bill_no + '\n' + calc.filter(c => c.excess > 0).map(c => c.l.material + ' — ' + ((matBy(c.l.material) || {}).name || '') + ': PO pending ' + qtyFmt(c.pen) + ', invoice ' + qtyFmt(c.inv) + ', excess ' + qtyFmt(c.excess)).join('\n') + '\nGRN by ' + ME.name;
+    Store.put('mail_queue', { id: uid(), to, subject: 'Excess material for approval — ' + g.no + ' (' + p.vendor + ')', body, ref: g.no, status: to ? 'queued' : 'no_recipient', at: nowIso(), by: ME.name });
+    flash(esc(g.no) + ' saved — stock updated. Excess ' + qtyFmt(totEx) + ' sent for approval' + (to ? ' (mail to ' + esc(to) + ')' : '') + '; GRN report after the decision.');
+  }
   else { flash(esc(g.no) + ' saved — stock updated.'); ACTIONS['print-grn']({ dataset: { id: g.id } }); }
 };
 
@@ -534,3 +539,56 @@ ACTIONS['ex-set'] = el => {
   flash(esc(l.material) + ': excess ' + (el.dataset.s === 'Approved' ? 'accepted — added to stock.' : 'rejected — moved to RTV stock.') + (done ? ' GRN ' + esc(g.no) + ' report is ready.' : ''));
   VIEWS.excessapproval.render();
 };
+
+/* ================= GRN register ================= */
+VIEWS.grnlist = {
+  mod: 'store', render() {
+    const gs = Store.all('grns').slice().sort((a, b) => b.no < a.no ? -1 : 1);
+    setMain('<div class="tbl-wrap"><table><tr><th>GRN No</th><th>GRN Date</th><th>Inward</th><th>PO No</th><th>Vendor</th><th>Invoice No</th><th class="num">Sr</th><th>Item Code</th><th>Item Name</th><th class="num">Invoice Qty</th><th class="num">Received</th><th class="num">Short</th><th class="num">Reject</th><th class="num">GRN Qty</th><th class="num">Excess</th><th>Excess Status</th><th>Rack</th><th>By</th><th>Report</th></tr>' +
+      (gs.length ? gs.map(g => { const pend = (g.lines || []).some(l => l.excess_status === 'Pending'); return g.lines.map((l, i) => '<tr' + (i === 0 ? ' class="bomfirst"' : '') + '><td><b>' + esc(g.no) + '</b></td><td>' + fmtD(g.date) + '</td><td>' + esc(g.inward_no || '') + '</td><td>' + esc(g.po_no) + '</td><td>' + esc(g.vendor) + '</td><td>' + esc(g.invoice || '') + '</td><td class="num">' + (i + 1) + '</td><td>' + esc(l.material) + '</td><td>' + esc((matBy(l.material) || {}).name || '') + '</td><td class="num">' + qtyFmt(l.inv_qty || 0) + '</td><td class="num">' + qtyFmt(l.recv_qty != null ? l.recv_qty : num(l.accepted) + num(l.rejected)) + '</td><td class="num">' + qtyFmt(l.short || 0) + '</td><td class="num">' + qtyFmt(l.rejected || 0) + '</td><td class="num">' + qtyFmt(l.accepted || 0) + '</td><td class="num">' + qtyFmt(l.excess || 0) + '</td><td>' + (num(l.excess) > 0 ? '<span class="st ' + (l.excess_status === 'Approved' ? 'Done' : l.excess_status === 'Rejected' ? 'Late' : 'Pending') + '">' + esc(l.excess_status || 'Pending') + '</span>' : '') + '</td><td>' + esc(l.rack || '') + '</td><td>' + esc(g.by) + '</td><td>' + (i === 0 ? (pend ? '<span class="st Pending">Excess approval pending</span>' : '<button class="btn sm ghost" data-act="print-grn" data-id="' + esc(g.id) + '">Print</button>') : '') + '</td></tr>').join(''); }).join('') : '<tr><td colspan="19" class="empty">No GRNs yet</td></tr>') + '</table></div>');
+  }
+};
+
+/* ================= Activity list (basis for tasks & scoring) ================= */
+// Every completed step with who did it and when, read from the records themselves.
+function activityRows() {
+  const A = [];
+  const add = (at, act, ref, party, detail, by, result) => { if (at) A.push({ at, act, ref, party: party || '', detail: detail || '', by: by || '', result: result || '' }); };
+  Store.all('purchase_orders').forEach(p => {
+    add(p.at || p.created_at || p.date, 'PO Raised', p.no, p.vendor, p.lines.length + ' item(s)', p.created_by);
+    (p.amend_log || []).forEach(x => add(x.at, 'PO Approval', p.no, p.vendor, x.remark, x.by, 'Amend'));
+    if (p.approval === 'Approved') add(p.approved_at, 'PO Approval', p.no, p.vendor, '', p.approved_by, 'Approved');
+    if (p.approval === 'Rejected') add(p.approved_at || p.at, 'PO Approval', p.no, p.vendor, p.reject_remark, p.approved_by, 'Rejected');
+  });
+  Store.all('inwards').forEach(i => {
+    add(i.at, 'Gate Entry', i.no, i.vendor, 'Invoice ' + (i.bill_no || '') + ' · Qty ' + qtyFmt(i.qty), i.by);
+    if (i.inv_hold_at) add(i.inv_hold_at, 'Invoice Approval', i.no, i.vendor, i.inv_hold_reason, i.inv_hold_by, 'Hold');
+    if (i.inv_status === 'Approved' || i.inv_status === 'Rejected') add(i.inv_at, 'Invoice Approval', i.no, i.vendor, i.inv_status === 'Rejected' ? i.inv_reject_reason : (i.grn_notes || []).length + ' note(s)', i.inv_by, i.inv_status);
+    (i.qc || []).forEach(q => {
+      if (q.result) add(q.at, 'QC Check', i.no, i.vendor, q.material, q.by, q.result);
+      if (q.m_status) add(q.m_at, 'Swatch Approval', i.no, i.vendor, q.material + (q.m_note ? ' · ' + q.m_note : ''), q.m_by, q.m_status);
+    });
+  });
+  Store.all('grns').forEach(g => {
+    add(g.at || g.date, 'GRN', g.no, g.vendor, 'PO ' + g.po_no + ' · Invoice ' + (g.invoice || '') + ' · ' + g.lines.length + ' item(s)', g.by);
+    g.lines.forEach(l => { if (l.excess_status && l.excess_status !== 'Pending') add(l.excess_at, 'Excess Approval', g.no, g.vendor, l.material + ' × ' + qtyFmt(l.excess), l.excess_by, l.excess_status === 'Approved' ? 'Accepted' : 'Rejected'); });
+  });
+  return A.sort((a, b) => (b.at || '') < (a.at || '') ? -1 : 1);
+}
+const ACT_UI = { act: '', by: '', from: '', to: '' };
+VIEWS.activity = {
+  mod: 'audit', render() {
+    const all = activityRows(); const U = ACT_UI;
+    const acts = ['PO Raised', 'PO Approval', 'Gate Entry', 'Invoice Approval', 'QC Check', 'Swatch Approval', 'GRN', 'Excess Approval'];
+    const people = Array.from(new Set(all.map(r => r.by).filter(Boolean))).sort();
+    const rows = all.filter(r => (!U.act || r.act === U.act) && (!U.by || r.by === U.by) && (!U.from || String(r.at).slice(0, 10) >= U.from) && (!U.to || String(r.at).slice(0, 10) <= U.to));
+    const sel = (id, list, val, ph) => '<select id="' + id + '"><option value="">' + ph + '</option>' + list.map(x => '<option' + (x === val ? ' selected' : '') + '>' + esc(x) + '</option>').join('') + '</select>';
+    setMain('<div class="toolbar">' + sel('acAct', acts, U.act, 'All activities') + sel('acBy', people, U.by, 'Everyone') + '<input id="acFrom" type="date" value="' + esc(U.from) + '"><input id="acTo" type="date" value="' + esc(U.to) + '"><span class="muted small">' + rows.length + ' record(s)</span><span class="grow"></span><button class="btn" data-act="act-csv">Export CSV</button></div>' +
+      '<div class="tbl-wrap"><table><tr><th>Date &amp; Time</th><th>Activity</th><th>Reference</th><th>Vendor</th><th>Detail</th><th>Result</th><th>Done By</th></tr>' +
+      (rows.length ? rows.map(r => '<tr><td>' + fmtDT(r.at) + '</td><td>' + esc(r.act) + '</td><td><b>' + esc(r.ref) + '</b></td><td>' + esc(r.party) + '</td><td>' + esc(r.detail) + '</td><td>' + esc(r.result) + '</td><td>' + esc(r.by) + '</td></tr>').join('') : '<tr><td colspan="7" class="empty">No activity</td></tr>') + '</table></div>');
+    VIEWS.activity.rows = rows;
+    const m = $('#main');
+    m.addEventListener('change', e => { const k = { acAct: 'act', acBy: 'by', acFrom: 'from', acTo: 'to' }[e.target.id]; if (k) { U[k] = e.target.value; VIEWS.activity.render(); } });
+  }
+};
+ACTIONS['act-csv'] = () => downloadCsv('activity-' + todayYmd() + '.csv', [['Date & Time', 'Activity', 'Reference', 'Vendor', 'Detail', 'Result', 'Done By']].concat((VIEWS.activity.rows || []).map(r => [fmtDT(r.at), r.act, r.ref, r.party, r.detail, r.result, r.by])));

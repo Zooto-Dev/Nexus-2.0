@@ -361,6 +361,7 @@ const NAV = [
     { v: 'inward', l: 'Inwarding', mod: 'store' },
     { v: 'swatchmatch', l: 'QC Check', mod: 'store' },
     { v: 'grn', l: 'GRN', mod: 'store' },
+    { v: 'grnlist', l: 'GRN Register', mod: 'store' },
     { v: 'issuance', l: 'Issuance', mod: 'store' },
     { v: 'stock', l: 'Stock View', mod: 'store' },
     { v: 'rejstock', l: 'Rejection Stock', mod: 'store' },
@@ -377,6 +378,7 @@ const NAV = [
   { menu: 'Accounts', items: [
     { v: 'invoices', l: 'Invoices', mod: 'accounts' }] },
   { menu: 'Operations', items: [
+    { v: 'activity', l: 'Activity List', mod: 'audit' },
     { v: 'tickets', l: 'Raise Ticket', mod: 'tickets' },
     { v: 'users', l: 'Manage Users', mod: 'users' },
     { v: 'roles', l: 'Roles & Access', mod: 'roles' },
