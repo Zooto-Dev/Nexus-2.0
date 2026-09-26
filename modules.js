@@ -457,24 +457,43 @@ function jcForm() {
     '<div class="row"><label>Order *<input id="jfOrd" list="dlOrdJc" placeholder="Select order..."></label><label>Article line *<select id="jfLine" disabled><option value="">—</option></select></label><label>JC No <span class="muted small">(auto from order)</span><input id="jfNo" value="" readonly style="width:100px"></label></div>' +
     '<div class="jcdoc" style="margin-top:10px"><div class="jcban">JOB CARD</div><div class="jcmid">' +
     '<div class="jcl"><table class="jckv" id="jfDetails"><tr><td class="muted" style="border:0">Select an order and article first</td></tr></table></div>' +
-    '<div class="jcph jcph-form"><span id="jfPhotoTag"></span>' + imgField('jfPhoto', 'Product Image') + '</div>' +
-    '<div class="jcr"><div><table id="jfSizes" class="jcszt"><tr class="hd"><th>SIZE</th><th>Act.Ord</th><th>Extra(2%)</th><th></th></tr><tr id="jfSzTotal" class="tt"><td><b>Total</b></td><td class="num"><b id="jfActT">0</b></td><td class="num"><b id="jfExtT">0</b></td><td></td></tr></table>' +
-    '<a class="small" data-act="jcf-size">+ size row</a> <span id="jfSzMsg" class="small"></span>' +
-    '<div class="row" style="margin-top:8px"><label>Status' + seg('jfStatus', ['NA', 'ONLINE', 'OFFLINE'], 'NA') + '</label><label>Remarks<input id="jfRem" placeholder="Remarks..."></label></div></div></div></div></div>' +
+    '<label class="jcph jcph-form" title="Click to add the product photo"><span id="jfPhotoTag">PRODUCT PHOTO</span><input type="file" id="jfPhoto" accept="image/*" style="display:none"></label>' +
+    '<div class="jcr"><table id="jfSizes" class="jcszt"><tr class="hd"><th>Order No</th><th>Order Date</th><th>SIZE</th><th>Act.Ord</th><th>With 2% Extra</th></tr>' +
+    '<tr id="jfSzTotal" class="tt"><td></td><td>Total</td><td></td><td id="jfActT">0</td><td id="jfExtT">0</td></tr></table>' +
+    '<div class="noprint" style="margin-top:4px"><a class="small" data-act="jcf-size">+ size row</a> <span id="jfSzMsg" class="small"></span></div></div></div></div>' +
+    '<div class="row" style="margin:10px 0"><label>Status' + seg('jfStatus', ['NA', 'ONLINE', 'OFFLINE'], 'NA') + '</label><label>Remarks<input id="jfRem" placeholder="Remarks..."></label></div>' +
     '<h2>Material Requirements BOM</h2><div class="toolbar"><a class="small" data-act="jcf-bomrow">+ Add</a><a class="small" data-act="jcf-paste">Bulk Paste</a><span id="jfBomTag" class="muted small"></span></div>' +
     '<div id="jfPasteBox" class="hidden" style="margin-bottom:6px"><textarea id="jfPaste" rows="5" class="mono" placeholder="PROCESS | SECTION | ITEM NAME | NORMS | SUPPLIER  (one row per line; separate with Tab or | — Excel/Sheets paste works directly. Item name alone also works.)"></textarea> <button class="btn sm" data-act="jcf-paste-go">Import</button></div>' +
     dlMat('dlMatJc') + dlVendor() +
-    '<div class="tbl-wrap"><table id="jfBom"><tr><th>#</th><th style="width:100px">Process</th><th style="width:120px">Section</th><th style="width:130px">Category</th><th>Item Name</th><th style="width:90px">Item Code</th><th style="width:60px">Uom</th><th class="num" style="width:80px">Stock</th><th class="num" style="width:90px">Norms</th><th class="num" style="width:90px">Req.Qty</th><th style="width:150px">Supplier</th><th style="width:30px"></th></tr></table></div>' +
+    '<div class="jcdoc"><table id="jfBom" class="jcbom"><tr class="hd"><th style="width:36px">Sr No</th><th style="width:100px">Process</th><th style="width:110px">Section</th><th style="width:120px">Item Category</th><th>Item Name</th><th style="width:90px">Item Code</th><th style="width:60px">Uom</th><th style="width:85px">Norms</th><th style="width:90px">Required Qty</th><th style="width:150px">Supplier</th><th style="width:26px"></th></tr></table></div>' +
     '</div><div class="card-f"><button class="btn primary" data-save data-act="jc-save">Submit Job Card</button><button class="btn" data-act="jc-new">Close</button><span id="njMsg" class="small"></span></div></div>';
 }
 function jcfSizeRow(size, act) {
-  return '<tr data-szrow><td><input data-sz="size" placeholder="Size" value="' + esc(size || '') + '" style="width:90px"></td><td><input data-sz="act" type="number" min="0" class="right" value="' + esc(act || '') + '" style="width:90px"></td><td class="num" data-sz-ext>0</td><td><button class="btn ghost sm" data-act="jcf-size-del">×</button></td></tr>';
+  return '<tr data-szrow><td data-c0></td><td data-c1></td><td><input data-sz="size" placeholder="Size" value="' + esc(size || '') + '"></td><td><input data-sz="act" type="number" min="0" value="' + esc(act || '') + '"></td><td data-sz-ext>0</td></tr>';
 }
+// Mirror the printed size panel: Order No/Date on row 1, channel on row 4, packing (highlighted)
+// on row 6, and filler rows so the box always holds at least 10 lines.
+function jcfDecorate() {
+  if (!$('#jfSizes')) return;
+  const o = Store.all('orders').find(x => norm(x.no) === norm(($('#jfOrd') || {}).value || '')) || {};
+  const li = num(($('#jfLine') || {}).value); const l = o.lines ? jcOrderLine(o, li) : {};
+  $$('#jfSizes tr.fill').forEach(t => t.remove());
+  for (let k = $$('#jfSizes tr[data-szrow]').length; k < 10; k++) $('#jfSzTotal').insertAdjacentHTML('beforebegin', '<tr class="fill"><td data-c0></td><td data-c1></td><td></td><td></td><td></td></tr>');
+  $$('#jfSizes tr[data-szrow], #jfSizes tr.fill').forEach((tr, i) => {
+    const c0 = $('[data-c0]', tr), c1 = $('[data-c1]', tr);
+    c0.textContent = ''; c1.textContent = ''; c0.classList.remove('hl'); c1.classList.remove('hl');
+    if (i === 0) { c0.textContent = ($('#jfNo') || {}).value || ''; c1.textContent = o.order_date ? fmtD(o.order_date) : ''; }
+    else if (i === 3) c0.textContent = (segVal($('[data-seg="jfStatus"]')) || 'NA') !== 'NA' ? segVal($('[data-seg="jfStatus"]')) : (o.channel || '').toUpperCase();
+    else if (i === 5) { c0.textContent = ($('#jfRem') || {}).value || (l.pack ? l.pack.toUpperCase() + ' PACKING' : ''); c0.classList.add('hl'); c1.classList.add('hl'); }
+  });
+}
+document.addEventListener('input', e => { if (e.target.id === 'jfRem') jcfDecorate(); });
+document.addEventListener('segchange', e => { if (e.target.dataset && e.target.dataset.seg === 'jfStatus') jcfDecorate(); });
 function jcfBomRow(l) {
   l = l || {}; const m = matBy(l.material) || {};
-  return '<tr data-bomrow><td class="muted" data-idx></td><td><input data-b="process" value="' + esc(l.process || '') + '"></td><td><input data-b="section" value="' + esc(l.section || '') + '"></td><td><input data-b="category" list="dlCatJc" value="' + esc(l.category || m.group || '') + '"></td>' +
-    '<td><input data-b="mat" list="dlMatJc" value="' + esc(m.name || l.material || '') + '"></td><td class="muted" data-b-code>' + esc(l.material || '') + '</td><td class="muted" data-b-uom>' + esc(l.uom || m.uom || '') + '</td><td class="num muted" data-b-stock>' + (l.material ? qtyFmt(stockOf(l.material)) : '') + '</td>' +
-    '<td><input data-b="norms" type="number" min="0" step="any" class="right" value="' + esc(l.norms || l.qty || '') + '"></td><td class="num" data-b-req>0</td><td><input data-b="supplier" list="dlVen" value="' + esc(l.supplier || '') + '"></td><td><button class="btn ghost sm" data-act="jcf-bom-del">×</button></td></tr>';
+  return '<tr data-bomrow><td class="c" data-idx></td><td><input data-b="process" value="' + esc(l.process || '') + '"></td><td><input data-b="section" value="' + esc(l.section || '') + '"></td><td><input data-b="category" list="dlCatJc" value="' + esc(l.category || m.group || '') + '"></td>' +
+    '<td><input data-b="mat" list="dlMatJc" value="' + esc(m.name || l.material || '') + '"></td><td class="c muted" data-b-code>' + esc(l.material || '') + '</td><td class="c muted" data-b-uom>' + esc(l.uom || m.uom || '') + '</td>' +
+    '<td><input data-b="norms" type="number" min="0" step="any" class="right" value="' + esc(l.norms || l.qty || '') + '"></td><td class="c" data-b-req>0</td><td><input data-b="supplier" list="dlVen" value="' + esc(l.supplier || '') + '"></td><td class="c"><a data-act="jcf-bom-del" title="Remove">×</a></td></tr>';
 }
 function jcfRecalc() {
   let act = 0, ext = 0;
@@ -488,6 +507,7 @@ function jcfRecalc() {
     const n = num($('[data-b="norms"]', tr).value);
     $('[data-b-req]', tr).textContent = n && ext ? qtyFmt(Math.ceil(n * ext * 1000) / 1000) : '0';
   });
+  jcfDecorate();
   return { act, ext };
 }
 function jcFormWire() {
@@ -503,10 +523,10 @@ function jcFormWire() {
       if (o && o.lines.length === 1) { sel.value = '0'; sel.dispatchEvent(new Event('change', { bubbles: true })); }
     }
     if (e.target.id === 'jfLine') jcfFillFromOrder();
-    if (e.target.id === 'jfPhoto') readImg(e.target.files[0], src => { JCF.photo = src; $('#jfPhotoTag').innerHTML = photoThumb(src); });
+    if (e.target.id === 'jfPhoto') readImg(e.target.files[0], src => { JCF.photo = src; $('#jfPhotoTag').innerHTML = '<img src="' + src + '">'; });
     if (e.target.dataset.b === 'mat') {
       const mt = matBy(e.target.value); const tr = e.target.closest('tr');
-      if (mt) { e.target.value = mt.name; $('[data-b-code]', tr).textContent = mt.code; $('[data-b-uom]', tr).textContent = mt.uom; $('[data-b-stock]', tr).textContent = qtyFmt(stockOf(mt.code)); const c = $('[data-b="category"]', tr); if (!c.value) c.value = mt.group || ''; }
+      if (mt) { e.target.value = mt.name; $('[data-b-code]', tr).textContent = mt.code; $('[data-b-uom]', tr).textContent = mt.uom; const c = $('[data-b="category"]', tr); if (!c.value) c.value = mt.group || ''; }
       else { $('[data-b-code]', tr).textContent = ''; $('[data-b-uom]', tr).textContent = ''; }
       jcfRecalc();
     }
@@ -517,7 +537,8 @@ function jcfFillFromOrder() {
   const o = Store.all('orders').find(x => norm(x.no) === norm($('#jfOrd').value)); if (!o) return;
   const li = num($('#jfLine').value); const l = jcOrderLine(o, li);
   if ($('#jfNo')) $('#jfNo').value = l.jc_no || jcNo();
-  $('#jfDetails').innerHTML = [['JOB CARD', l.jc_no || jcNo()], ['Date', fmtD(o.order_date)], ['Brand', o.customer_name], ['Style Name', l.style], ['Colour', l.colour], ['Gender', l.gender], ['Category', o.category], ['Last/Tooling', o.tooling_no], ['Article', l.article], ['Size Run', l.size_run || l.size], ['Order Qty', qtyFmt(l.qty)]]
+  const mean = (l.sizes && l.sizes.length) ? l.sizes[Math.floor((l.sizes.length - 1) / 2)].size : '';
+  $('#jfDetails').innerHTML = [['JOB CARD', l.jc_no || jcNo()], ['Date', fmtD(o.order_date)], ['Brand', o.customer_name], ['Style Name', l.style], ['Colour', l.colour], ['Gender', l.gender], ['Category', o.category], ['Last/Tooling', o.tooling_no], ['Mean Size', mean], ['Article', l.article], ['Size Run', l.size_run || l.size], ['Style Code/No.', 'NA']]
     .map(([k, v], i) => '<tr><td class="k">' + k + '</td><td class="v' + (i === 0 ? ' b' : '') + '">' + esc(v || '') + '</td></tr>').join('');
   // size rows: prefill from the order line's size-wise breakup (fallback: single row)
   $$('#jfSizes tr[data-szrow]').forEach(tr => tr.remove());
@@ -526,11 +547,11 @@ function jcfFillFromOrder() {
   // BOM auto-load
   const b = jcBomFor(l.article, l.colour);
   $$('#jfBom tr[data-bomrow]').forEach(tr => tr.remove());
-  if (b) { b.lines.forEach(x => $('#jfBom').insertAdjacentHTML('beforeend', jcfBomRow(x))); $('#jfBomTag').textContent = 'Auto-loaded from BOM (' + b.article + (b.colour ? ' ' + b.colour : '') + ' v' + b.version + ', ' + b.lines.length + ' items)'; if (b.photo && !JCF.photo) { JCF.photo = b.photo; $('#jfPhotoTag').innerHTML = photoThumb(b.photo) + ' <span class="muted small">auto from BOM</span>'; } }
+  if (b) { b.lines.forEach(x => $('#jfBom').insertAdjacentHTML('beforeend', jcfBomRow(x))); $('#jfBomTag').textContent = 'Auto-loaded from BOM (' + b.article + (b.colour ? ' ' + b.colour : '') + ' v' + b.version + ', ' + b.lines.length + ' items)'; if (b.photo && !JCF.photo) { JCF.photo = b.photo; $('#jfPhotoTag').innerHTML = '<img src="' + b.photo + '">'; } }
   else { $('#jfBom').insertAdjacentHTML('beforeend', jcfBomRow()); $('#jfBomTag').innerHTML = '<span class="late-txt">No Development BOM for this article — fill the rows manually or create one in Development.</span>'; }
   jcfRecalc();
 }
-ACTIONS['jcf-size'] = () => { $('#jfSzTotal').insertAdjacentHTML('beforebegin', jcfSizeRow()); };
+ACTIONS['jcf-size'] = () => { $('#jfSzTotal').insertAdjacentHTML('beforebegin', jcfSizeRow()); jcfRecalc(); };
 ACTIONS['jcf-size-del'] = el => { el.closest('tr').remove(); jcfRecalc(); };
 ACTIONS['jcf-bomrow'] = () => { $('#jfBom').insertAdjacentHTML('beforeend', jcfBomRow()); jcfRecalc(); };
 ACTIONS['jcf-bom-del'] = el => { el.closest('tr').remove(); jcfRecalc(); };

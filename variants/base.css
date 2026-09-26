@@ -230,3 +230,16 @@ td input.right, input.right { text-align: right; }
 .jcbom .c { text-align: center; }
 .jcbom tr:last-child td, .jckv tr:last-child td, .jcszt tr:last-child td { border-bottom: 1px solid #b9d4d4; }
 @media (max-width: 900px) { .jcmid { flex-direction: column; } .jcl, .jcr { width: auto; } }
+
+/* Job Card form inputs blend into the document tables */
+.jcszt input { border: 0; background: transparent; height: 22px; width: 74px; padding: 0 4px; text-align: center; font-size: 12px; border-radius: 0; }
+.jcszt input:focus { background: #eef7f7; box-shadow: none; }
+.jcszt tr.fill td { height: 24px; }
+.jcbom input { border: 0; background: transparent; height: 24px; width: 100%; min-width: 60px; padding: 0 5px; font-size: 12px; border-radius: 0; }
+.jcbom input:focus { background: #eef7f7; box-shadow: none; }
+.jcbom a[data-act="jcf-bom-del"] { color: #c62828; font-weight: bold; text-decoration: none; }
+.jcph-form { cursor: pointer; }
+.jcph-form:hover { border-color: #0d7377; }
+.jcl, .jcr { display: flex; flex-direction: column; }
+.jcr > table { flex: 1; }
+.jckv { flex: 1; }
