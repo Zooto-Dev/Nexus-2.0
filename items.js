@@ -50,6 +50,7 @@ VIEWS.itemcreate = {
       if (t.id === 'icCat') { IC_UI.cat = t.value; IC_UI.type = ''; IC_UI.vals = {}; IC_UI.extra = {}; IC_UI.photo = ''; VIEWS.itemcreate.render(); }
       if (t.id === 'icType') { IC_UI.type = t.value; IC_UI.vals = {}; IC_UI.extra = {}; VIEWS.itemcreate.render(); }
       if (t.id === 'icPhoto') readImg(t.files[0], src => { IC_UI.photo = src; VIEWS.itemcreate.render(); });
+      if (t.dataset.icmp) { const mt = Store.get('materials', t.dataset.icmp); if (mt) readImg(t.files[0], src => { mt.photo = src; Store.put('materials', mt); audit('item.photo', '', mt.code); flash('Photo saved.'); VIEWS.itemcreate.render(); }); }
       if (t.dataset.icAttr) { IC_UI.vals[t.dataset.icAttr] = t.value; VIEWS.itemcreate.render(); const nx = $$('select[data-ic-attr]').find(s => !s.value && !s.disabled); if (nx) nx.focus(); }
     });
     m.addEventListener('input', e => { if (e.target.dataset.icx) IC_UI.extra[e.target.dataset.icx] = e.target.value; });
@@ -99,7 +100,7 @@ function icCreateHtml(edit) {
   if (t) {
     const list = Store.all('materials').filter(m => norm(m.group) === norm(IC_UI.cat) && norm(m.item_type || '') === norm(t.name)).sort((a, b) => a.code.localeCompare(b.code));
     h += '<h2>' + esc(t.name) + ' — existing items (' + list.length + ')</h2><div class="tbl-wrap"><table><tr><th>Photo</th><th>Item Code</th><th>Item Name</th>' + attrs.map((a, i) => '<th>' + (i + 1) + '. ' + esc(a.name) + '</th>').join('') + '<th>UOM</th><th class="num">Price</th></tr>' +
-      (list.length ? list.map(m => '<tr><td>' + photoThumb(m.photo) + '</td><td><b>' + esc(m.code) + '</b></td><td>' + esc(m.name) + '</td>' + attrs.map(a => '<td>' + esc((m.attrs || {})[a.name] || '') + '</td>').join('') + '<td>' + esc(m.uom || '') + '</td><td class="num">' + (m.price ? money(m.price) : '') + '</td></tr>').join('')
+      (list.length ? list.map(m => '<tr><td>' + (can('development', 'edit') ? '<label class="icphoto sm" title="Add / change photo">' + (m.photo ? '<img src="' + m.photo + '">' : '<span class="muted small">+ Photo</span>') + '<input type="file" accept="image/*" data-icmp="' + esc(m.id) + '" style="display:none"></label>' : photoThumb(m.photo)) + '</td><td><b>' + esc(m.code) + '</b></td><td>' + esc(m.name) + '</td>' + attrs.map(a => '<td>' + esc((m.attrs || {})[a.name] || '') + '</td>').join('') + '<td>' + esc(m.uom || '') + '</td><td class="num">' + (m.price ? money(m.price) : '') + '</td></tr>').join('')
         : '<tr><td colspan="' + (attrs.length + 5) + '" class="empty">No items of this type yet</td></tr>') + '</table></div>';
   } else if (IC_UI.cat) {
     h += '<h2>' + esc(IC_UI.cat) + ' — item types</h2>' + icTypeMatrix(IC_UI.cat, false);

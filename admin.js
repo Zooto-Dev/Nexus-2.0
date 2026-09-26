@@ -14,7 +14,7 @@ function masterView(cfg) {
     if (c.type === 'check') return '<td><input type="checkbox" data-c="' + c.k + '"' + (v !== false ? ' checked' : '') + '></td>';
     return '<td><input data-c="' + c.k + '" value="' + esc(v) + '"' + (c.type === 'number' ? ' type="number" step="any" class="right"' : '') + (c.w ? ' style="width:' + c.w + 'px"' : '') + (!d && c.ph ? ' placeholder="' + esc(c.ph) + '"' : '') + '></td>';
   };
-  let h = '<h1>' + esc(cfg.title) + '</h1><div class="toolbar"><input id="mtQ" placeholder="Search…" value="' + esc(ui.q) + '"><span class="muted small">' + rows.length + ' record(s)' + (edit ? ' · edits save automatically' : '') + '</span><span class="grow"></span>' +
+  let h = '<div class="toolbar"><input id="mtQ" placeholder="Search…" value="' + esc(ui.q) + '"><span class="muted small">' + rows.length + ' record(s)' + (edit ? ' · edits save automatically' : '') + '</span><span class="grow"></span>' +
     (edit && cfg.paste ? '<button class="btn" data-act="mt-paste-toggle" data-col="' + cfg.col + '">Paste from Excel</button>' : '') + '<button class="btn" data-act="mt-csv" data-col="' + cfg.col + '">Export CSV</button></div>';
   if (edit && cfg.paste && ui.paste) h += '<div class="panel" style="margin-bottom:10px"><div class="small muted">Copy rows from Excel with columns: <b>' + cfg.cols.filter(c => !c.noPaste).map(c => c.l).join(' · ') + '</b>. Existing ' + esc(cfg.cols[0].l) + ' = update, new = add.</div><textarea id="mtPaste" rows="6" class="mono"></textarea><div class="toolbar" style="margin-top:6px"><button class="btn primary" data-act="mt-paste" data-col="' + cfg.col + '">Import</button></div></div>';
   h += '<div class="tbl-wrap"><table><tr>' + cfg.cols.map(c => '<th' + (c.type === 'number' ? ' class="num"' : '') + '>' + esc(c.l) + '</th>').join('') + '<th></th></tr>';
@@ -121,7 +121,7 @@ VIEWS.items = {
       col: 'items', mod: 'masters', title: 'Articles', view: VIEWS.items, sort: 'code', paste: true,
       cols: [{ k: 'code', l: 'Article', w: 110, upper: true, ph: 'ZT-601' }, { k: 'name', l: 'Style name', ph: 'Style name' },
         { k: 'group', l: 'Category', opts: () => (fieldOptions('category').length ? fieldOptions('category') : ['Shoes', 'Slider', 'Clogs', 'V Shape', 'Eva Slider']).map(v => ({ v, l: v })) },
-        { k: 'gender', l: 'Gender', opts: () => [''].concat(GENDERS).map(v => ({ v, l: v || '—' })) }],
+        { k: 'gender', l: 'Gender', opts: () => [''].concat(GENDERS_()).map(v => ({ v, l: v || '—' })) }],
       validate: (d, old) => uniq('items', 'code', 'Article')(d),
       inUse: d => Store.all('orders').some(o => (o.lines || []).some(l => norm(l.article) === norm(d.code))) ? 'Article is used in orders — cannot delete.' : ''
     });
@@ -157,7 +157,7 @@ VIEWS.users = {
 VIEWS.roles = {
   mod: 'roles', render() {
     const edit = can('roles', 'edit'); const roles = Store.all('roles');
-    let h = '<h1>Roles &amp; Access</h1>';
+    let h = '';
     h += '<div class="tbl-wrap"><table><tr><th>Module</th>' + roles.map(r => '<th class="nowrap">' + esc(r.name) + '<div class="muted small" style="font-weight:400">' + Store.all('users').filter(u => u.role_id === r.id).length + ' user(s)' + (edit && !r.system && !Store.all('users').some(u => u.role_id === r.id) ? ' · <a data-act="role-del" data-r="' + esc(r.id) + '" data-confirm="Delete?">delete</a>' : '') + '</div></th>').join('') + '</tr>' +
       MODULES.map(m => '<tr><td>' + esc(m.label) + (m.note ? '<div class="muted small">' + esc(m.note) + '</div>' : '') + '</td>' + roles.map(r => {
         const p = r.system ? 'edit' : ((r.perms || {})[m.key] || 'none');
@@ -187,10 +187,10 @@ VIEWS.settings = {
   mod: 'settings', render() {
     const s = settings(); const c = s.calendar; const edit = can('settings', 'edit'); const dis = edit ? '' : ' disabled';
     const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-    let h = '<h1>Settings</h1><div class="grid2"><div>';
+    let h = '<div class="grid2"><div>';
     h += '<div class="panel"><h2 style="margin-top:0">Company</h2><div class="row"><label style="flex:1">Company name<input data-s="company" value="' + esc(s.company) + '"' + dis + '></label><label>GSTIN<input data-s="gstin" value="' + esc(s.gstin) + '"' + dis + '></label></div><label style="margin-top:8px">Address<input data-s="address" value="' + esc(s.address) + '"' + dis + '></label></div>' +
-      '<div class="panel" style="margin-top:12px"><h2 style="margin-top:0">Alert emails</h2><label>MOQ over-order alert \u2014 concerned person email(s), comma separated<input data-s="alert_moq_email" value="' + esc(s.alert_moq_email || '') + '"' + dis + ' placeholder="purchase.head@company.com"></label>' +
-      '';
+      '<div class="panel" style="margin-top:12px"><h2 style="margin-top:0">Alert emails</h2><label>MOQ over-order alert \u2014 concerned person email(s), comma separated<input data-s="alert_moq_email" value="' + esc(s.alert_moq_email || '') + '"' + dis + ' placeholder="purchase.head@company.com"></label></div>' +
+      '<div class="panel" style="margin-top:12px"><h2 style="margin-top:0">QC categories</h2><div class="row">' + itemCats().map(c => '<label style="flex-direction:row;align-items:center;gap:4px;min-width:0"><input type="checkbox" data-qccat="' + esc(c) + '"' + (qcCats().some(x => norm(x) === norm(c)) ? ' checked' : '') + dis + '>' + esc(c) + '</label>').join('') + '</div></div>';
     h += '<div class="panel" style="margin-top:12px"><h2 style="margin-top:0">Working calendar (used for every TAT &amp; delay)</h2><div class="row">' +
       [['open', 'Office opens'], ['close', 'Office closes'], ['lunchStart', 'Lunch from'], ['lunchEnd', 'Lunch to']].map(([k, l]) => '<label>' + l + '<input type="time" data-cal="' + k + '" value="' + esc(c[k]) + '"' + dis + '></label>').join('') + '</div>' +
       '<div style="margin-top:10px"><span class="muted small">Weekly off</span><div class="row" style="margin-top:4px">' + days.map((d, i) => '<label style="flex-direction:row;align-items:center;gap:4px;min-width:0"><input type="checkbox" data-off="' + i + '"' + ((c.weeklyOff || []).includes(i) ? ' checked' : '') + dis + '>' + d + '</label>').join('') + '</div></div>' +
@@ -210,6 +210,7 @@ VIEWS.settings = {
     m.addEventListener('change', e => {
       const t = e.target; const st = settings();
       if (t.dataset.s) { st[t.dataset.s] = t.value.trim(); }
+      else if (t.dataset.qccat != null) { st.qc_categories = $$('[data-qccat]').filter(x => x.checked).map(x => x.dataset.qccat); }
       else if (t.dataset.cal) { if (!/^\d\d:\d\d$/.test(t.value)) return; st.calendar[t.dataset.cal] = t.value; }
       else if (t.dataset.off != null) { st.calendar.weeklyOff = $$('[data-off]').filter(x => x.checked).map(x => +x.dataset.off); if (st.calendar.weeklyOff.length > 5) { flash('At least 2 working days needed.', 'err'); return VIEWS.settings.render(); } }
       else if (t.dataset.opt) {
@@ -221,7 +222,7 @@ VIEWS.settings = {
       else if (t.id === 'restoreFile') return restoreBackup(t.files[0]);
       else return;
       const cc = st.calendar; if (!(cc.open < cc.lunchStart && cc.lunchStart <= cc.lunchEnd && cc.lunchEnd < cc.close)) { flash('Timings must be: open < lunch from ≤ lunch to < close.', 'err'); return; }
-      Store.setSettings(st); audit('settings.edit', '', t.dataset.s || t.dataset.cal || 'weekly off'); flash('Saved. Planned times recalculated.');
+      Store.setSettings(st); audit('settings.edit', '', t.dataset.s || t.dataset.cal || (t.dataset.qccat != null ? 'qc categories' : 'weekly off')); flash('Saved. Planned times recalculated.');
     });
     onSeg(e => { if (e.target.dataset.seg === 'halfDays') { const st = settings(); st.calendar.halfDays = e.detail; Store.setSettings(st); audit('settings.edit', '', 'halfDays → ' + e.detail); flash('Saved.'); } });
   }
@@ -252,7 +253,7 @@ VIEWS.audit = {
   mod: 'audit', render() {
     const q = norm(AUD_UI.q);
     const list = Store.all('audit').filter(a => !q || norm(a.user + ' ' + a.action + ' ' + a.ref + ' ' + a.detail).includes(q)).sort((a, b) => a.at < b.at ? 1 : -1);
-    setMain('<h1>Audit Log</h1><div class="toolbar"><input id="audQ" placeholder="Search user / action / order…" value="' + esc(AUD_UI.q) + '"><span class="muted small">' + list.length + ' event(s)' + (list.length > 500 ? ', showing latest 500' : '') + '</span></div>' +
+    setMain('<div class="toolbar"><input id="audQ" placeholder="Search user / action / order…" value="' + esc(AUD_UI.q) + '"><span class="muted small">' + list.length + ' event(s)' + (list.length > 500 ? ', showing latest 500' : '') + '</span></div>' +
       '<div class="tbl-wrap"><table><tr><th>When</th><th>User</th><th>Action</th><th>Ref</th><th>Detail</th></tr>' + list.slice(0, 500).map(a => '<tr><td class="nowrap">' + fmtDT(a.at) + '</td><td>' + esc(a.user) + '</td><td class="mono">' + esc(a.action) + '</td><td>' + esc(a.ref) + '</td><td>' + esc(a.detail) + '</td></tr>').join('') + '</table></div>');
     $('#audQ').addEventListener('input', e => { AUD_UI.q = e.target.value; clearTimeout(AUD_UI.t); AUD_UI.t = setTimeout(() => { VIEWS.audit.render(); const i = $('#audQ'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }, 250); });
   }

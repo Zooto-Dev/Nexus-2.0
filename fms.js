@@ -75,7 +75,7 @@ VIEWS.builder = {
     const edit = can('builder', 'edit'); const proc = Store.get('processes', B.pid);
     const versions = Store.all('processes').filter(p => p.code === proc.code).sort((a, b) => a.version - b.version);
     const v = validateSpec(B.draft);
-    let h = '<div class="toolbar"><h1 style="margin:0">FMS Builder</h1><span class="muted">' + esc(B.draft.process.name) + '</span><span class="grow"></span>' +
+    let h = '<div class="toolbar"><span>' + esc(B.draft.process.name) + '</span><span class="grow"></span>' +
       '<span class="muted small">Version</span>' + seg('ver', versions.map(p => ({ v: p.id, l: 'v' + p.version + (p.active ? ' ✓' : '') })), B.pid) + '</div>';
     h += '<div class="toolbar"><span class="small">' + (proc.active ? '<b>v' + proc.version + ' is live</b> — new orders use it.' : 'v' + proc.version + ' is not live.') + ' ' + (B.dirty ? '<span class="late-txt">Unsaved changes.</span>' : '') + '</span><span class="grow"></span>' +
       (edit ? (B.dirty ? '<button class="btn" data-act="bld-discard" data-confirm="Discard?">Discard</button><button class="btn primary" data-save data-act="bld-save"' + (v.errors.length ? ' disabled title="Fix errors first"' : '') + '>Save as v' + (versions[versions.length - 1].version + 1) + '</button>' : '') +

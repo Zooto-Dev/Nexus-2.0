@@ -311,3 +311,11 @@ tr.moqrow td { background: #fff8e6; }
 
 .icphoto { display: inline-flex; align-items: center; cursor: pointer; font-size: 12px; font-weight: normal; }
 .icphoto img { height: 56px; border-radius: 3px; border: 1px solid #b9d4d4; }
+/* build 41: gate entry, PO doc, item photo */
+.inwform{display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start}
+.podoc-col{flex:1}.jcbom .r{text-align:right}.jcbom tr.tt td{font-weight:bold;background:#e3f2f2}
+.po-ph{height:34px}.podoc-note{font-size:12px;margin-top:6px}
+.icphoto.sm img{height:30px}
+@media(max-width:800px){.inwform{grid-template-columns:1fr}}
+.inwform .jckv td.k{white-space:nowrap;width:130px}.inwform .icphoto{display:inline-flex;flex-direction:row;align-items:center;gap:8px}.inwform .icphoto img{height:28px}
+#grnDate{width:160px}

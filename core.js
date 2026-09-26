@@ -147,6 +147,7 @@ function fyNo(col, tag, width) {
 }
 // Approvals (PO approve/reject etc.) need Admin or Manager — plain edit access is not enough.
 function canApprove() { const r = myRole(); return !!r && (r.system || norm(r.name) === 'manager'); }
+function isSuperAdmin() { const r = myRole(); return !!(r && r.system); }
 function nextNo(col, prefix) {
   const yr = new Date().getFullYear(); const head = prefix + '-' + yr + '-';
   const max = Store.all(col).reduce((m, d) => d.no && d.no.startsWith(head) ? Math.max(m, parseInt(d.no.slice(head.length), 10) || 0) : m, 0);
@@ -342,6 +343,7 @@ const NAV = [
     { v: 'purchasedash', l: 'Purchase Dashboard', mod: 'purchase' },
     { v: 'netreq', l: 'Net Requirement', mod: 'purchase' },
     { v: 'po', l: 'Purchase Order', mod: 'purchase' },
+    { v: 'poapproval', l: 'PO Approval', mod: 'purchase' },
     { v: 'sourcing', l: 'Sourcing', mod: 'purchase' },
     { v: 'followup', l: 'Followup', mod: 'purchase' },
     { v: 'vendors', l: 'Vendors', mod: 'purchase' }] },
@@ -355,7 +357,7 @@ const NAV = [
     { v: 'items', l: 'Articles', mod: 'masters' }] },
   { menu: 'Store', items: [
     { v: 'inward', l: 'Inwarding', mod: 'store' },
-    { v: 'swatchmatch', l: 'Swatch Matching', mod: 'store' },
+    { v: 'swatchmatch', l: 'QC Check', mod: 'store' },
     { v: 'grn', l: 'GRN', mod: 'store' },
     { v: 'issuance', l: 'Issuance', mod: 'store' },
     { v: 'stock', l: 'Stock View', mod: 'store' },

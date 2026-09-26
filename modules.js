@@ -61,7 +61,7 @@ function jcBy(no) { return Store.all('job_cards').find(j => norm(j.no) === norm(
 function issuedToJc(jc, code) { return Store.all('issues').filter(i => i.status === 'Approved' && i.type !== 'scrap' && norm(i.to_jc) === norm(jc) && norm(i.material) === norm(code)).reduce((s2, i) => s2 + (i.type === 'return' || i.type === 'line_reject' ? -num(i.qty) : num(i.qty)), 0); }
 // Net requirement per item across all open JCs:
 //   JC balance (required − net issued) − good stock − open PO pending (approved + awaiting approval) + min level (if set)
-function netReqRows(vendor) {
+function netReqRows(vendor, excludePo) {
   const by = {};
   const row = code => { const k = norm(code); return by[k] || (by[k] = { material: (matBy(code) || {}).code || code, jcs: [], demand: 0, suppliers: new Set() }); };
   Store.all('job_cards').filter(j => j.status !== 'Closed').forEach(j => (j.lines || []).forEach(l => {
@@ -71,7 +71,7 @@ function netReqRows(vendor) {
   }));
   Store.all('materials').filter(m => num(m.min_level) > 0).forEach(m => row(m.code));
   const src = Store.all('sourcing');
-  const openPo = code => Store.all('purchase_orders').filter(p => !p.cancelled && p.approval !== 'Rejected')
+  const openPo = code => Store.all('purchase_orders').filter(p => !p.cancelled && p.approval !== 'Rejected' && p.id !== excludePo)
     .reduce((s2, p) => s2 + (p.lines || []).filter(l => norm(l.material) === norm(code)).reduce((a, l) => a + Math.max(0, num(l.qty) - num(l.received)), 0), 0);
   return Object.values(by).map(r => {
     const m = matBy(r.material) || {};
@@ -90,11 +90,12 @@ function poPending(po) { return (po.lines || []).reduce((s, l) => s + Math.max(0
 function poStatus(po) {
   if (po.cancelled) return 'Cancelled';
   if (po.approval === 'Rejected') return 'Rejected';
+  if (po.approval === 'Amend') return 'Amend';
   if (po.approval !== 'Approved') return 'Pending Approval';
   const p = poPending(po); const got = (po.lines || []).some(l => num(l.received) > 0);
   return p <= 0 ? 'Received' : got ? 'Partial' : 'Open';
 }
-function poStCls(st) { return st === 'Received' ? 'Done' : st === 'Partial' ? 'Pending' : st === 'Cancelled' || st === 'Rejected' ? 'Cancelled' : st === 'Pending Approval' ? 'Late' : 'Waiting'; }
+function poStCls(st) { return st === 'Received' ? 'Done' : st === 'Partial' ? 'Pending' : st === 'Cancelled' || st === 'Rejected' ? 'Cancelled' : st === 'Pending Approval' || st === 'Amend' ? 'Late' : 'Waiting'; }
 // GRN, followup and inwarding run only against APPROVED POs.
 function openPOs() { return Store.all('purchase_orders').filter(p => !p.cancelled && p.approval === 'Approved' && poPending(p) > 0); }
 function autoTask(title, doer, dueDays) {
@@ -277,7 +278,7 @@ ACTIONS['print-iss'] = el => {
 };
 
 function newBtn(label, act) { return '<button class="btn primary" data-act="' + act + '">+ ' + label + '</button>'; }
-function subTitle(t) { return '<h1>' + t + '</h1>'; }
+function subTitle() { return ''; }
 
 /* ================= PURCHASE ================= */
 VIEWS.purchasedash = {
@@ -329,8 +330,8 @@ VIEWS.po = {
       (rows.length ? rows.map(p => {
         const oq = p.lines.reduce((s, l) => s + num(l.qty), 0), rq = p.lines.reduce((s, l) => s + num(l.received), 0); const st = poStatus(p);
         let row = '<tr class="click" data-act="po-toggle" data-id="' + esc(p.id) + '"><td><b>' + esc(p.no) + '</b><div class="muted small">' + esc(p.created_by || '') + '</div></td><td class="nowrap">' + fmtD(p.date) + '</td><td>' + esc(p.vendor) + '</td><td class="small">' + p.lines.map(l => esc(l.material) + ' × ' + qtyFmt(l.qty)).join('<br>') + '</td><td class="num">' + qtyFmt(oq) + '</td><td class="num">' + qtyFmt(rq) + '</td><td class="nowrap">' + fmtD(p.expected) + '</td><td><span class="st ' + poStCls(st) + '">' + st + '</span>' + ((p.moq_log || []).length ? ' <span class="st Pending" title="Ordered above net requirement because of MOQ">MOQ +' + qtyFmt(p.moq_log.reduce((a, x) => a + num(x.extra), 0)) + '</span>' : '') + (p.approved_by ? '<div class="muted small">' + esc(p.approved_by) + '</div>' : '') + '</td>' +
-          '<td class="right nowrap">' + (st === 'Pending Approval' && canApprovePo(p) ? '<button class="btn sm primary" data-act="po-approve" data-id="' + esc(p.id) + '">Approve</button> <button class="btn sm danger" data-act="po-reject" data-id="' + esc(p.id) + '" data-confirm="Reject PO?">Reject</button>' : '') +
-          (edit && (st === 'Open' || st === 'Pending Approval') ? ' <button class="btn ghost sm danger" data-act="po-cancel" data-id="' + esc(p.id) + '" data-confirm="Cancel PO?">Cancel</button>' : '') + '</td></tr>';
+          '<td class="right nowrap">' + (st === 'Amend' && edit && (poOwn(p) || isSuperAdmin()) ? '<button class="btn sm primary" data-act="po-edit" data-id="' + esc(p.id) + '">Edit</button>' : '') +
+          (edit && (st === 'Open' || st === 'Pending Approval' || st === 'Amend') ? ' <button class="btn ghost sm danger" data-act="po-cancel" data-id="' + esc(p.id) + '" data-confirm="Cancel PO?">Cancel</button>' : '') + '</td></tr>';
         if (PO_UI.open === p.id) row += '<tr class="inline-form"><td colspan="9">' + poDetail(p) + '</td></tr>';
         return row;
       }).join('') : '<tr><td colspan="9" class="empty">No purchase orders</td></tr>') + '</table></div>';
@@ -342,50 +343,31 @@ VIEWS.po = {
 };
 // the person who raised a PO never approves it; only the Super Admin (system role) is exempt
 function poOwn(p) { return !!ME && ((p.created_by_id && p.created_by_id === ME.id) || (!p.created_by_id && p.created_by === ME.name)); }
-function canApprovePo(p) { const r = myRole(); return canApprove() && (!poOwn(p) || !!(r && r.system)); }
+function canApprovePo(p) { return canApprove() && (!poOwn(p) || isSuperAdmin()); }
 function poDetail(p) {
-  const v = vendorBy(p.vendor) || {}; const total = p.lines.reduce((s, l) => s + num(l.qty) * num(l.rate), 0);
-  return '<div class="po-doc" style="padding:8px 4px"><div class="row" style="justify-content:space-between"><div><b>' + esc(settings().company || '') + '</b><div class="muted small">' + esc(settings().address || '') + (settings().gstin ? ' · GSTIN ' + esc(settings().gstin) : '') + '</div></div>' +
-    '<div class="right"><b>' + esc(p.no) + '</b><div class="muted small">' + fmtD(p.date) + ' · Expected ' + fmtD(p.expected) + '</div></div></div>' +
-    '<div class="small" style="margin:6px 0"><b>Vendor:</b> ' + esc(p.vendor) + (v.address ? ' · ' + esc(v.address) : '') + (v.gstin ? ' · GSTIN ' + esc(v.gstin) : '') + (v.mobile ? ' · ' + esc(v.mobile) : '') + '</div>' +
-    '<table style="max-width:640px"><tr><th>Material</th><th>UOM</th><th class="num">Qty</th><th class="num">Rate ₹</th><th class="num">Amount ₹</th></tr>' +
-    p.lines.map(l => '<tr><td>' + esc(l.material) + (l.jc_no ? ' <span class="muted small">' + esc(l.jc_no) + '</span>' : '') + (l.remark ? '<div class="muted small">' + esc(l.remark) + '</div>' : '') + '</td><td>' + esc(l.uom) + '</td><td class="num">' + qtyFmt(l.qty) + '</td><td class="num">' + money(l.rate) + (l.gst ? '<div class="muted small">+' + l.gst + '% GST</div>' : '') + '</td><td class="num">' + money(num(l.qty) * num(l.rate) * (1 + num(l.gst || 0) / 100)) + '</td></tr>').join('') +
-    '<tr><td colspan="4" class="right"><b>Total</b></td><td class="num"><b>' + money(total) + '</b></td></tr></table>' +
-    (p.remarks ? '<div class="small" style="margin-top:4px"><b>Remarks:</b> ' + esc(p.remarks) + '</div>' : '') +
-    ((p.moq_log || []).length ? '<div class="small" style="margin-top:6px"><b>MOQ log:</b> ' + p.moq_log.map(x => esc(x.material) + ' net ' + qtyFmt(x.net) + ' → ' + qtyFmt(x.moq) + ' (+' + qtyFmt(x.extra) + ') · ' + esc(x.reason) + ' · ' + esc(x.by) + ' ' + fmtDT(x.at)).join('<br>') + '</div>' : '') +
-    '<div class="toolbar noprint" style="margin-top:8px"><button class="btn sm" data-act="po-print">Print</button></div></div>';
+  return poDocHtml(p) + '<div class="toolbar noprint" style="margin-top:8px"><button class="btn sm" data-act="po-print" data-id="' + p.id + '">Print</button></div>';
 }
 ACTIONS['po-toggle'] = (el, ev) => { if (ev.target.closest('button')) return; PO_UI.open = PO_UI.open === el.dataset.id ? null : el.dataset.id; VIEWS.po.render(); };
-ACTIONS['po-print'] = el => { document.body.classList.add('print-po'); window.print(); setTimeout(() => document.body.classList.remove('print-po'), 500); };
-ACTIONS['po-approve'] = el => {
-  const p = Store.get('purchase_orders', el.dataset.id);
-  if (!canApprovePo(p)) { flash(poOwn(p) ? 'You raised this PO — someone else must approve it.' : 'Only Admin/Manager can approve POs.', 'err'); return; }
-  if (p.approval === 'Approved') { flash('This PO is already approved.', 'err'); return; }
-  p.approval = 'Approved'; p.approved_by = ME.name; p.approved_at = nowIso(); Store.put('purchase_orders', p);
-  // update "PO Raised" on the linked JC lines
-  p.lines.forEach(l => { if (!l.jc_no) return; const j = jcBy(l.jc_no); if (!j) return; const jl = (j.lines || []).find(x => norm(x.material) === norm(l.material)); if (jl) { jl.po_raised = num(jl.po_raised) + num(l.qty); Store.put('job_cards', j); } });
-  audit('po.approve', p.no, p.vendor); flash(esc(p.no) + ' approved — now available for GRN/followup.'); VIEWS.po.render();
-};
-ACTIONS['po-reject'] = el => {
-  const p = Store.get('purchase_orders', el.dataset.id);
-  if (!canApprovePo(p)) { flash(poOwn(p) ? 'You raised this PO — someone else must approve or reject it.' : 'Only Admin/Manager can reject POs.', 'err'); return; } p.approval = 'Rejected'; p.approved_by = ME.name; Store.put('purchase_orders', p);
-  audit('po.reject', p.no, p.vendor); flash(esc(p.no) + ' rejected.'); VIEWS.po.render();
-};
 function poForm() {
-  return '<div class="card"><div class="card-h"><b>New Purchase Order</b><span class="muted small">' + fyNo('purchase_orders', 'PO', 3) + '</span></div><div class="card-b">' + dlVendor() + dlMat('dlMatPo') +
-    '<div class="row"><label>Mode' + seg('poMode', [{ v: 'jc', l: 'From JC requirement' }, { v: 'manual', l: 'Manual' }], PO_UI.mode || 'jc') + '</label>' +
-    '<label>Vendor *<input id="npVen" list="dlVen"></label><label>PO date<input id="npDate" type="date" value="' + todayYmd() + '"></label><label>Expected delivery *<input id="npExp" type="date"></label><label style="flex:1">Remarks<input id="npRem"></label></div>' +
+  const ed = PO_UI.editId ? Store.get('purchase_orders', PO_UI.editId) : null;
+  const lastAmend = ed && (ed.amend_log || []).length ? ed.amend_log[ed.amend_log.length - 1] : null;
+  return '<div class="card"><div class="card-b">' + dlVendor() + dlMat('dlMatPo') + '<datalist id="dlBrandPo">' + Store.all('customers').map(c => '<option value="' + esc(c.name) + '">').join('') + '</datalist>' +
+    (lastAmend ? '<div class="panel" style="border-left:3px solid var(--late);margin-bottom:10px"><b>' + esc(ed.no) + '</b> \u2014 ' + esc(lastAmend.remark) + ' <span class="muted small">(' + esc(lastAmend.by) + ', ' + fmtDT(lastAmend.at) + ')</span></div>' : '') +
+    '<div class="row">' + (ed ? '' : '<label>Mode' + seg('poMode', [{ v: 'jc', l: 'From JC requirement' }, { v: 'manual', l: 'Manual' }], PO_UI.mode || 'jc') + '</label>') +
+    '<label>Vendor *<input id="npVen" list="dlVen" value="' + esc(ed ? ed.vendor : '') + '"' + (ed ? ' readonly' : '') + '></label><label>PO date<input id="npDate" type="date" value="' + esc(ed ? ed.date : todayYmd()) + '"></label><label>Expected delivery *<input id="npExp" type="date" value="' + esc(ed ? ed.expected : '') + '"></label><label style="flex:1">Remarks<input id="npRem" value="' + esc(ed ? ed.remarks || '' : '') + '"></label></div>' +
     '<div id="npHint" class="muted small" style="margin:6px 0"></div>' +
     '<table style="margin-top:4px"><tr id="npHead"></tr><tbody id="npLines"></tbody></table><a class="small" data-act="po-line" id="npAdd">+ material</a>' +
-    '</div><div class="card-f"><button class="btn primary" data-act="po-save">Save PO</button><button class="btn" data-act="po-new">Close</button><span id="npMsg" class="small"></span></div></div>';
+    '</div><div class="card-f"><button class="btn primary" data-act="po-save">' + (ed ? 'Save & send for approval' : 'Save PO') + '</button><button class="btn" data-act="po-new">Close</button><span id="npMsg" class="small"></span></div></div>';
 }
 function poFormSetup() {
+  if (PO_UI.editId) PO_UI.mode = 'manual';
   const mode = PO_UI.mode || 'jc';
   $('#npHead').innerHTML = mode === 'manual'
-    ? '<th>Item Name</th><th>Category</th><th>Code</th><th>HSN</th><th>UOM</th><th class="num">Rate</th><th class="num">GST %</th><th>Remark</th><th>Job Card</th><th class="num">Qty</th><th class="num">Amount</th><th class="num">Total</th><th></th>'
+    ? '<th>Item Name</th><th>Category</th><th>Code</th><th>HSN</th><th>UOM</th><th>Brand *</th><th class="num">Rate</th><th class="num">GST %</th><th>Remark</th><th class="num">Qty</th><th class="num">Amount</th><th class="num">Total</th><th></th>'
     : '<th>Photo</th><th>Item Name</th><th>Category</th><th>Code</th><th>HSN</th><th>UOM</th><th>Brand</th><th class="num" style="width:90px">Rate</th><th class="num" style="width:70px">GST %</th><th style="width:160px">Remark</th><th class="num">Qty</th><th class="num">Amount</th><th class="num">Total</th>';
   $('#npAdd').classList.toggle('hidden', mode !== 'manual');
-  $('#npLines').innerHTML = mode === 'manual' ? poLineRow() : '';
+  const ed = PO_UI.editId ? Store.get('purchase_orders', PO_UI.editId) : null;
+  $('#npLines').innerHTML = ed ? ed.lines.map(l => poLineRow(l)).join('') : mode === 'manual' ? poLineRow() : '';
   const tb = $('#npLines').closest('table');
   if (!$('#npFoot', tb)) tb.insertAdjacentHTML('beforeend', '<tr id="npFoot"></tr>');
   $('#npFoot').innerHTML = '';
@@ -421,7 +403,7 @@ function poJcDraw() {
     const a2 = num(L.qty) * num(rate); const g2 = a2 * (1 + num(gst) / 100); q += num(L.qty); amt += a2; tot += g2;
     return '<tr data-jrow data-key="' + esc(L.key) + '"' + (L.moq ? ' class="moqrow"' : '') + '><td>' + photoThumb(L.photo) + '</td>' +
       '<td><b>' + esc(L.m.name || L.r.material) + '</b></td><td>' + esc(L.m.group || '') + '</td><td>' + esc(L.r.material) + '</td><td>' + esc(L.m.hsn || '') + '</td><td>' + esc(L.m.uom || '') + '</td>' +
-      '<td>' + esc(L.brand) + '</td>' +
+      '<td>' + (L.brand ? esc(L.brand) : '<input data-jbrand list="dlBrandPo" style="width:120px" value="' + esc((PO_UI.ed[L.key] || {}).brand || '') + '">') + '</td>' +
       '<td><input class="qty" type="number" min="0" step="any" data-jrate value="' + esc(rate) + '"></td><td><input class="qty" type="number" min="0" step="any" data-jgst value="' + esc(gst) + '"></td>' +
       '<td><input data-jrem value="' + esc(rem) + '"></td>' +
       '<td class="num"><b>' + qtyFmt(L.qty) + '</b>' + '<div><a class="small" data-act="po-moq" data-m="' + esc(L.r.material) + '">' + (L.moq ? 'MOQ ✎' : 'MOQ') + '</a></div>' + '</td>' +
@@ -443,6 +425,7 @@ document.addEventListener('input', e => {
   if (e.target.dataset.jrate != null) ed.rate = e.target.value;
   else if (e.target.dataset.jgst != null) ed.gst = e.target.value;
   else if (e.target.dataset.jrem != null) { ed.rem = e.target.value; return; }
+  else if (e.target.dataset.jbrand != null) { ed.brand = e.target.value; return; }
   else return;
   clearTimeout(PO_UI.dt); PO_UI.dt = setTimeout(() => { const pos = e.target.selectionStart; const sel = '[data-key="' + k + '"] ' + (e.target.dataset.jrate != null ? '[data-jrate]' : '[data-jgst]'); poJcDraw(); const x = $(sel); if (x) { x.focus(); try { x.setSelectionRange(pos, pos); } catch (err) {} } }, 400);
 });
@@ -455,11 +438,14 @@ ACTIONS['po-moq-set'] = el => {
   PO_UI.moq[r.material] = { qty: q, reason: why }; PO_UI.moqOpen = null; poJcDraw();
 };
 ACTIONS['po-moq-clear'] = el => { delete PO_UI.moq[el.dataset.m]; PO_UI.moqOpen = null; poJcDraw(); };
-function poLineRow() {
-  return '<tr data-mline><td><input data-np="mat" list="dlMatPo" placeholder="Item Name"></td><td class="muted small" data-np-cat></td><td class="muted" data-np-code></td><td class="muted small" data-np-hsn></td><td class="muted" data-uom></td>' +
-    '<td><input data-np="rate" type="number" min="0" step="any" class="right" style="width:80px"></td><td><input data-np="gst" type="number" min="0" step="any" class="right" style="width:60px"></td>' +
-    '<td><input data-np="rem" style="width:100px"></td><td><input data-np="jc" list="dlJcPo" style="width:90px"></td>' +
-    '<td><input data-np="qty" type="number" min="0" step="any" class="right" style="width:80px"></td><td class="num muted" data-np-amt>0</td><td class="num muted" data-np-tot>0</td><td><button class="btn ghost sm" data-act="po-line-del">×</button></td></tr>';
+function poLineRow(l) {
+  l = l || {}; const m = l.material ? (matBy(l.material) || {}) : {};
+  const a2 = num(l.qty) * num(l.rate), g2 = a2 * (1 + num(l.gst) / 100);
+  return '<tr data-mline><td><input data-np="mat" list="dlMatPo" placeholder="Item Name" value="' + esc(m.name || '') + '"></td><td class="muted small" data-np-cat>' + esc(m.group || '') + '</td><td class="muted" data-np-code>' + esc(m.code || '') + '</td><td class="muted small" data-np-hsn>' + esc(m.hsn || '') + '</td><td class="muted" data-uom>' + esc(m.uom || '') + '</td>' +
+    '<td><input data-np="brand" list="dlBrandPo" style="width:120px" value="' + esc(l.brand || '') + '"></td>' +
+    '<td><input data-np="rate" type="number" min="0" step="any" class="right" style="width:80px" value="' + esc(l.rate != null ? l.rate : '') + '"></td><td><input data-np="gst" type="number" min="0" step="any" class="right" style="width:60px" value="' + esc(l.gst != null ? l.gst : '') + '"></td>' +
+    '<td><input data-np="rem" style="width:120px" value="' + esc(l.remark || '') + '"></td>' +
+    '<td><input data-np="qty" type="number" min="0" step="any" class="right" style="width:80px" value="' + esc(l.qty || '') + '"></td><td class="num muted" data-np-amt>' + (a2 ? money(a2) : '0') + '</td><td class="num muted" data-np-tot>' + (a2 ? money(g2) : '0') + '</td><td><button class="btn ghost sm" data-act="po-line-del">\u00d7</button></td></tr>';
 }
 function poManualRecalc() {
   let q = 0, amt = 0, net = 0;
@@ -467,7 +453,8 @@ function poManualRecalc() {
   const f = $('#npFoot'); if (f) f.innerHTML = '<td><b>Total:</b></td><td colspan="8"></td><td class="num"><b>' + qtyFmt(q) + '</b></td><td class="num"><b>' + money(amt) + '</b></td><td class="num"><b>' + money(net) + '</b></td><td></td>';
 }
 document.addEventListener('input', e => { if (e.target.closest && e.target.closest('tr[data-mline]')) poManualRecalc(); });
-ACTIONS['po-new'] = () => { PO_UI.form = !PO_UI.form; VIEWS.po.render(); if (PO_UI.form) $('#npVen').focus(); };
+ACTIONS['po-new'] = () => { PO_UI.form = !PO_UI.form; PO_UI.editId = null; VIEWS.po.render(); if (PO_UI.form) $('#npVen').focus(); };
+ACTIONS['po-edit'] = el => { PO_UI.form = true; PO_UI.editId = el.dataset.id; VIEWS.po.render(); poManualRecalc(); window.scrollTo(0, 0); };
 document.addEventListener('change', e => { if (e.target.id === 'npVen' && (PO_UI.mode || 'jc') === 'jc') { const v = vendorBy(e.target.value); PO_UI.moqOpen = null; if (v) poFillJc(v.name); } });
 ACTIONS['po-line'] = () => { $('#npLines').insertAdjacentHTML('beforeend', poLineRow()); };
 ACTIONS['po-line-del'] = el => el.closest('tr').remove();
@@ -479,6 +466,7 @@ document.addEventListener('change', e => {
   $('[data-np-cat]', tr).textContent = m.group || ''; $('[data-np-code]', tr).textContent = m.code; $('[data-np-hsn]', tr).textContent = m.hsn || ''; $('[data-uom]', tr).textContent = m.uom;
   const r = $('[data-np="rate"]', tr); if (!r.value) r.value = m.price || '';
   const g = $('[data-np="gst"]', tr); if (!g.value && m.gst != null) g.value = m.gst;
+  const q = $('[data-np="qty"]', tr); if (!q.value) { const nr = netReqRows(null, PO_UI.editId).find(x => norm(x.material) === norm(m.code)); q.value = nr && nr.net > 0 ? +nr.net.toFixed(3) : ''; }
   poManualRecalc();
 });
 ACTIONS['po-save'] = () => {
@@ -486,11 +474,15 @@ ACTIONS['po-save'] = () => {
   const ven = $('#npVen').value.trim(); const exp = $('#npExp').value;
   const mode = PO_UI.mode || 'jc';
   const lines = mode === 'manual'
-    ? $$('#npLines tr[data-mline]').map(tr => { const m = Store.all('materials').find(x => norm(x.name) === norm($('[data-np="mat"]', tr).value) || norm(x.code) === norm($('[data-np="mat"]', tr).value)); return m ? { material: m.code, uom: m.uom, qty: num($('[data-np="qty"]', tr).value), rate: num($('[data-np="rate"]', tr).value), gst: num($('[data-np="gst"]', tr).value), remark: $('[data-np="rem"]', tr).value.trim(), jc_no: $('[data-np="jc"]', tr).value.trim(), received: 0, rejected: 0 } : null; }).filter(l => l && l.qty > 0)
-    : poJcLines().map(L => { const tr = $('#npLines tr[data-key="' + L.key + '"]'); return { material: L.r.material, uom: L.m.uom || '', qty: L.qty, rate: num($('[data-jrate]', tr).value), gst: num($('[data-jgst]', tr).value), remark: $('[data-jrem]', tr).value.trim(), jc_no: '', brand: L.brand, moq: L.moq, net: L.r.net, received: 0, rejected: 0 }; });
+    ? $$('#npLines tr[data-mline]').map(tr => { const m = Store.all('materials').find(x => norm(x.name) === norm($('[data-np="mat"]', tr).value) || norm(x.code) === norm($('[data-np="mat"]', tr).value)); return m ? { material: m.code, uom: m.uom, qty: num($('[data-np="qty"]', tr).value), rate: num($('[data-np="rate"]', tr).value), gst: num($('[data-np="gst"]', tr).value), remark: $('[data-np="rem"]', tr).value.trim(), brand: $('[data-np="brand"]', tr).value.trim(), jc_no: '', received: 0, rejected: 0 } : null; }).filter(l => l && l.qty > 0)
+    : poJcLines().map(L => { const tr = $('#npLines tr[data-key="' + L.key + '"]'); return { material: L.r.material, uom: L.m.uom || '', qty: L.qty, rate: num($('[data-jrate]', tr).value), gst: num($('[data-jgst]', tr).value), remark: $('[data-jrem]', tr).value.trim(), jc_no: '', brand: L.brand || ($('[data-jbrand]', tr) || { value: '' }).value.trim(), moq: L.moq, net: L.r.net, received: 0, rejected: 0 }; });
+  const brandNames = Store.all('customers').map(c => norm(c.name));
+  const noBrand = lines.find(l => !l.brand || l.brand.split(',').some(b => !brandNames.includes(norm(b))));
+  if (noBrand) { $('#npMsg').innerHTML = '<span class="late-txt">' + esc(noBrand.material) + ': select a Brand from the CDB list.</span>'; return; }
   // never above net requirement (fresh figures) unless an MOQ override is logged for that item
   const freshNet = {}; netReqRows(ven).forEach(r => { freshNet[norm(r.material)] = r.net; });
-  const allNet = {}; netReqRows().forEach(r => { allNet[norm(r.material)] = r.net; });
+  const allNet = {}; netReqRows(null, PO_UI.editId).forEach(r => { allNet[norm(r.material)] = r.net; });
+  if (PO_UI.editId) (Store.get('purchase_orders', PO_UI.editId).moq_log || []).forEach(x => { const k = norm(x.material); if (allNet[k] != null) allNet[k] = Math.max(allNet[k], num(x.moq)); });
   const byMat = {}; lines.forEach(l => { byMat[norm(l.material)] = (byMat[norm(l.material)] || 0) + num(l.qty); });
   for (const k of Object.keys(byMat)) {
     const cap = mode === 'manual' ? allNet[k] : Math.max(freshNet[k] || 0, ((PO_UI.moq || {})[(matBy(k) || {}).code] || {}).qty || 0);
@@ -504,6 +496,14 @@ ACTIONS['po-save'] = () => {
   const bad = lines.find(l => !matBy(l.material)); if (bad) { $('#npMsg').innerHTML = '<span class="late-txt">Material "' + esc(bad.material) + '" is not in the master — add it in Store → Materials first.</span>'; return; }
   // double-submit guard: same vendor + same lines within 60s
   const sig = norm(ven) + '|' + lines.map(l => l.material + ':' + l.qty).sort().join(',');
+  if (PO_UI.editId) {
+    const ep = Store.get('purchase_orders', PO_UI.editId);
+    if (!ep || ep.approval !== 'Amend') { $('#npMsg').innerHTML = '<span class="late-txt">This PO is no longer open for amendment.</span>'; return; }
+    Object.assign(ep, { date: $('#npDate').value || ep.date, expected: exp, remarks: $('#npRem').value.trim(), lines, approval: 'Pending' });
+    ep.edit_log = (ep.edit_log || []).concat([{ by: ME.name, at: nowIso() }]);
+    Store.put('purchase_orders', ep); audit('po.amended', ep.no, 'resubmitted for approval');
+    PO_UI.form = false; PO_UI.editId = null; flash(esc(ep.no) + ' updated and sent for approval.'); VIEWS.po.render(); return;
+  }
   const dup = Store.all('purchase_orders').find(p => p._sig === sig && (Date.now() - new Date(p.at)) < 60000);
   if (dup) { $('#npMsg').innerHTML = '<span class="late-txt">An identical PO ' + esc(dup.no) + ' was just created (double-submit guard).</span>'; return; }
   const po = Store.put('purchase_orders', { id: uid(), no: fyNo('purchase_orders', 'PO', 3), date: $('#npDate').value || todayYmd(), vendor: vm.name, expected: exp, remarks: $('#npRem').value.trim(), lines, moq_log: moqLog, followups: [], approval: 'Pending', created_by: ME.name, created_by_id: ME.id, at: nowIso(), _sig: sig });
@@ -618,7 +618,7 @@ function jcForm() {
   const picks = Store.all('orders').filter(o => orderState(o).open)
     .flatMap(o => (o.lines || []).filter(l => l.jc_no && !used.has(norm(l.jc_no)))
       .map(l => '<option value="' + esc(l.jc_no) + '">' + esc(o.customer_name + ' · ' + l.article + (l.colour ? ' ' + l.colour : '') + ' · ' + qtyFmt(l.qty)) + '</option>')).join('');
-  return '<div class="card"><div class="card-h"><b>New Job Card</b></div><div class="card-b"><datalist id="dlJcPick">' + picks + '</datalist>' +
+  return '<div class="card"><div class="card-b"><datalist id="dlJcPick">' + picks + '</datalist>' +
     '<input type="hidden" id="jfOrd"><input type="hidden" id="jfLine"><input type="hidden" id="jfNo">' +
     '<div class="jcdoc"><div class="jcban">JOB CARD</div><div class="jcmid">' +
     '<div class="jcl"><table class="jckv" id="jfDetails">' + jcfDetailRows() + '</table></div>' +
@@ -803,24 +803,6 @@ ACTIONS['jc-save'] = () => {
 };
 ACTIONS['jc-close'] = el => { const j = Store.get('job_cards', el.dataset.id); if ((j.corrections || []).some(c => !c.resolved)) { flash('Resolve open corrections first.', 'err'); return; } j.status = 'Closed'; Store.put('job_cards', j); audit('jc.close', j.no, ''); VIEWS.jobcards.render(); };
 
-VIEWS.swatch = {
-  mod: 'merchant', render() {
-    const edit = can('merchant', 'edit');
-    const rows = Store.all('job_cards').filter(j => j.swatch_status === 'Pending' || j.swatch_status === 'Rejected');
-    let h = subTitle('Swatch Approval', 'pending + rejected') + '<div class="tbl-wrap"><table><tr><th>JC No</th><th>Brand</th><th>Article</th><th>Colour</th><th class="num">Qty</th><th>Status</th><th>Note</th>' + (edit ? '<th></th>' : '') + '</tr>' +
-      (rows.length ? rows.map(j => '<tr><td><b>' + esc(j.no) + '</b></td><td>' + esc(j.brand) + '</td><td>' + esc(j.article) + '</td><td>' + esc(j.colour) + '</td><td class="num">' + qtyFmt(j.qty) + '</td><td><span class="st ' + (j.swatch_status === 'Rejected' ? 'Late' : 'Pending') + '">' + esc(j.swatch_status) + '</span></td>' +
-        '<td>' + (edit ? '<input data-sw-note placeholder="optional" value="' + esc(j.swatch_note || '') + '">' : esc(j.swatch_note || '')) + '</td>' +
-        (edit ? '<td class="right nowrap"><button class="btn sm primary" data-act="sw-set" data-id="' + esc(j.id) + '" data-s="Approved">Approve</button> <button class="btn sm danger" data-act="sw-set" data-id="' + esc(j.id) + '" data-s="Rejected">Reject</button></td>' : '') + '</tr>').join('') : '<tr><td colspan="8" class="empty">No swatches pending</td></tr>') + '</table></div>';
-    h += '<h2>Approved (last 10)</h2><div class="tbl-wrap"><table><tr><th>JC</th><th>Brand</th><th>Article</th><th>Note</th></tr>' + Store.all('job_cards').filter(j => j.swatch_status === 'Approved').slice(-10).reverse().map(j => '<tr><td>' + esc(j.no) + '</td><td>' + esc(j.brand) + '</td><td>' + esc(j.article) + '</td><td class="small">' + esc(j.swatch_note || '') + '</td></tr>').join('') + '</table></div>';
-    setMain(h);
-  }
-};
-ACTIONS['sw-set'] = el => {
-  const j = Store.get('job_cards', el.dataset.id); const tr = el.closest('tr');
-  j.swatch_status = el.dataset.s; j.swatch_note = $('[data-sw-note]', tr).value.trim(); j.swatch_by = ME.name;
-  Store.put('job_cards', j); audit('jc.swatch', j.no, el.dataset.s + (j.swatch_note ? ' — ' + j.swatch_note : '')); flash(esc(j.no) + ' swatch ' + el.dataset.s.toLowerCase() + '.'); VIEWS.swatch.render();
-};
-
 VIEWS.jccorrection = {
   mod: 'merchant', render() {
     const edit = can('merchant', 'edit');
@@ -840,142 +822,6 @@ ACTIONS['jcc-add'] = el => {
 ACTIONS['jcc-resolve'] = el => { const j = Store.get('job_cards', el.dataset.id); j.corrections[+el.dataset.i].resolved = true; Store.put('job_cards', j); audit('jc.correction.resolve', j.no, j.corrections[+el.dataset.i].note); VIEWS.jccorrection.render(); };
 
 /* ================= STORE ================= */
-const INW_UI = { form: false };
-const BILL_TYPES = [
-  { v: 'Invoice', l: 'Invoice (against PO, in accounts)' },
-  { v: 'Challan', l: 'Challan (against PO, in accounts)' },
-  { v: 'FOC', l: 'FOC / Free of Cost (stock only, not in accounts)' },
-  { v: 'Sample', l: 'Sample (no PO, stock only)' }
-];
-VIEWS.inward = {
-  mod: 'store', render() {
-    const edit = can('store', 'edit');
-    const rows = Store.all('inwards').slice().sort((a2, b2) => b2.no < a2.no ? -1 : 1);
-    let h = subTitle('NEW GATE ENTRY', 'inwarding — GRN is separate') + '<div class="toolbar"><span class="grow"></span>' + (edit ? newBtn('New gate entry', 'inw-new') : '') + '</div>';
-    if (INW_UI.form && edit) {
-      const bt = INW_UI.bt || 'Invoice'; const isFoc = bt === 'FOC', isSample = bt === 'Sample';
-      h += '<div class="card"><div class="card-h"><b>New Gate Entry</b></div><div class="card-b">' + dlVendor() + dlMat('dlMatI') +
-        '<div class="toolbar" style="margin-bottom:14px">' + seg('inwBt', BILL_TYPES, bt) + '</div>' +
-        '<div class="row" style="margin-top:8px"><label>Vendor Name *<input id="niVen" list="dlVen"></label>' +
-        (isSample ? '<label>Concern Person *<input id="niPerson" list="dlUsers"><datalist id="dlUsers">' + Store.all('users').map(u => '<option value="' + esc(u.name) + '">').join('') + '</datalist></label>'
-          : '<label>PO Number *<input id="niPo" list="dlPoNo"><datalist id="dlPoNo">' + openPOs().map(p => '<option value="' + esc(p.no) + '">' + esc(p.vendor) + '</option>').join('') + '</datalist></label>') +
-        '<label>' + bt + ' Number' + (isFoc ? '' : ' *') + '<input id="niNum" placeholder="' + (isFoc ? '(optional)' : bt.toUpperCase() + '-XXXX') + '"></label>' +
-        '<label>' + bt + ' Date' + (isFoc ? '' : ' *') + '<input id="niBillDate" type="date"></label>' +
-        '<label>Inwarding Date *<input id="niDate" type="date" value="' + todayYmd() + '"></label></div>' +
-        '<div class="row" style="margin-top:8px"><label>Material *<input id="niMat" list="dlMatI"></label><label>Invoice Qty *<input id="niQty" type="number" min="0" style="width:100px"></label>' +
-        '<label>QC Report Number (If Any)<input id="niQc"></label>' + imgField('niPhoto', 'Attach ' + bt + ' Photo', !isFoc) + '<span id="niPhotoTag"></span>' + imgField('niQcPhoto', 'Attach QC Report Photo') + '<span id="niQcTag"></span>' +
-        '<label style="flex:1">Remark<input id="niRem"></label><button class="btn primary" data-act="inw-save">Save</button><span id="niMsg" class="small"></span></div>' +
-        '</div><div class="card-f"><span class="muted small">Inward By: ' + esc(ME.name) + ' (auto)</span></div></div>';
-    }
-    h += '<h2>PREVIOUS GATE ENTRY LOGS</h2><div class="tbl-wrap"><table><tr><th>Timestamp</th><th>Bill</th><th>Vendor</th><th>PO Number</th><th>Invoice No</th><th>Invoice Date</th><th class="num">Aging (Days)</th><th>Material</th><th class="num">Invoice Qty</th><th>Photo</th><th>Swatch match</th><th>Remark</th></tr>' +
-      (rows.length ? rows.map(i => '<tr><td class="nowrap">' + fmtD(i.date) + '</td><td>' + esc(i.bill_type || 'Invoice') + '</td><td>' + esc(i.vendor) + '</td><td>' + esc(i.po_no || (i.bill_type === 'Sample' ? 'SAMPLE: ' + (i.person || '') : '')) + '</td><td>' + esc(i.bill_no || '') + '</td><td class="nowrap">' + fmtD(i.bill_date) + '</td><td class="num">' + Math.max(0, Math.floor((Date.now() - new Date(i.date)) / 86400000)) + '</td><td>' + esc(i.material) + '</td><td class="num">' + qtyFmt(i.qty) + '</td><td>' + photoThumb(i.photo) + '</td><td><span class="st ' + (i.swatch_match === 'Pass' ? 'Done' : i.swatch_match === 'Fail' ? 'Late' : 'Pending') + '">' + (i.swatch_match || 'Pending') + '</span></td><td class="small">' + esc(i.remark || '') + '</td></tr>').join('') : '<tr><td colspan="12" class="empty">No gate entries</td></tr>') + '</table></div>';
-    setMain(h);
-    onSeg(e => { if (e.target.dataset.seg === 'inwBt') { INW_UI.bt = e.detail; VIEWS.inward.render(); } });
-    const m = $('#main');
-    m.addEventListener('change', e => {
-      if (e.target.id === 'niPhoto') readImg(e.target.files[0], src => { INW_UI.photo = src; $('#niPhotoTag').innerHTML = photoThumb(src); });
-      if (e.target.id === 'niQcPhoto') readImg(e.target.files[0], src => { INW_UI.qcPhoto = src; $('#niQcTag').innerHTML = photoThumb(src); });
-    });
-  }
-};
-ACTIONS['inw-new'] = () => { INW_UI.form = !INW_UI.form; INW_UI.photo = ''; INW_UI.qcPhoto = ''; VIEWS.inward.render(); };
-ACTIONS['inw-save'] = () => {
-  if (!requirePerm('store', 'edit')) return;
-  const bt = INW_UI.bt || 'Invoice'; const isFoc = bt === 'FOC', isSample = bt === 'Sample';
-  const ven = $('#niVen').value.trim(); const m = matBy($('#niMat').value); const qty = num($('#niQty').value);
-  const billNo = $('#niNum').value.trim(); const billDate = $('#niBillDate').value; const po = isSample ? '' : ($('#niPo') ? $('#niPo').value.trim() : '');
-  const err = !ven ? 'Vendor is required.' : !m ? 'Material (from the master) is required.' : qty <= 0 ? 'Invoice qty is required.'
-    : (!isSample && !po) ? 'PO Number is required.' : (isSample && !$('#niPerson').value.trim()) ? 'Concern Person is required.'
-    : (!isFoc && !billNo) ? bt + ' Number is required.' : (!isFoc && !billDate) ? bt + ' Date is required.'
-    : (!isFoc && !INW_UI.photo) ? 'Attach the ' + bt + ' photo.' : '';
-  if (err) { $('#niMsg').innerHTML = '<span class="late-txt">' + esc(err) + '</span>'; return; }
-  if (billNo && Store.all('inwards').some(x => norm(x.vendor) === norm(ven) && norm(x.bill_no) === norm(billNo))) { $('#niMsg').innerHTML = '<span class="late-txt">This vendor already has an entry with this ' + bt + ' number (duplicate guard).</span>'; return; }
-  const i = Store.put('inwards', { id: uid(), no: nextNo('inwards', 'INW'), date: $('#niDate').value || todayYmd(), bill_type: bt, vendor: ven, po_no: po, person: isSample ? $('#niPerson').value.trim() : '', bill_no: billNo, bill_date: billDate, material: m.code, uom: m.uom, qty, qc_no: $('#niQc').value.trim(), photo: INW_UI.photo || '', qc_photo: INW_UI.qcPhoto || '', remark: $('#niRem').value.trim(), swatch_match: '', by: ME.name });
-  audit('inward.create', i.no, bt + ' · ' + ven + ' · ' + m.code + ' × ' + qty); INW_UI.form = false;
-  flash(esc(i.no) + ' saved — swatch matching pending.'); VIEWS.inward.render();
-};
-
-VIEWS.swatchmatch = {
-  mod: 'store', render() {
-    const edit = can('store', 'edit');
-    const rows = Store.all('inwards').filter(i => !i.swatch_match);
-    let h = subTitle('Swatch Matching', 'inward material vs approved swatch') + '<div class="tbl-wrap"><table><tr><th>Inward</th><th>Date</th><th>Vendor</th><th>Material</th><th class="num">Qty</th><th>Note</th>' + (edit ? '<th></th>' : '') + '</tr>' +
-      (rows.length ? rows.map(i => '<tr><td><b>' + esc(i.no) + '</b></td><td class="nowrap">' + fmtD(i.date) + '</td><td>' + esc(i.vendor) + '</td><td>' + esc(i.material) + '</td><td class="num">' + qtyFmt(i.qty) + '</td>' +
-        '<td>' + (edit ? '<input data-sm-note placeholder="optional">' : '') + '</td>' +
-        (edit ? '<td class="right nowrap"><button class="btn sm primary" data-act="sm-set" data-id="' + esc(i.id) + '" data-s="Pass">Pass</button> <button class="btn sm danger" data-act="sm-set" data-id="' + esc(i.id) + '" data-s="Fail">Fail</button></td>' : '') + '</tr>').join('') : '<tr><td colspan="7" class="empty">Nothing pending</td></tr>') + '</table></div>';
-    h += '<h2>Recent results</h2><div class="tbl-wrap"><table><tr><th>Inward</th><th>Material</th><th>Result</th><th>Note</th><th>By</th></tr>' + Store.all('inwards').filter(i => i.swatch_match).slice(-10).reverse().map(i => '<tr><td>' + esc(i.no) + '</td><td>' + esc(i.material) + '</td><td><span class="st ' + (i.swatch_match === 'Pass' ? 'Done' : 'Late') + '">' + i.swatch_match + '</span></td><td class="small">' + esc(i.swatch_note || '') + '</td><td>' + esc(i.swatch_by || '') + '</td></tr>').join('') + '</table></div>';
-    setMain(h);
-  }
-};
-ACTIONS['sm-set'] = el => {
-  const i = Store.get('inwards', el.dataset.id); i.swatch_match = el.dataset.s; i.swatch_note = ($('[data-sm-note]', el.closest('tr')) || { value: '' }).value.trim(); i.swatch_by = ME.name;
-  Store.put('inwards', i); audit('inward.swatch', i.no, el.dataset.s); flash(esc(i.no) + ': swatch ' + el.dataset.s + '.'); VIEWS.swatchmatch.render();
-};
-
-const GRN_UI = { open: null };
-VIEWS.grn = {
-  mod: 'store', render() {
-    const edit = can('store', 'edit');
-    const pos = openPOs();
-    let h = subTitle('GRN') + '<div class="tbl-wrap"><table><tr><th>PO</th><th>Vendor</th><th>Expected</th><th class="num">Pending qty</th><th></th></tr>' +
-      (pos.length ? pos.map(p => {
-        let row = '<tr><td><b>' + esc(p.no) + '</b></td><td>' + esc(p.vendor) + '</td><td class="nowrap ' + (p.expected < todayYmd() ? 'late-txt' : '') + '">' + fmtD(p.expected) + '</td><td class="num">' + qtyFmt(poPending(p)) + '</td><td class="right">' + (edit ? '<button class="btn sm ' + (GRN_UI.open === p.id ? '' : 'primary') + '" data-act="grn-open" data-id="' + esc(p.id) + '">' + (GRN_UI.open === p.id ? 'Close' : 'Make GRN') + '</button>' : '') + '</td></tr>';
-        if (GRN_UI.open === p.id) row += '<tr class="inline-form"><td colspan="5"><table style="max-width:880px;margin:6px 0"><tr><th>Material</th><th>JC</th><th class="num">PO Pending</th><th class="num">JC Qty</th><th class="num">Inv Qty</th><th class="num">GRN Qty</th><th class="num">Reject</th><th class="num">Short</th><th class="num">Excess</th><th>Rack</th></tr>' +
-          p.lines.map((l, i) => { const pen = Math.max(0, num(l.qty) - num(l.received)); const mt = matBy(l.material) || {}; const jq = l.jc_no ? (((jcBy(l.jc_no) || {}).lines || []).find(x => norm(x.material) === norm(l.material)) || {}).required : ''; return '<tr data-i="' + i + '" data-pen="' + pen + '"><td>' + esc(l.material) + '</td><td class="small">' + esc(l.jc_no || '') + '</td><td class="num">' + qtyFmt(pen) + '</td><td class="num muted">' + (jq ? qtyFmt(jq) : '—') + '</td><td><input class="qty" type="number" min="0" step="any" data-gi value="' + (pen || '') + '"' + (pen ? '' : ' disabled') + '></td><td><input class="qty" type="number" min="0" step="any" data-ga value="' + (pen || '') + '"' + (pen ? '' : ' disabled') + '></td><td><input class="qty" type="number" min="0" step="any" data-gr value="0"' + (pen ? '' : ' disabled') + '></td><td class="num muted" data-gs>—</td><td class="num muted" data-gx>—</td><td><input data-grack value="' + esc(mt.rack || '') + '" style="width:60px"></td></tr>'; }).join('') +
-          '</table><div class="row"><label>Invoice / challan no *<input id="grnInv" list="dlGrnInv"><datalist id="dlGrnInv">' + Store.all('inwards').filter(iw => norm(iw.vendor) === norm(p.vendor) && iw.bill_no && iw.swatch_match !== 'Fail').map(iw => '<option value="' + esc(iw.bill_no) + '">' + esc(iw.no) + '</option>').join('') + '</datalist></label><label>Date<input id="grnDate" type="date" value="' + todayYmd() + '"></label><button class="btn primary" data-act="grn-save" data-id="' + esc(p.id) + '">Save GRN</button><span id="grnMsg" class="small"></span></div><div class="row" id="grnWhyBox" style="display:none;margin-top:4px"><label style="flex:1">Reject reason *<input id="grnWhy"></label></div></td></tr>';
-        return row;
-      }).join('') : '<tr><td colspan="5" class="empty">No open POs — create a Purchase Order first</td></tr>') + '</table></div>';
-    const gs = Store.all('grns').slice().sort((a, b) => b.no < a.no ? -1 : 1).slice(0, 15);
-    h += '<h2>Recent GRNs</h2><div class="tbl-wrap"><table><tr><th>GRN</th><th>Date</th><th>PO</th><th>Vendor</th><th class="num">Accepted</th><th class="num">Rej + Short</th><th>By</th><th></th></tr>' +
-      (gs.length ? gs.map(g => '<tr><td><b>' + esc(g.no) + '</b></td><td class="nowrap">' + fmtD(g.date) + '</td><td>' + esc(g.po_no) + '</td><td>' + esc(g.vendor) + '</td><td class="num">' + qtyFmt(g.lines.reduce((s, l) => s + num(l.accepted), 0)) + '</td><td class="num late-txt">' + qtyFmt(g.lines.reduce((s, l) => s + num(l.rejected) + num(l.short || 0), 0)) + '</td><td>' + esc(g.by) + '</td><td class="right"><button class="btn sm ghost" data-act="print-grn" data-id="' + esc(g.id) + '">Print</button></td></tr>').join('') : '<tr><td colspan="8" class="empty">No GRNs yet</td></tr>') + '</table></div>';
-    setMain(h);
-  }
-};
-ACTIONS['grn-open'] = el => { GRN_UI.open = GRN_UI.open === el.dataset.id ? null : el.dataset.id; VIEWS.grn.render(); };
-function grnCalcRow(tr) {
-  const inv = num($('[data-gi]', tr).value), acc = num($('[data-ga]', tr).value), rej = num($('[data-gr]', tr).value), pen = num(tr.dataset.pen);
-  const excess = Math.max(0, inv - pen);                       // billed beyond PO balance
-  const short = Math.max(0, inv - acc - rej);                  // billed but not physically received
-  $('[data-gx]', tr).textContent = excess ? qtyFmt(excess) : '—';
-  $('[data-gs]', tr).textContent = short ? qtyFmt(short) : '—';
-  return { inv, acc, rej, excess, short };
-}
-document.addEventListener('input', e => { const tr = e.target.closest('tr[data-pen]'); if (tr && (e.target.dataset.gi != null || e.target.dataset.ga != null || e.target.dataset.gr != null)) { grnCalcRow(tr); const anyRej = $$('tr[data-pen]').some(t => num(($('[data-gr]', t) || {}).value) > 0); const box = $('#grnWhyBox'); if (box) box.style.display = anyRej ? '' : 'none'; } });
-ACTIONS['grn-save'] = el => {
-  if (!requirePerm('store', 'edit')) return;
-  const p = Store.get('purchase_orders', el.dataset.id);
-  const rows = $$('tr[data-pen]').map(tr => Object.assign({ i: +tr.dataset.i, material: p.lines[+tr.dataset.i].material }, grnCalcRow(tr))).filter(r => r.inv > 0 || r.acc > 0 || r.rej > 0);
-  if (!rows.length) { $('#grnMsg').innerHTML = '<span class="late-txt">Enter invoice qty or accept/reject qty.</span>'; return; }
-  for (const r of rows) {
-    const pen = Math.max(0, num(p.lines[r.i].qty) - num(p.lines[r.i].received));
-    if (r.acc + r.rej > r.inv + 1e-9) { $('#grnMsg').innerHTML = '<span class="late-txt">' + esc(r.material) + ': accept + reject exceeds invoice qty.</span>'; return; }
-    if (r.acc + r.rej > pen + r.excess + 1e-9) { $('#grnMsg').innerHTML = '<span class="late-txt">' + esc(r.material) + ': qty exceeds PO pending + excess.</span>'; return; }
-  }
-  const inv = $('#grnInv').value.trim();
-  if (!inv) { $('#grnMsg').innerHTML = '<span class="late-txt">Invoice / challan no is required.</span>'; return; }
-  const totRejPre = rows.reduce((x, r) => x + r.rej, 0);
-  const why = ($('#grnWhy') || { value: '' }).value.trim();
-  if (totRejPre > 0 && !why) { $('#grnMsg').innerHTML = '<span class="late-txt">Reject reason is required.</span>'; return; }
-  if (Store.all('grns').some(g => norm(g.vendor) === norm(p.vendor) && norm(g.invoice) === norm(inv))) { $('#grnMsg').innerHTML = '<span class="late-txt">This vendor invoice already has a GRN (duplicate guard).</span>'; return; }
-  const failedInward = Store.all('inwards').find(iw => norm(iw.vendor) === norm(p.vendor) && norm(iw.po_no) === norm(p.no) && iw.swatch_match === 'Fail');
-  if (failedInward) { $('#grnMsg').innerHTML = '<span class="late-txt">' + esc(failedInward.no) + ' failed swatch matching — GRN for this PO is blocked until Merchant resolves it.</span>'; return; }
-  rows.forEach(r => { const pl = p.lines[r.i]; pl.received = num(pl.received) + r.acc + r.rej; pl.rejected = num(pl.rejected) + r.rej; });
-  Store.put('purchase_orders', p);
-  const lines = rows.map(r => { const tr = $$('tr[data-pen]')[r.i] || $$('tr[data-pen]').find(t => +t.dataset.i === r.i); return { material: r.material, jc_no: p.lines[r.i].jc_no || '', inv_qty: r.inv, accepted: r.acc, rejected: r.rej, short: r.short, excess: r.excess, rack: tr ? ($('[data-grack]', tr) || { value: '' }).value.trim() : '' }; });
-  const g = Store.put('grns', { id: uid(), no: fyNo('grns', 'GRN', 4), date: $('#grnDate').value || todayYmd(), po_id: p.id, po_no: p.no, vendor: p.vendor, invoice: inv, reject_reason: why, lines, by: ME.name });
-  const totRej = rows.reduce((x, r) => x + r.rej, 0), totShort = rows.reduce((x, r) => x + r.short, 0), totExcess = rows.reduce((x, r) => x + r.excess, 0);
-  // Auto tasks: short/reject -> Debit Note (Accounts) + RTV (Store); every GRN -> Tally Entry next day.
-  if (totRej > 0 || totShort > 0) {
-    autoTask('Debit Note — ' + inv + ' (' + p.vendor + '): reject ' + qtyFmt(totRej) + ', short ' + qtyFmt(totShort), 'ACCOUNTS', 0);
-    if (totRej > 0) autoTask('RTV — ' + p.vendor + ' inv ' + inv + ': ' + rows.filter(r => r.rej).map(r => r.material + ' × ' + qtyFmt(r.rej)).join(', '), 'STORE', 1);
-  }
-  autoTask('Tally Entry — GRN ' + g.no + ' (' + p.vendor + ', inv ' + inv + ')', 'ACCOUNTS', 1);
-  audit('grn.create', g.no, p.no + ' · inv ' + inv + ' · acc ' + qtyFmt(rows.reduce((x, r) => x + r.acc, 0)) + (totRej ? ' / rej ' + qtyFmt(totRej) : '') + (totShort ? ' / short ' + qtyFmt(totShort) : '') + (totExcess ? ' / excess ' + qtyFmt(totExcess) : ''));
-  GRN_UI.open = null;
-  flash(esc(g.no) + ' saved — stock updated.' + (totRej || totShort ? ' <b>Debit Note' + (totRej ? ' + RTV' : '') + ' task created automatically.</b>' : '') + (poPending(p) <= 0 ? ' ' + esc(p.no) + ' fully received.' : ''));
-  VIEWS.grn.render();
-};
-
 const ISS_UI = { form: false, ret: false };
 function pendingIssues() { return Store.all('issues').filter(i => i.status === 'Pending'); }
 VIEWS.issuance = {
@@ -1164,7 +1010,7 @@ VIEWS.rtv = {
       const avail = srcRows.map(r => { const k = norm(r.vendor + '|' + r.material + '|' + r.source); const take = Math.min(r.qty, Math.max(0, r.qty - (returned[k] || 0))); returned[k] = Math.max(0, (returned[k] || 0) - r.qty); return Object.assign({}, r, { avail: take }); }).filter(r => r.avail > 0);
       const vendors = Array.from(new Set(avail.map(r => r.vendor)));
       const sel = RTV_UI.vendor || vendors[0] || '';
-      h += '<div class="card"><div class="card-h"><b>New RTV</b></div><div class="card-b"><div class="row">' +
+      h += '<div class="card"><div class="card-b"><div class="row">' +
         '<label>Vendor *<select id="rvVen">' + (vendors.length ? vendors.map(v => '<option' + (v === sel ? ' selected' : '') + '>' + esc(v) + ' (' + avail.filter(r => r.vendor === v).length + ')</option>').join('') : '<option value="">No rejection stock</option>') + '</select></label>' +
         '<label>Reason<select id="rvWhy">' + RTV_REASONS.map(x => '<option>' + x + '</option>').join('') + '</select></label>' +
         '<label>Vehicle No<input id="rvVeh" placeholder="HR-26-XX-1234"></label><label>Driver Name<input id="rvDrv"></label><label style="flex:1">Remarks<input id="rvRem" placeholder="Optional remarks (printed on NRGP)"></label></div>' +
@@ -1248,7 +1094,7 @@ VIEWS.bom = {
       if (!has) pend.push({ key, brand: o.customer_name, article: l.article, style: l.style || '', colour: l.colour || '', gender: l.gender || '', category: o.category || '', run: l.size_run || l.size || '', mould: o.tooling_no || '' });
     }));
     const pendBrands = Array.from(new Set(pend.map(p => p.brand)));
-    let h = subTitle('Development BOM') + '<div class="card"><div class="card-h"><b>New BOM</b><span class="muted small">' + pend.length + ' article(s) pending BOM</span></div><div class="card-b">' + dlMat('dlMatB') + dlVendor() +
+    let h = subTitle('Development BOM') + '<div class="card"><div class="card-b">' + dlMat('dlMatB') + dlVendor() +
       '<datalist id="dlCatJc2">' + itemCats().map(x => '<option>' + x + '</option>').join('') + '</datalist><datalist id="dlCatB">' + fieldOptions('category').map(x => '<option value="' + esc(x) + '">').join('') + '</datalist>' +
       '<div class="jcdoc"><div class="jcban">BILL OF MATERIALS</div><div class="jcmid">' +
       '<div class="jcl"><table class="jckv">' +
@@ -1375,7 +1221,7 @@ VIEWS.requisition = {
     if (stale.length) h += '<div class="panel" style="border-left:3px solid var(--late);margin-bottom:10px"><b>' + stale.length + ' slip(s) pending for 24h+</b> — new slips are blocked until Store issues/rejects them (Manager/Admin exempt). <a href="#/issuance">Issuance →</a></div>';
     h += '<div class="toolbar"><span class="grow"></span>' + (edit ? newBtn('New requisition', 'req-new') : '') + '</div>';
     if (REQ_UI.form && edit) {
-      h += '<div class="card"><div class="card-h"><b>New Requisition Slip</b></div><div class="card-b">' + dlMat('dlMatR') + '<datalist id="dlJc">' + Store.all('job_cards').filter(j => j.status !== 'Closed').map(j => '<option value="' + esc(j.no) + '">' + esc(j.article) + '</option>').join('') + '</datalist>' +
+      h += '<div class="card"><div class="card-b">' + dlMat('dlMatR') + '<datalist id="dlJc">' + Store.all('job_cards').filter(j => j.status !== 'Closed').map(j => '<option value="' + esc(j.no) + '">' + esc(j.article) + '</option>').join('') + '</datalist>' +
         '<div class="row"><label>Job Card *<input id="nrJc" list="dlJc"></label><label>Requested By<input value="' + esc(ME.name) + '" readonly></label><button class="btn sm" data-act="req-fill">Fill All Pending Qty</button></div>' +
         '<div class="tbl-wrap" style="margin-top:8px"><table id="nrTable" style="max-width:820px"><tr><th>#</th><th>Item Name</th><th>UOM</th><th class="num">Req Qty</th><th class="num">Stock</th><th>Coverage</th><th class="num" style="width:120px">Requisition Qty</th><th style="width:30px"></th></tr></table></div>' +
         '<a class="small" data-act="req-extra">+ Add Extra Item</a>' +
@@ -1571,7 +1417,7 @@ VIEWS.vendors = {
   mod: 'purchase', render() {
     masterView({
       col: 'vendors', mod: 'purchase', title: 'Vendors', view: VIEWS.vendors, sort: 'name', paste: true,
-      cols: [{ k: 'name', l: 'Vendor Name', ph: 'e.g. ABC Textiles' }, { k: 'address', l: 'Address' }, { k: 'state', l: 'State', w: 130 }, { k: 'gstin', l: 'GST No', w: 160, upper: true }, { k: 'email', l: 'Email ID', w: 180 }, { k: 'mobile', l: 'Mobile No.', w: 120 }],
+      cols: [{ k: 'name', l: 'Vendor Name', ph: 'e.g. ABC Textiles' }, { k: 'address', l: 'Address' }, { k: 'state', l: 'State', w: 130 }, { k: 'gstin', l: 'GST No', w: 160, upper: true }, { k: 'email', l: 'Email ID', w: 180 }, { k: 'mobile', l: 'Mobile No.', w: 120 }, { k: 'qc_required', l: 'QC Report', w: 90, opts: () => [{ v: '', l: 'No' }, { v: 'Yes', l: 'Yes' }] }],
       validate: d => uniq('vendors', 'name', 'Vendor')(d),
       inUse: d => Store.all('purchase_orders').some(p => norm(p.vendor) === norm(d.name)) ? 'Vendor has POs — cannot delete.' : ''
     });

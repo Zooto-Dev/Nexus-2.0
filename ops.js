@@ -29,7 +29,7 @@ VIEWS.home = {
     const reqs = Store.all('requisitions').filter(r => r.status === 'Pending');
     const swPend = Store.all('job_cards').filter(j => j.swatch_status === 'Pending' && j.status !== 'Closed');
     const jcCorr = Store.all('job_cards').filter(j => (j.corrections || []).some(c => !c.resolved));
-    const smPend = Store.all('inwards').filter(i => !i.swatch_match);
+    const smPend = Store.all('inwards').filter(i => i.status === 'Pending GRN' && (i.qc || []).some(q => !q.result));
     const payPend = Store.all('dispatches').filter(d => !d.cancelled && d.payment !== 'Received');
     const chkDue = myChecklistDue();
 
@@ -95,7 +95,7 @@ VIEWS.tasks = {
     if (TASK_UI.when === 'late') list = list.filter(x => x.step.status === 'Late');
     if (TASK_UI.when === 'today') list = list.filter(x => dueToday(x.step) || x.step.status === 'Late');
     const q = norm(TASK_UI.q); if (q) list = list.filter(x => norm(x.order.no + ' ' + x.order.customer_name + ' ' + x.step.name + ' ' + x.step.doer).includes(q));
-    setMain('<h1>My Tasks</h1><div class="toolbar">' + (all ? seg('who', [{ v: 'mine', l: 'Mine (' + esc(ME.doer || '-') + ')' }, { v: 'all', l: 'Everyone' }], TASK_UI.who) : '') +
+    setMain('<div class="toolbar">' + (all ? seg('who', [{ v: 'mine', l: 'Mine (' + esc(ME.doer || '-') + ')' }, { v: 'all', l: 'Everyone' }], TASK_UI.who) : '') +
       seg('when', [{ v: 'open', l: 'All open' }, { v: 'today', l: 'Today + late' }, { v: 'late', l: 'Late' }], TASK_UI.when) +
       '<input id="taskQ" placeholder="Filter…" value="' + esc(TASK_UI.q) + '"><span class="muted small">' + list.length + ' task(s)</span></div>' + taskTable(list, false));
     onSeg(e => { TASK_UI[e.target.dataset.seg] = e.detail; VIEWS.tasks.render(); });
@@ -141,7 +141,7 @@ VIEWS.punch = {
     if (!proc) { setMain('<div class="panel">No active FMS flow. Activate one in FMS Builder first.</div>'); return; }
     const extra = proc.spec.fields.filter(f => f.source === 'form' && !CORE_FIELDS.includes(f.key));
     const P = PUNCH;
-    let h = '<h1>' + (P.id ? 'Edit ' + esc(P.no) : 'Punch Order') + '</h1><div class="panel punch">';
+    let h = (P.id ? '<h1>Edit ' + esc(P.no) + '</h1>' : '') + '<div class="panel punch">';
 
     h += '<datalist id="dlArt">' + Store.all('items').map(i => '<option value="' + esc(i.code) + '">' + esc(i.name + ' · ' + (i.group || '')) + '</option>').join('') + '</datalist>';
     h += '<div class="hdr">' +
@@ -325,7 +325,7 @@ VIEWS.orders = {
         case 'done': return x.st.label === 'Dispatched'; case 'cancel': return x.o.priority === 'Cancelled'; default: return true;
       }
     });
-    let h = '<h1>Punched Orders</h1><div class="toolbar">' + seg('f', [{ v: 'open', l: 'Open' }, { v: 'late', l: 'Late' }, { v: 'hold', l: 'On hold' }, { v: 'done', l: 'Dispatched' }, { v: 'cancel', l: 'Cancelled' }, { v: 'all', l: 'All' }], ORD_UI.f) +
+    let h = '<div class="toolbar">' + seg('f', [{ v: 'open', l: 'Open' }, { v: 'late', l: 'Late' }, { v: 'hold', l: 'On hold' }, { v: 'done', l: 'Dispatched' }, { v: 'cancel', l: 'Cancelled' }, { v: 'all', l: 'All' }], ORD_UI.f) +
       '<input id="ordQ" placeholder="Order no / brand / PO / article / JC\u2026" value="' + esc(ORD_UI.q) + '"><span class="muted small">' + rows.length + ' order(s)</span><span class="grow"></span>' +
       '<button class="btn" data-act="orders-csv">Export CSV</button>' + (can('orders', 'edit') ? '<a class="btn primary" href="#/punch">+ Punch order</a>' : '') + '</div>';
     h += '<div class="tbl-wrap"><table><tr><th>Time Stamp</th><th>Job Card No.</th><th>Order Date</th><th>Tooling/Mould No</th><th>Buyer PO NO</th><th>Po Expiry Date</th><th>Brand</th><th>Article</th><th>Style</th><th>Colour</th><th>Gender</th><th class="num">Qty</th><th>Channel</th><th>Size</th><th>Category</th><th>Packing Assortment/Solid</th><th>Assortment Qty /Solid Qty</th></tr>' +
@@ -412,7 +412,7 @@ VIEWS.dispatch = {
   mod: 'dispatch', render(param) {
     if (['ready', 'upcoming', 'history'].includes(param)) { DSP_UI.tab = param; DSP_UI.open = null; }
     const edit = can('dispatch', 'edit');
-    let h = '<h1>Dispatch</h1><div class="tabs">' + [['ready', 'Ready (' + readyForDispatch().length + ')'], ['upcoming', 'Upcoming'], ['history', 'History']].map(([k, l]) => '<a data-act="dsp-tab" data-t="' + k + '" class="' + (DSP_UI.tab === k ? 'on' : '') + '">' + l + '</a>').join('') + '</div>';
+    let h = '<div class="tabs">' + [['ready', 'Ready (' + readyForDispatch().length + ')'], ['upcoming', 'Upcoming'], ['history', 'History']].map(([k, l]) => '<a data-act="dsp-tab" data-t="' + k + '" class="' + (DSP_UI.tab === k ? 'on' : '') + '">' + l + '</a>').join('') + '</div>';
     if (DSP_UI.tab === 'ready') {
       const list = readyForDispatch().sort((a, b) => resolveOrder(a).steps[resolveOrder(a).spec.process.endStep].planned - resolveOrder(b).steps[resolveOrder(b).spec.process.endStep].planned);
       h += '<div class="tbl-wrap"><table><tr><th>Order</th><th>Customer</th><th>PO expiry</th><th class="num">Pending qty</th><th>Dispatch due</th><th>Status</th><th></th></tr>' +
@@ -480,7 +480,7 @@ VIEWS.tracker = {
     const q = norm(TRK_UI.q);
     const orders = Store.all('orders').filter(o => o.process_id === proc.id).sort((a, b) => b.created_at < a.created_at ? -1 : 1)
       .filter(o => (TRK_UI.f === 'all' || orderState(o).open) && (!q || norm(o.no + ' ' + o.customer_name).includes(q)));
-    let h = '<h1>FMS Tracker</h1><div class="toolbar">' + (procs.length > 1 ? seg('pid', procs.map(p => ({ v: p.id, l: 'v' + p.version + (p.active ? ' (active)' : '') })), TRK_UI.pid) : '<span class="muted small">' + esc(proc.name) + ' v' + proc.version + '</span>') +
+    let h = '<div class="toolbar">' + (procs.length > 1 ? seg('pid', procs.map(p => ({ v: p.id, l: 'v' + p.version + (p.active ? ' (active)' : '') })), TRK_UI.pid) : '<span class="muted small">' + esc(proc.name) + ' v' + proc.version + '</span>') +
       seg('f', [{ v: 'open', l: 'Open orders' }, { v: 'all', l: 'All' }], TRK_UI.f) + '<input id="trkQ" placeholder="Filter…" value="' + esc(TRK_UI.q) + '"><span class="muted small">' + orders.length + ' order(s) · ✓ = done · red = late</span></div>';
     const steps = FMSEngine.topoOrder(proc.spec).map(id => proc.spec.steps.find(s => s.id === id));
     h += '<div class="tbl-wrap" style="max-height:75vh"><table class="trk"><tr><th>Order</th>' + steps.map(s => '<th title="' + esc(typeof s.doer === 'object' ? s.doer.name || '' : s.doer) + '">' + esc(s.name) + '</th>').join('') + '</tr>' +
