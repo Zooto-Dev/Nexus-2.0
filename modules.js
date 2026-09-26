@@ -463,18 +463,19 @@ function jcForm() {
     '<div class="jcl"><table class="jckv" id="jfDetails">' + jcfDetailRows() + '</table></div>' +
     '<label class="jcph jcph-form" title="Click to add the product photo"><span id="jfPhotoTag">PRODUCT PHOTO</span><input type="file" id="jfPhoto" accept="image/*" style="display:none"></label>' +
     '<div class="jcr"><table id="jfSizes" class="jcszt"><tr class="hd"><th>Order No</th><th>Order Date</th><th>SIZE</th><th>Act.Ord</th><th>With 2% Extra</th></tr>' +
-    Array.from({ length: 10 }, (x, i) => jcfSizeRow('', '', i === 5)).join('') +
+    Array.from({ length: 10 }, (x, i) => jcfSizeRow('', '', i === 3 ? 'status' : i === 5 ? 'rem' : '')).join('') +
     '<tr id="jfSzTotal" class="tt"><td></td><td>Total</td><td></td><td id="jfActT">0</td><td id="jfExtT">0</td></tr></table>' +
     '<div class="noprint" style="margin-top:4px"><a class="small" data-act="jcf-size">+ size row</a> <span id="jfSzMsg" class="small"></span></div></div></div></div>' +
-    '<div class="row" style="margin:10px 0"><label>Status' + seg('jfStatus', ['NA', 'ONLINE', 'OFFLINE'], 'NA') + '</label></div>' +
     '<h2>Material Requirements BOM</h2><div class="toolbar"><a class="small" data-act="jcf-bomrow">+ Add</a><a class="small" data-act="jcf-paste">Bulk Paste</a><span id="jfBomTag" class="muted small"></span></div>' +
     '<div id="jfPasteBox" class="hidden" style="margin-bottom:6px"><textarea id="jfPaste" rows="5" class="mono" placeholder="PROCESS | SECTION | ITEM NAME | NORMS | SUPPLIER  (one row per line; separate with Tab or | — Excel/Sheets paste works directly. Item name alone also works.)"></textarea> <button class="btn sm" data-act="jcf-paste-go">Import</button></div>' +
     dlMat('dlMatJc') + dlVendor() +
     '<div class="jcdoc"><table id="jfBom" class="jcbom"><tr class="hd"><th style="width:36px">Sr No</th><th style="width:100px">Process</th><th style="width:110px">Section</th><th style="width:120px">Item Category</th><th>Item Name</th><th style="width:90px">Item Code</th><th style="width:60px">Uom</th><th style="width:85px">Norms</th><th style="width:90px">Required Qty</th><th style="width:150px">Supplier</th><th style="width:26px"></th></tr></table></div>' +
     '</div><div class="card-f"><button class="btn primary" data-save data-act="jc-save">Submit Job Card</button><button class="btn" data-act="jc-new">Close</button><span id="njMsg" class="small"></span></div></div>';
 }
-function jcfSizeRow(size, act, withRem) {
-  return '<tr data-szrow><td data-c0>' + (withRem ? '<input id="jfRem" autocomplete="off">' : '') + '</td><td data-c1></td><td><input data-sz="size" value="' + esc(size || '') + '"></td><td><input data-sz="act" type="number" min="0" value="' + esc(act || '') + '"></td><td data-sz-ext></td></tr>';
+function jcfSizeRow(size, act, sp) {
+  const c0 = sp === 'rem' ? '<input id="jfRem" autocomplete="off">'
+    : sp === 'status' ? '<select id="jfStatus"><option value="NA">NA</option><option>ONLINE</option><option>OFFLINE</option></select>' : '';
+  return '<tr data-szrow><td data-c0>' + c0 + '</td><td data-c1></td><td><input data-sz="size" value="' + esc(size || '') + '"></td><td><input data-sz="act" type="number" min="0" value="' + esc(act || '') + '"></td><td data-sz-ext></td></tr>';
 }
 // Left details table; row 1 holds the JC picker — selecting a JC number fills the whole document
 function jcfDetailRows(o, l, jc) {
@@ -501,13 +502,17 @@ function jcfDecorate() {
       c0.classList.add('hl'); c1.classList.add('hl');
       return;
     }
+    if (i === 3) {
+      // the channel/status dropdown lives here; NA shows the order's channel, same as the print
+      const st = $('#jfStatus', c0);
+      if (st && st.options[0]) st.options[0].text = (o.channel || 'NA').toUpperCase();
+      return;
+    }
     c0.textContent = '';
     if (i === 0) { c0.textContent = ($('#jfNo') || {}).value || ''; c1.textContent = o.order_date ? fmtD(o.order_date) : ''; }
-    else if (i === 3) c0.textContent = (segVal($('[data-seg="jfStatus"]')) || 'NA') !== 'NA' ? segVal($('[data-seg="jfStatus"]')) : (o.channel || '').toUpperCase();
   });
 }
 document.addEventListener('input', e => { if (e.target.id === 'jfRem' && window.JCF) JCF.rem = e.target.value; });
-document.addEventListener('segchange', e => { if (e.target.dataset && e.target.dataset.seg === 'jfStatus') jcfDecorate(); });
 function jcfBomRow(l) {
   l = l || {}; const m = matBy(l.material) || {};
   return '<tr data-bomrow><td class="c" data-idx></td><td><input data-b="process" value="' + esc(l.process || '') + '"></td><td><input data-b="section" value="' + esc(l.section || '') + '"></td><td><input data-b="category" list="dlCatJc" value="' + esc(l.category || m.group || '') + '"></td>' +
@@ -623,7 +628,7 @@ ACTIONS['jc-save'] = () => {
   const useNo = wantNo && !Store.all('job_cards').some(x => norm(x.no) === norm(wantNo)) ? wantNo : jcNo();
   const j = Store.put('job_cards', {
     id: uid(), no: useNo, order_no: o.no, brand: o.customer_name, article: l.article, style: l.style || '', colour: l.colour || '', gender: l.gender || '', category: o.category,
-    qty: act, sizes, lines, photo: JCF.photo || '', line_status: segVal($('[data-seg="jfStatus"]')) || 'NA', remarks: $('#jfRem').value.trim(),
+    qty: act, sizes, lines, photo: JCF.photo || '', line_status: (($('#jfStatus') || {}).value || 'NA'), remarks: (($('#jfRem') || {}).value || '').trim(),
     swatch_status: 'Pending', status: 'Open', corrections: [], by: ME.name, at: nowIso()
   });
   audit('jc.create', j.no, o.no + ' · ' + l.article + ' × ' + act + ' · ' + lines.length + ' materials');
