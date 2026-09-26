@@ -277,7 +277,7 @@ ACTIONS['print-iss'] = el => {
 };
 
 function newBtn(label, act) { return '<button class="btn primary" data-act="' + act + '">+ ' + label + '</button>'; }
-function subTitle(t, extra) { return '<h1>' + t + (extra ? ' <span class="muted small">' + extra + '</span>' : '') + '</h1>'; }
+function subTitle(t) { return '<h1>' + t + '</h1>'; }
 
 /* ================= PURCHASE ================= */
 VIEWS.purchasedash = {
@@ -329,18 +329,20 @@ VIEWS.po = {
       (rows.length ? rows.map(p => {
         const oq = p.lines.reduce((s, l) => s + num(l.qty), 0), rq = p.lines.reduce((s, l) => s + num(l.received), 0); const st = poStatus(p);
         let row = '<tr class="click" data-act="po-toggle" data-id="' + esc(p.id) + '"><td><b>' + esc(p.no) + '</b><div class="muted small">' + esc(p.created_by || '') + '</div></td><td class="nowrap">' + fmtD(p.date) + '</td><td>' + esc(p.vendor) + '</td><td class="small">' + p.lines.map(l => esc(l.material) + ' × ' + qtyFmt(l.qty)).join('<br>') + '</td><td class="num">' + qtyFmt(oq) + '</td><td class="num">' + qtyFmt(rq) + '</td><td class="nowrap">' + fmtD(p.expected) + '</td><td><span class="st ' + poStCls(st) + '">' + st + '</span>' + ((p.moq_log || []).length ? ' <span class="st Pending" title="Ordered above net requirement because of MOQ">MOQ +' + qtyFmt(p.moq_log.reduce((a, x) => a + num(x.extra), 0)) + '</span>' : '') + (p.approved_by ? '<div class="muted small">' + esc(p.approved_by) + '</div>' : '') + '</td>' +
-          '<td class="right nowrap">' + (st === 'Pending Approval' && canApprove() ? '<button class="btn sm primary" data-act="po-approve" data-id="' + esc(p.id) + '">Approve</button> <button class="btn sm danger" data-act="po-reject" data-id="' + esc(p.id) + '" data-confirm="Reject PO?">Reject</button>' : '') +
+          '<td class="right nowrap">' + (st === 'Pending Approval' && canApprovePo(p) ? '<button class="btn sm primary" data-act="po-approve" data-id="' + esc(p.id) + '">Approve</button> <button class="btn sm danger" data-act="po-reject" data-id="' + esc(p.id) + '" data-confirm="Reject PO?">Reject</button>' : '') +
           (edit && (st === 'Open' || st === 'Pending Approval') ? ' <button class="btn ghost sm danger" data-act="po-cancel" data-id="' + esc(p.id) + '" data-confirm="Cancel PO?">Cancel</button>' : '') + '</td></tr>';
         if (PO_UI.open === p.id) row += '<tr class="inline-form"><td colspan="9">' + poDetail(p) + '</td></tr>';
         return row;
       }).join('') : '<tr><td colspan="9" class="empty">No purchase orders</td></tr>') + '</table></div>';
-    if (!canApprove()) h += '<div class="muted small" style="margin-top:8px">Only Admin/Manager can approve or reject POs.</div>';
     setMain(h);
     if (PO_UI.form && edit) poFormSetup();
     onSeg(e => { if (e.target.dataset.seg === 'poMode') { PO_UI.mode = e.detail; poFormSetup(); const v = vendorBy($('#npVen').value); if (v && e.detail === 'jc') poFillJc(v.name); return; } PO_UI.f = e.detail; VIEWS.po.render(); });
     $('#poQ').addEventListener('input', e => { PO_UI.q = e.target.value; clearTimeout(PO_UI.t); PO_UI.t = setTimeout(() => { VIEWS.po.render(); const i = $('#poQ'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }, 250); });
   }
 };
+// the person who raised a PO never approves it; only the Super Admin (system role) is exempt
+function poOwn(p) { return !!ME && ((p.created_by_id && p.created_by_id === ME.id) || (!p.created_by_id && p.created_by === ME.name)); }
+function canApprovePo(p) { const r = myRole(); return canApprove() && (!poOwn(p) || !!(r && r.system)); }
 function poDetail(p) {
   const v = vendorBy(p.vendor) || {}; const total = p.lines.reduce((s, l) => s + num(l.qty) * num(l.rate), 0);
   return '<div class="po-doc" style="padding:8px 4px"><div class="row" style="justify-content:space-between"><div><b>' + esc(settings().company || '') + '</b><div class="muted small">' + esc(settings().address || '') + (settings().gstin ? ' · GSTIN ' + esc(settings().gstin) : '') + '</div></div>' +
@@ -356,8 +358,8 @@ function poDetail(p) {
 ACTIONS['po-toggle'] = (el, ev) => { if (ev.target.closest('button')) return; PO_UI.open = PO_UI.open === el.dataset.id ? null : el.dataset.id; VIEWS.po.render(); };
 ACTIONS['po-print'] = el => { document.body.classList.add('print-po'); window.print(); setTimeout(() => document.body.classList.remove('print-po'), 500); };
 ACTIONS['po-approve'] = el => {
-  if (!canApprove()) { flash('Only Admin/Manager can approve POs.', 'err'); return; }
   const p = Store.get('purchase_orders', el.dataset.id);
+  if (!canApprovePo(p)) { flash(poOwn(p) ? 'You raised this PO — someone else must approve it.' : 'Only Admin/Manager can approve POs.', 'err'); return; }
   if (p.approval === 'Approved') { flash('This PO is already approved.', 'err'); return; }
   p.approval = 'Approved'; p.approved_by = ME.name; p.approved_at = nowIso(); Store.put('purchase_orders', p);
   // update "PO Raised" on the linked JC lines
@@ -365,12 +367,12 @@ ACTIONS['po-approve'] = el => {
   audit('po.approve', p.no, p.vendor); flash(esc(p.no) + ' approved — now available for GRN/followup.'); VIEWS.po.render();
 };
 ACTIONS['po-reject'] = el => {
-  if (!canApprove()) { flash('Only Admin/Manager can reject POs.', 'err'); return; }
-  const p = Store.get('purchase_orders', el.dataset.id); p.approval = 'Rejected'; p.approved_by = ME.name; Store.put('purchase_orders', p);
+  const p = Store.get('purchase_orders', el.dataset.id);
+  if (!canApprovePo(p)) { flash(poOwn(p) ? 'You raised this PO — someone else must approve or reject it.' : 'Only Admin/Manager can reject POs.', 'err'); return; } p.approval = 'Rejected'; p.approved_by = ME.name; Store.put('purchase_orders', p);
   audit('po.reject', p.no, p.vendor); flash(esc(p.no) + ' rejected.'); VIEWS.po.render();
 };
 function poForm() {
-  return '<div class="card"><div class="card-h"><b>New Purchase Order</b><span class="muted small">' + fyNo('purchase_orders', 'PO', 3) + ' · goes for approval on save</span></div><div class="card-b">' + dlVendor() + dlMat('dlMatPo') +
+  return '<div class="card"><div class="card-h"><b>New Purchase Order</b><span class="muted small">' + fyNo('purchase_orders', 'PO', 3) + '</span></div><div class="card-b">' + dlVendor() + dlMat('dlMatPo') +
     '<div class="row"><label>Mode' + seg('poMode', [{ v: 'jc', l: 'From JC requirement' }, { v: 'manual', l: 'Manual' }], PO_UI.mode || 'jc') + '</label>' +
     '<label>Vendor *<input id="npVen" list="dlVen"></label><label>PO date<input id="npDate" type="date" value="' + todayYmd() + '"></label><label>Expected delivery *<input id="npExp" type="date"></label><label style="flex:1">Remarks<input id="npRem"></label></div>' +
     '<div id="npHint" class="muted small" style="margin:6px 0"></div>' +
@@ -389,7 +391,7 @@ function poFormSetup() {
   $('#npFoot').innerHTML = '';
   if (!document.getElementById('dlJcPo')) document.body.insertAdjacentHTML('beforeend', '<datalist id="dlJcPo"></datalist>');
   document.getElementById('dlJcPo').innerHTML = Store.all('job_cards').filter(j => j.status !== 'Closed').map(j => '<option value="' + esc(j.no) + '">').join('');
-  $('#npHint').textContent = mode === 'manual' ? '' : 'Select a vendor — all open JC materials still to be ordered from that supplier load automatically.';
+  $('#npHint').textContent = '';
 }
 // JC mode: rows come from the net requirement split over JCs; qty is computed, never typed.
 // An MOQ override may raise one item's qty above net — it is logged on the PO and mailed to the alert person.
@@ -404,7 +406,7 @@ function poJcLines() {
     const m = matBy(r.material) || {}; const o = PO_UI.moq[r.material];
     const jcs = r.jcs.map(x => jcBy(x.jc)).filter(Boolean);
     return { key: r.material, r, m, qty: o && o.qty > r.net + 1e-9 ? o.qty : r.net, moq: !!(o && o.qty > r.net + 1e-9),
-      brand: Array.from(new Set(jcs.map(j => j.brand).filter(Boolean))).join(', '), photo: (jcs.find(j => j.photo) || {}).photo || '' };
+      brand: Array.from(new Set(jcs.map(j => j.brand).filter(Boolean))).join(', '), photo: m.photo || '' };
   });
 }
 function poJcDraw() {
@@ -433,7 +435,7 @@ function poJcDraw() {
   }).join('');
   $('#npLines').innerHTML = lines.length ? html : '<tr><td colspan="13" class="empty">Nothing to order from this vendor — net requirement is covered by stock and open POs.</td></tr>';
   const f = $('#npFoot'); if (f) f.innerHTML = lines.length ? '<td colspan="10" class="right"><b>Total</b></td><td class="num"><b>' + qtyFmt(q) + '</b></td><td class="num"><b>' + money(amt) + '</b></td><td class="num"><b>' + money(tot) + '</b></td>' : '';
-  $('#npHint').innerHTML = lines.length ? 'Qty = <b>net requirement</b> (JC balance − stock − open PO + min level), item-wise — it cannot be typed. Use <b>MOQ</b> only when the vendor needs a larger minimum order; it is logged and mailed.' : '';
+  $('#npHint').innerHTML = '';
 }
 document.addEventListener('input', e => {
   const tr = e.target.closest && e.target.closest('#npLines tr[data-jrow]'); if (!tr) return;
@@ -504,7 +506,7 @@ ACTIONS['po-save'] = () => {
   const sig = norm(ven) + '|' + lines.map(l => l.material + ':' + l.qty).sort().join(',');
   const dup = Store.all('purchase_orders').find(p => p._sig === sig && (Date.now() - new Date(p.at)) < 60000);
   if (dup) { $('#npMsg').innerHTML = '<span class="late-txt">An identical PO ' + esc(dup.no) + ' was just created (double-submit guard).</span>'; return; }
-  const po = Store.put('purchase_orders', { id: uid(), no: fyNo('purchase_orders', 'PO', 3), date: $('#npDate').value || todayYmd(), vendor: vm.name, expected: exp, remarks: $('#npRem').value.trim(), lines, moq_log: moqLog, followups: [], approval: 'Pending', created_by: ME.name, at: nowIso(), _sig: sig });
+  const po = Store.put('purchase_orders', { id: uid(), no: fyNo('purchase_orders', 'PO', 3), date: $('#npDate').value || todayYmd(), vendor: vm.name, expected: exp, remarks: $('#npRem').value.trim(), lines, moq_log: moqLog, followups: [], approval: 'Pending', created_by: ME.name, created_by_id: ME.id, at: nowIso(), _sig: sig });
   audit('po.create', po.no, ven + ' · ' + qtyFmt(lines.reduce((s, l) => s + l.qty, 0)) + ' qty');
   let mailNote = '';
   if (moqLog.length) {
@@ -540,7 +542,7 @@ VIEWS.sourcing = {
       cols: [{ k: 'material', l: 'Material', w: 140, upper: true }, { k: 'vendor', l: 'Vendor' }, { k: 'rate', l: 'Rate ₹', type: 'number', w: 90 }, { k: 'moq', l: 'MOQ', type: 'number', w: 80 }, { k: 'lead_days', l: 'Lead days', type: 'number', w: 80 }, { k: 'remark', l: 'Remark' }],
       validate: d => !String(d.material || '').trim() ? 'Material is required.' : !String(d.vendor || '').trim() ? 'Vendor is required.' : (Store.all('sourcing').some(x => x.id !== d.id && norm(x.material) === norm(d.material) && norm(x.vendor) === norm(d.vendor)) ? 'This material+vendor already exists.' : '')
     });
-    $('#main').insertAdjacentHTML('beforeend', '<div class="muted small" style="margin-top:8px">A material can have multiple vendors — rates here are used when creating POs.</div>');
+    $('#main').insertAdjacentHTML('beforeend', '');
   }
 };
 
@@ -920,7 +922,7 @@ VIEWS.grn = {
         let row = '<tr><td><b>' + esc(p.no) + '</b></td><td>' + esc(p.vendor) + '</td><td class="nowrap ' + (p.expected < todayYmd() ? 'late-txt' : '') + '">' + fmtD(p.expected) + '</td><td class="num">' + qtyFmt(poPending(p)) + '</td><td class="right">' + (edit ? '<button class="btn sm ' + (GRN_UI.open === p.id ? '' : 'primary') + '" data-act="grn-open" data-id="' + esc(p.id) + '">' + (GRN_UI.open === p.id ? 'Close' : 'Make GRN') + '</button>' : '') + '</td></tr>';
         if (GRN_UI.open === p.id) row += '<tr class="inline-form"><td colspan="5"><table style="max-width:880px;margin:6px 0"><tr><th>Material</th><th>JC</th><th class="num">PO Pending</th><th class="num">JC Qty</th><th class="num">Inv Qty</th><th class="num">GRN Qty</th><th class="num">Reject</th><th class="num">Short</th><th class="num">Excess</th><th>Rack</th></tr>' +
           p.lines.map((l, i) => { const pen = Math.max(0, num(l.qty) - num(l.received)); const mt = matBy(l.material) || {}; const jq = l.jc_no ? (((jcBy(l.jc_no) || {}).lines || []).find(x => norm(x.material) === norm(l.material)) || {}).required : ''; return '<tr data-i="' + i + '" data-pen="' + pen + '"><td>' + esc(l.material) + '</td><td class="small">' + esc(l.jc_no || '') + '</td><td class="num">' + qtyFmt(pen) + '</td><td class="num muted">' + (jq ? qtyFmt(jq) : '—') + '</td><td><input class="qty" type="number" min="0" step="any" data-gi value="' + (pen || '') + '"' + (pen ? '' : ' disabled') + '></td><td><input class="qty" type="number" min="0" step="any" data-ga value="' + (pen || '') + '"' + (pen ? '' : ' disabled') + '></td><td><input class="qty" type="number" min="0" step="any" data-gr value="0"' + (pen ? '' : ' disabled') + '></td><td class="num muted" data-gs>—</td><td class="num muted" data-gx>—</td><td><input data-grack value="' + esc(mt.rack || '') + '" style="width:60px"></td></tr>'; }).join('') +
-          '</table><div class="row"><label>Invoice / challan no *<input id="grnInv" list="dlGrnInv"><datalist id="dlGrnInv">' + Store.all('inwards').filter(iw => norm(iw.vendor) === norm(p.vendor) && iw.bill_no && iw.swatch_match !== 'Fail').map(iw => '<option value="' + esc(iw.bill_no) + '">' + esc(iw.no) + '</option>').join('') + '</datalist></label><label>Date<input id="grnDate" type="date" value="' + todayYmd() + '"></label><button class="btn primary" data-act="grn-save" data-id="' + esc(p.id) + '">Save GRN</button><span id="grnMsg" class="small"></span></div><div class="row" id="grnWhyBox" style="display:none;margin-top:4px"><label style="flex:1">Reject reason *<input id="grnWhy"></label></div><div class="muted small" style="margin-top:4px">Accept = stock · Reject = rejection stock (RTV) · <b>Short</b> = billed but not received (auto Debit Note task) · <b>Excess</b> = billed beyond PO pending</div></td></tr>';
+          '</table><div class="row"><label>Invoice / challan no *<input id="grnInv" list="dlGrnInv"><datalist id="dlGrnInv">' + Store.all('inwards').filter(iw => norm(iw.vendor) === norm(p.vendor) && iw.bill_no && iw.swatch_match !== 'Fail').map(iw => '<option value="' + esc(iw.bill_no) + '">' + esc(iw.no) + '</option>').join('') + '</datalist></label><label>Date<input id="grnDate" type="date" value="' + todayYmd() + '"></label><button class="btn primary" data-act="grn-save" data-id="' + esc(p.id) + '">Save GRN</button><span id="grnMsg" class="small"></span></div><div class="row" id="grnWhyBox" style="display:none;margin-top:4px"><label style="flex:1">Reject reason *<input id="grnWhy"></label></div></td></tr>';
         return row;
       }).join('') : '<tr><td colspan="5" class="empty">No open POs — create a Purchase Order first</td></tr>') + '</table></div>';
     const gs = Store.all('grns').slice().sort((a, b) => b.no < a.no ? -1 : 1).slice(0, 15);
@@ -988,7 +990,7 @@ VIEWS.issuance = {
     h += '<h2 style="margin-top:0">Issue approvals (' + pend.length + ')</h2><div class="tbl-wrap"><table><tr><th>No</th><th>Material</th><th class="num">Qty</th><th>Source</th><th>To</th><th>Req</th><th>By</th>' + (appr ? '<th></th>' : '') + '</tr>' +
       (pend.length ? pend.map(i => '<tr><td><b>' + esc(i.no) + '</b></td><td>' + esc(i.material) + '</td><td class="num">' + qtyFmt(i.qty) + '</td><td class="small">' + esc(i.source || 'AUTO') + '</td><td>' + esc(i.to_jc || i.to_dept || '') + '</td><td>' + esc(i.req_no || '') + '</td><td>' + esc(i.by) + '</td>' +
         (appr ? '<td class="right nowrap"><button class="btn sm primary" data-act="iss-approve" data-id="' + esc(i.id) + '">Approve</button> <button class="btn sm ghost danger" data-act="iss-deny" data-id="' + esc(i.id) + '" data-confirm="Reject?">Reject</button></td>' : '') + '</tr>').join('') : '<tr><td colspan="8" class="empty">No issue approvals pending</td></tr>') + '</table></div>' +
-      (appr ? '' : '<div class="muted small" style="margin-top:4px">Only Admin/Manager can approve — stock is deducted on approval.</div>');
+      (appr ? '' : '');
 
     // 2) pending requisitions
     h += '<h2>Pending requisitions</h2><div class="tbl-wrap"><table><tr><th>Req</th><th>Date</th><th>JC / Dept</th><th>Materials</th><th>Stock check</th>' + (edit ? '<th></th>' : '') + '</tr>' +
@@ -1008,7 +1010,7 @@ VIEWS.issuance = {
       '<label>Condition' + seg('lrCond', [{ v: 'used', l: 'Used — not returnable' }, { v: 'unused', l: 'Unused — back to vendor' }], 'used') + '</label>' +
       '<label>Vendor <span class="muted small">(if back to vendor)</span><input id="lrVen" list="dlVen"></label><label>Remark<input id="lrRem"></label>' +
       '<button class="btn primary" data-act="lr-save">Save line rejection</button><span id="lrMsg" class="small"></span></div>' +
-      '<div class="muted small">Goes to Line Rejection stock (not good stock). The same qty re-opens on the JC, so the replacement issue is not counted as excess.</div></div>';
+      '</div>';
     if (ISS_UI.form && edit) h += '<div class="panel" style="margin-bottom:10px">' + dlMat('dlMatIs') + '<datalist id="dlJc2">' + Store.all('job_cards').filter(j => j.status !== 'Closed').map(j => '<option value="' + esc(j.no) + '">').join('') + '</datalist>' +
       '<div class="row"><label>Material *<input id="isMat" list="dlMatIs"></label><label>Issue Qty *<input id="isQty" type="number" min="0" style="width:100px"></label><label>Job Card<input id="isJc" list="dlJc2"></label>' +
       '<label>Issued To * <span class="muted small">(Person / Department)</span><input id="isTo" list="dlDept"><datalist id="dlDept">' + ['Production', 'Development', 'Merchant', 'Dispatch'].map(d => '<option>' + d + '</option>').join('') + '</datalist></label>' +
@@ -1016,7 +1018,7 @@ VIEWS.issuance = {
       '<label>Issue Source' + seg('isSrc', [{ v: 'AUTO', l: 'Auto (reserved→open)' }, { v: 'RSJW', l: 'RESERVED STOCK' }, { v: 'OPEN', l: 'OPEN STOCK' }], 'AUTO') + '</label><button class="btn primary" data-act="iss-save">Request issue</button><span id="isMsg" class="small"></span></div></div>';
     if (ISS_UI.ret && edit) h += '<div class="panel" style="margin-bottom:10px">' + dlMat('dlMatRt') + '<datalist id="dlJc3">' + Store.all('job_cards').map(j => '<option value="' + esc(j.no) + '">').join('') + '</datalist>' +
       '<div class="row"><label>Job Card *<input id="rtJc" list="dlJc3"></label><label>Material *<input id="rtMat" list="dlMatRt"></label><label>Return Qty *<input id="rtQty" type="number" min="0" style="width:100px"></label><label>Returned By *<input id="rtBy" value="' + esc(ME.name) + '"></label><label style="flex:1">Remark <span class="muted small">(Optional)</span><input id="rtRem"></label><button class="btn primary" data-act="ret-save">Return to stock</button><span id="rtMsg" class="small"></span></div>' +
-      '<div class="muted small">Returns go to open stock. Cannot return more than issued.</div></div>';
+      '</div>';
 
     // 4) history
     const iss = Store.all('issues').filter(i => i.status !== 'Pending').slice().sort((a2, b2) => (b2.at || '') < (a2.at || '') ? -1 : 1).slice(0, 15);
@@ -1162,7 +1164,7 @@ VIEWS.rtv = {
       const avail = srcRows.map(r => { const k = norm(r.vendor + '|' + r.material + '|' + r.source); const take = Math.min(r.qty, Math.max(0, r.qty - (returned[k] || 0))); returned[k] = Math.max(0, (returned[k] || 0) - r.qty); return Object.assign({}, r, { avail: take }); }).filter(r => r.avail > 0);
       const vendors = Array.from(new Set(avail.map(r => r.vendor)));
       const sel = RTV_UI.vendor || vendors[0] || '';
-      h += '<div class="card"><div class="card-h"><b>New RTV</b><span class="muted small">return rejection stock to the vendor — prints an NRGP</span></div><div class="card-b"><div class="row">' +
+      h += '<div class="card"><div class="card-h"><b>New RTV</b></div><div class="card-b"><div class="row">' +
         '<label>Vendor *<select id="rvVen">' + (vendors.length ? vendors.map(v => '<option' + (v === sel ? ' selected' : '') + '>' + esc(v) + ' (' + avail.filter(r => r.vendor === v).length + ')</option>').join('') : '<option value="">No rejection stock</option>') + '</select></label>' +
         '<label>Reason<select id="rvWhy">' + RTV_REASONS.map(x => '<option>' + x + '</option>').join('') + '</select></label>' +
         '<label>Vehicle No<input id="rvVeh" placeholder="HR-26-XX-1234"></label><label>Driver Name<input id="rvDrv"></label><label style="flex:1">Remarks<input id="rvRem" placeholder="Optional remarks (printed on NRGP)"></label></div>' +
@@ -1373,7 +1375,7 @@ VIEWS.requisition = {
     if (stale.length) h += '<div class="panel" style="border-left:3px solid var(--late);margin-bottom:10px"><b>' + stale.length + ' slip(s) pending for 24h+</b> — new slips are blocked until Store issues/rejects them (Manager/Admin exempt). <a href="#/issuance">Issuance →</a></div>';
     h += '<div class="toolbar"><span class="grow"></span>' + (edit ? newBtn('New requisition', 'req-new') : '') + '</div>';
     if (REQ_UI.form && edit) {
-      h += '<div class="card"><div class="card-h"><b>New Requisition Slip</b><span class="muted small">select a JC — pending materials load automatically</span></div><div class="card-b">' + dlMat('dlMatR') + '<datalist id="dlJc">' + Store.all('job_cards').filter(j => j.status !== 'Closed').map(j => '<option value="' + esc(j.no) + '">' + esc(j.article) + '</option>').join('') + '</datalist>' +
+      h += '<div class="card"><div class="card-h"><b>New Requisition Slip</b></div><div class="card-b">' + dlMat('dlMatR') + '<datalist id="dlJc">' + Store.all('job_cards').filter(j => j.status !== 'Closed').map(j => '<option value="' + esc(j.no) + '">' + esc(j.article) + '</option>').join('') + '</datalist>' +
         '<div class="row"><label>Job Card *<input id="nrJc" list="dlJc"></label><label>Requested By<input value="' + esc(ME.name) + '" readonly></label><button class="btn sm" data-act="req-fill">Fill All Pending Qty</button></div>' +
         '<div class="tbl-wrap" style="margin-top:8px"><table id="nrTable" style="max-width:820px"><tr><th>#</th><th>Item Name</th><th>UOM</th><th class="num">Req Qty</th><th class="num">Stock</th><th>Coverage</th><th class="num" style="width:120px">Requisition Qty</th><th style="width:30px"></th></tr></table></div>' +
         '<a class="small" data-act="req-extra">+ Add Extra Item</a>' +
@@ -1573,7 +1575,7 @@ VIEWS.vendors = {
       validate: d => uniq('vendors', 'name', 'Vendor')(d),
       inUse: d => Store.all('purchase_orders').some(p => norm(p.vendor) === norm(d.name)) ? 'Vendor has POs — cannot delete.' : ''
     });
-    $('#main').insertAdjacentHTML('beforeend', '<div class="muted small" style="margin-top:8px">A vendor mobile or email is required to create a PO.</div>');
+    $('#main').insertAdjacentHTML('beforeend', '');
   }
 };
 

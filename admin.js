@@ -149,8 +149,7 @@ VIEWS.users = {
       canDelete: d => d.id !== ME.id,
       inUse: d => d.id === ME.id ? 'You cannot delete yourself.' : ''
     });
-    $('#main').insertAdjacentHTML('beforeend', '<div class="muted small" style="margin-top:8px">Doer name links a user to FMS steps — every step whose doer is e.g. <b>SALES</b> shows in My Tasks for all users with doer SALES. ' +
-      (CLOUD ? 'Cloud mode: also create the login for this email in Supabase → Authentication → Users (Invite user).' : 'Local mode: users sign in with email + PIN.') + '</div>');
+    $('#main').insertAdjacentHTML('beforeend', '');
   }
 };
 
@@ -158,7 +157,7 @@ VIEWS.users = {
 VIEWS.roles = {
   mod: 'roles', render() {
     const edit = can('roles', 'edit'); const roles = Store.all('roles');
-    let h = '<h1>Roles &amp; Access</h1><div class="muted small" style="margin-bottom:8px">Click a cell to cycle <b>—</b> → <b>View</b> → <b>Edit</b>. Changes save immediately.</div>';
+    let h = '<h1>Roles &amp; Access</h1>';
     h += '<div class="tbl-wrap"><table><tr><th>Module</th>' + roles.map(r => '<th class="nowrap">' + esc(r.name) + '<div class="muted small" style="font-weight:400">' + Store.all('users').filter(u => u.role_id === r.id).length + ' user(s)' + (edit && !r.system && !Store.all('users').some(u => u.role_id === r.id) ? ' · <a data-act="role-del" data-r="' + esc(r.id) + '" data-confirm="Delete?">delete</a>' : '') + '</div></th>').join('') + '</tr>' +
       MODULES.map(m => '<tr><td>' + esc(m.label) + (m.note ? '<div class="muted small">' + esc(m.note) + '</div>' : '') + '</td>' + roles.map(r => {
         const p = r.system ? 'edit' : ((r.perms || {})[m.key] || 'none');
@@ -166,7 +165,7 @@ VIEWS.roles = {
         return '<td' + (edit && !r.system ? ' class="click" data-act="perm" data-r="' + esc(r.id) + '" data-m="' + m.key + '" style="cursor:pointer"' : '') + '>' + txt + '</td>';
       }).join('') + '</tr>').join('') + '</table></div>';
     if (edit) h += '<div class="row" style="margin-top:10px"><label>New role<input id="newRole" placeholder="e.g. Merchandiser"></label><label>Copy access from<select id="copyRole"><option value="">— none —</option>' + roles.map(r => '<option value="' + esc(r.id) + '">' + esc(r.name) + '</option>').join('') + '</select></label><button class="btn" data-act="role-add">Add role</button></div>';
-    h += '<div class="muted small" style="margin-top:8px">Admin always has full access. Access is checked on every screen and every action.</div>';
+    h += '';
     setMain(h);
   }
 };
@@ -191,13 +190,13 @@ VIEWS.settings = {
     let h = '<h1>Settings</h1><div class="grid2"><div>';
     h += '<div class="panel"><h2 style="margin-top:0">Company</h2><div class="row"><label style="flex:1">Company name<input data-s="company" value="' + esc(s.company) + '"' + dis + '></label><label>GSTIN<input data-s="gstin" value="' + esc(s.gstin) + '"' + dis + '></label></div><label style="margin-top:8px">Address<input data-s="address" value="' + esc(s.address) + '"' + dis + '></label></div>' +
       '<div class="panel" style="margin-top:12px"><h2 style="margin-top:0">Alert emails</h2><label>MOQ over-order alert \u2014 concerned person email(s), comma separated<input data-s="alert_moq_email" value="' + esc(s.alert_moq_email || '') + '"' + dis + ' placeholder="purchase.head@company.com"></label>' +
-      '<div class="muted small" style="margin-top:6px">' + Store.all('mail_queue').filter(x => x.status === 'queued').length + ' alert(s) waiting to be sent.</div></div>';
+      '';
     h += '<div class="panel" style="margin-top:12px"><h2 style="margin-top:0">Working calendar (used for every TAT &amp; delay)</h2><div class="row">' +
       [['open', 'Office opens'], ['close', 'Office closes'], ['lunchStart', 'Lunch from'], ['lunchEnd', 'Lunch to']].map(([k, l]) => '<label>' + l + '<input type="time" data-cal="' + k + '" value="' + esc(c[k]) + '"' + dis + '></label>').join('') + '</div>' +
       '<div style="margin-top:10px"><span class="muted small">Weekly off</span><div class="row" style="margin-top:4px">' + days.map((d, i) => '<label style="flex-direction:row;align-items:center;gap:4px;min-width:0"><input type="checkbox" data-off="' + i + '"' + ((c.weeklyOff || []).includes(i) ? ' checked' : '') + dis + '>' + d + '</label>').join('') + '</div></div>' +
       '<div style="margin-top:10px"><span class="muted small">Half-day TAT (1.5 days)</span><div style="margin-top:4px">' + seg('halfDays', [{ v: 'exact', l: 'Exact — 1.5 days = 1.5 × office hours' }, { v: 'truncate', l: 'Sheet style — 1.5 → 1 day' }], c.halfDays, edit ? '' : 'data-locked') + '</div></div></div>';
     const OPT_KEYS = [['category', 'Category'], ['channel', 'Channel'], ['gender', 'Gender'], ['packing', 'Packing']];
-    h += '<div class="panel" style="margin-top:12px"><h2 style="margin-top:0">Dropdown Options</h2><div class="muted small" style="margin-bottom:8px">These options drive the dropdowns in Order Punch, Job Card and Articles. Separate values with commas. The brand list comes from Merchant → Brands.</div>' +
+    h += '<div class="panel" style="margin-top:12px"><h2 style="margin-top:0">Dropdown Options</h2>' +
       OPT_KEYS.map(([k, l]) => '<label style="margin-bottom:8px">' + l + '<input data-opt="' + k + '" value="' + esc(optList(k).join(', ')) + '"' + (edit ? '' : ' disabled') + '></label>').join('') + '</div>';
     h += '<div class="panel" style="margin-top:12px"><h2 style="margin-top:0">Data</h2><div class="toolbar"><button class="btn" data-act="backup">Download full backup (JSON)</button>' +
       (edit ? '<label class="btn" style="flex-direction:row;color:var(--text)">Restore backup<input type="file" id="restoreFile" accept=".json,application/json" class="hidden"></label>' : '') +

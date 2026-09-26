@@ -308,3 +308,6 @@ td.wrap { white-space: normal; }
 /* PO: MOQ override row */
 tr.moqrow td { background: #fff8e6; }
 #npLines [data-jrem] { width: 100%; min-width: 110px; }
+
+.icphoto { display: inline-flex; align-items: center; cursor: pointer; font-size: 12px; font-weight: normal; }
+.icphoto img { height: 56px; border-radius: 3px; border: 1px solid #b9d4d4; }

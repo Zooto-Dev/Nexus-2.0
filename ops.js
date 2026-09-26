@@ -141,7 +141,7 @@ VIEWS.punch = {
     if (!proc) { setMain('<div class="panel">No active FMS flow. Activate one in FMS Builder first.</div>'); return; }
     const extra = proc.spec.fields.filter(f => f.source === 'form' && !CORE_FIELDS.includes(f.key));
     const P = PUNCH;
-    let h = '<h1>' + (P.id ? 'Edit ' + esc(P.no) : 'Punch Order') + ' <span class="muted small">Enter = next field · <span class="kbd">Ctrl</span>+<span class="kbd">S</span> save</span></h1><div class="panel punch">';
+    let h = '<h1>' + (P.id ? 'Edit ' + esc(P.no) : 'Punch Order') + '</h1><div class="panel punch">';
 
     h += '<datalist id="dlArt">' + Store.all('items').map(i => '<option value="' + esc(i.code) + '">' + esc(i.name + ' · ' + (i.group || '')) + '</option>').join('') + '</datalist>';
     h += '<div class="hdr">' +
@@ -178,7 +178,7 @@ VIEWS.punch = {
             l.sizes.map((sz, k) => '<span class="szbox"><input data-szl data-i="' + i + '" data-k="' + k + '" value="' + esc(sz.size) + '" title="Size"><input type="number" min="0" data-szq data-i="' + i + '" data-k="' + k + '" value="' + (sz.qty || '') + '" placeholder="qty" title="Qty for size ' + esc(sz.size) + '"></span>').join('') +
             '<a data-act="punch-size-add" data-i="' + i + '" class="small">+ size</a>' +
             '<button class="btn sm" data-act="punch-sz-done" data-i="' + i + '">Done ✓</button></div>'
-            : '<span class="muted small">Enter a Size Run (e.g. <b>6-10</b>) for size-wise qty boxes</span>') + '</td></tr>';
+            : '') + '</td></tr>';
         return row;
       }).join('') +
       '<tr><td></td><td colspan="4"><a data-act="punch-add">+ Add article</a></td><td></td><td class="num"><b id="pTq"></b></td><td></td><td></td><td></td></tr></table>';

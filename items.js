@@ -47,8 +47,9 @@ VIEWS.itemcreate = {
     const m = $('#main');
     m.addEventListener('change', e => {
       const t = e.target;
-      if (t.id === 'icCat') { IC_UI.cat = t.value; IC_UI.type = ''; IC_UI.vals = {}; IC_UI.extra = {}; VIEWS.itemcreate.render(); }
+      if (t.id === 'icCat') { IC_UI.cat = t.value; IC_UI.type = ''; IC_UI.vals = {}; IC_UI.extra = {}; IC_UI.photo = ''; VIEWS.itemcreate.render(); }
       if (t.id === 'icType') { IC_UI.type = t.value; IC_UI.vals = {}; IC_UI.extra = {}; VIEWS.itemcreate.render(); }
+      if (t.id === 'icPhoto') readImg(t.files[0], src => { IC_UI.photo = src; VIEWS.itemcreate.render(); });
       if (t.dataset.icAttr) { IC_UI.vals[t.dataset.icAttr] = t.value; VIEWS.itemcreate.render(); const nx = $$('select[data-ic-attr]').find(s => !s.value && !s.disabled); if (nx) nx.focus(); }
     });
     m.addEventListener('input', e => { if (e.target.dataset.icx) IC_UI.extra[e.target.dataset.icx] = e.target.value; });
@@ -74,7 +75,8 @@ function icCreateHtml(edit) {
   });
   if (t) {
     const inp = (k, label, def, type) => '<tr><td class="k">' + label + '</td><td><input data-icx="' + k + '"' + (type ? ' type="' + type + '" min="0" step="any"' : '') + ' value="' + esc(X[k] != null ? X[k] : def) + '"></td></tr>';
-    rows += '<tr><td class="k">UOM</td><td><select data-icx="uom">' + UOMS.map(u => '<option' + (u === (X.uom || t.uom || 'PCS') ? ' selected' : '') + '>' + u + '</option>').join('') + '</select></td></tr>' +
+    rows += '<tr><td class="k">Photo</td><td><label class="icphoto">' + (IC_UI.photo ? '<img src="' + IC_UI.photo + '">' : '<span class="muted">Add photo (optional)</span>') + '<input type="file" id="icPhoto" accept="image/*" style="display:none"></label>' + (IC_UI.photo ? ' <a class="small" data-act="ic-photo-clear">Remove</a>' : '') + '</td></tr>' +
+      '<tr><td class="k">UOM</td><td><select data-icx="uom">' + UOMS.map(u => '<option' + (u === (X.uom || t.uom || 'PCS') ? ' selected' : '') + '>' + u + '</option>').join('') + '</select></td></tr>' +
       inp('price', 'Price ₹', '', 'number') + inp('gst', 'GST %', t.gst || '', 'number') + inp('hsn', 'HSN', t.hsn || '') + inp('rack', 'Rack No.', '') + inp('min', 'Min Level', '', 'number');
   }
   const missing = attrs.filter(a => !IC_UI.vals[a.name]);
@@ -96,9 +98,9 @@ function icCreateHtml(edit) {
   // existing items: one column per attribute so values line up
   if (t) {
     const list = Store.all('materials').filter(m => norm(m.group) === norm(IC_UI.cat) && norm(m.item_type || '') === norm(t.name)).sort((a, b) => a.code.localeCompare(b.code));
-    h += '<h2>' + esc(t.name) + ' — existing items (' + list.length + ')</h2><div class="tbl-wrap"><table><tr><th>Item Code</th><th>Item Name</th>' + attrs.map((a, i) => '<th>' + (i + 1) + '. ' + esc(a.name) + '</th>').join('') + '<th>UOM</th><th class="num">Price</th></tr>' +
-      (list.length ? list.map(m => '<tr><td><b>' + esc(m.code) + '</b></td><td>' + esc(m.name) + '</td>' + attrs.map(a => '<td>' + esc((m.attrs || {})[a.name] || '') + '</td>').join('') + '<td>' + esc(m.uom || '') + '</td><td class="num">' + (m.price ? money(m.price) : '') + '</td></tr>').join('')
-        : '<tr><td colspan="' + (attrs.length + 4) + '" class="empty">No items of this type yet</td></tr>') + '</table></div>';
+    h += '<h2>' + esc(t.name) + ' — existing items (' + list.length + ')</h2><div class="tbl-wrap"><table><tr><th>Photo</th><th>Item Code</th><th>Item Name</th>' + attrs.map((a, i) => '<th>' + (i + 1) + '. ' + esc(a.name) + '</th>').join('') + '<th>UOM</th><th class="num">Price</th></tr>' +
+      (list.length ? list.map(m => '<tr><td>' + photoThumb(m.photo) + '</td><td><b>' + esc(m.code) + '</b></td><td>' + esc(m.name) + '</td>' + attrs.map(a => '<td>' + esc((m.attrs || {})[a.name] || '') + '</td>').join('') + '<td>' + esc(m.uom || '') + '</td><td class="num">' + (m.price ? money(m.price) : '') + '</td></tr>').join('')
+        : '<tr><td colspan="' + (attrs.length + 5) + '" class="empty">No items of this type yet</td></tr>') + '</table></div>';
   } else if (IC_UI.cat) {
     h += '<h2>' + esc(IC_UI.cat) + ' — item types</h2>' + icTypeMatrix(IC_UI.cat, false);
   }
@@ -117,12 +119,13 @@ ACTIONS['ic-create'] = () => {
     id: uid(), code: itemCodeAuto(IC_UI.cat), name: itemNameOf(t, vals), group: IC_UI.cat, item_type: t.name,
     attrs: vals, attr_key: itemKeyOf(IC_UI.cat, t.name, vals), uom: X.uom || t.uom || 'PCS',
     price: num(X.price) || 0, gst: num(X.gst != null ? X.gst : t.gst) || 0, hsn: String(X.hsn != null ? X.hsn : t.hsn || '').trim(),
-    rack: String(X.rack || '').trim().toUpperCase(), min_level: num(X.min) || 0, created_at: nowIso(), created_by: ME.name
+    rack: String(X.rack || '').trim().toUpperCase(), min_level: num(X.min) || 0, photo: IC_UI.photo || '', created_at: nowIso(), created_by: ME.name
   });
   audit('item.create', m.code, m.name);
   flash('Created ' + esc(m.code) + ' · ' + esc(m.name));
-  IC_UI.vals = {}; IC_UI.extra = {}; VIEWS.itemcreate.render();
+  IC_UI.vals = {}; IC_UI.extra = {}; IC_UI.photo = ''; VIEWS.itemcreate.render();
 };
+ACTIONS['ic-photo-clear'] = () => { IC_UI.photo = ''; VIEWS.itemcreate.render(); };
 
 /* ================= Category Setup ================= */
 function icSetupHtml(edit) {
@@ -133,7 +136,7 @@ function icSetupHtml(edit) {
   let h = '<div class="toolbar">' + seg('iccat', cats, cat) + (edit ? '<span class="grow"></span><input id="icNewCat" placeholder="New category" style="width:160px"><button class="btn sm" data-act="ic-addcat">Add Category</button>' : '') + '</div>';
 
   // attributes of this category, in name sequence
-  h += '<div class="card"><div class="card-h"><b>' + esc(cat) + ' — Attributes</b><span class="muted small">the Seq decides the order in the item name</span></div><div class="card-b">' +
+  h += '<div class="card"><div class="card-h"><b>' + esc(cat) + ' — Attributes</b></div><div class="card-b">' +
     '<table class="jcbom icgrid"><tr class="hd"><th style="width:56px">Seq</th><th style="width:180px">Attribute</th><th>Allowed Values</th><th style="width:220px">Used in Item Types</th>' + (edit ? '<th style="width:190px">Actions</th>' : '') + '</tr>';
   A.forEach((a, i) => {
     const used = typesOf(cat).filter(t => usesAttr(t, a.name));
@@ -151,7 +154,7 @@ function icSetupHtml(edit) {
   h += '</table></div></div>';
 
   // item types of this category: one tick column per attribute, in sequence
-  h += '<div class="card"><div class="card-h"><b>' + esc(cat) + ' — Item Types</b><span class="muted small">tick the attributes each type uses; the name follows the Seq order above</span></div><div class="card-b">' + icTypeMatrix(cat, edit) + '</div></div>';
+  h += '<div class="card"><div class="card-h"><b>' + esc(cat) + ' — Item Types</b></div><div class="card-b">' + icTypeMatrix(cat, edit) + '</div></div>';
   return h;
 }
 function icTypeMatrix(cat, edit) {
