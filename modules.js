@@ -456,7 +456,7 @@ function jcForm() {
     '<a class="small" data-act="jcf-size">+ size row</a> <span id="jfSzMsg" class="small"></span>' +
     '<div class="row" style="margin-top:8px"><label>Status' + seg('jfStatus', ['NA', 'ONLINE', 'OFFLINE'], 'NA') + '</label><label style="flex:1">Remarks<input id="jfRem" placeholder="Remarks..."></label></div></div></div>' +
     '<h2>Material Requirements BOM</h2><div class="toolbar"><a class="small" data-act="jcf-bomrow">+ Add</a><a class="small" data-act="jcf-paste">Bulk Paste</a><span id="jfBomTag" class="muted small"></span></div>' +
-    '<div id="jfPasteBox" class="hidden" style="margin-bottom:6px"><textarea id="jfPaste" rows="4" class="mono" placeholder="One item name per line (or Name[TAB]Norms[TAB]Supplier)"></textarea> <button class="btn sm" data-act="jcf-paste-go">Import</button></div>' +
+    '<div id="jfPasteBox" class="hidden" style="margin-bottom:6px"><textarea id="jfPaste" rows="5" class="mono" placeholder="PROCESS | SECTION | ITEM NAME | NORMS | SUPPLIER  (one row per line; separate with Tab or | — Excel/Sheets paste works directly. Item name alone also works.)"></textarea> <button class="btn sm" data-act="jcf-paste-go">Import</button></div>' +
     dlMat('dlMatJc') + dlVendor() +
     '<div class="tbl-wrap"><table id="jfBom"><tr><th>#</th><th style="width:100px">Process</th><th style="width:120px">Section</th><th style="width:130px">Category</th><th>Item Name</th><th style="width:90px">Item Code</th><th style="width:60px">Uom</th><th class="num" style="width:80px">Stock</th><th class="num" style="width:90px">Norms</th><th class="num" style="width:90px">Req.Qty</th><th style="width:150px">Supplier</th><th style="width:30px"></th></tr></table></div>' +
     '</div><div class="card-f"><button class="btn primary" data-save data-act="jc-save">Submit Job Card</button><button class="btn" data-act="jc-new">Close</button><span id="njMsg" class="small"></span></div></div>';
@@ -531,10 +531,22 @@ ACTIONS['jcf-bom-del'] = el => { el.closest('tr').remove(); jcfRecalc(); };
 ACTIONS['jcf-paste'] = () => $('#jfPasteBox').classList.toggle('hidden');
 ACTIONS['jcf-paste-go'] = () => {
   let ok = 0, bad = [];
-  $('#jfPaste').value.split(/\r?\n/).map(x => x.split('\t')).filter(r => r.join('').trim()).forEach(r => {
-    const m = Store.all('materials').find(x => norm(x.name) === norm(r[0]) || norm(x.code) === norm(r[0]));
-    if (!m) { bad.push(r[0]); return; }
-    $('#jfBom').insertAdjacentHTML('beforeend', jcfBomRow({ material: m.code, uom: m.uom, norms: r[1] || '', supplier: r[2] || '' })); ok++;
+  const matOf = c => Store.all('materials').find(x => norm(x.name) === norm(c) || norm(x.code) === norm(c));
+  $('#jfPaste').value.split(/\r?\n/).forEach(line => {
+    const cells = line.split(/\t|\s*\|\s*/).map(x => x.trim());
+    if (!cells.join('')) return;
+    // find the item-name cell; cells before it are Process, Section; after it Norms (number) and Supplier
+    const mi = cells.findIndex(c => c && matOf(c));
+    if (mi < 0) { bad.push(cells.find(Boolean) || line.trim()); return; }
+    const m = matOf(cells[mi]);
+    const before = cells.slice(0, mi), after = cells.slice(mi + 1);
+    const ni = after.findIndex(c => c !== '' && !isNaN(parseFloat(c)));
+    $('#jfBom').insertAdjacentHTML('beforeend', jcfBomRow({
+      process: before[0] || '', section: before[1] || '',
+      material: m.code, uom: m.uom,
+      norms: ni >= 0 ? after[ni] : '',
+      supplier: after.find((c, k) => k !== ni && c && isNaN(parseFloat(c))) || ''
+    })); ok++;
   });
   $('#jfPasteBox').classList.add('hidden'); jcfRecalc();
   flash(ok + ' items imported.' + (bad.length ? ' Not matched: ' + esc(bad.join(', ')) : ''), bad.length ? 'err' : '');
