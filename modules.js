@@ -36,9 +36,9 @@ function dlVendor() { return '<datalist id="dlVen">' + vendorNames().map(v => '<
 // stk = good stock; rej = GRN rejection (goes back to the vendor);
 // rejLine = line rejection that is unused and can go back to the vendor; rejScrap = line rejection that cannot
 function stockMaps() {
-  const stk = {}, rej = {}, rejLine = {}, rejScrap = {};
+  const stk = {}, rej = {}, rejLine = {}, rejScrap = {}, rtvx = {};
   const add = (m, k, q) => { const key = norm(k); m[key] = (m[key] || 0) + q; };
-  Store.all('grns').forEach(g => (g.lines || []).forEach(l => { add(stk, l.material, num(l.accepted)); add(rej, l.material, num(l.rejected)); }));
+  Store.all('grns').forEach(g => (g.lines || []).forEach(l => { add(stk, l.material, num(l.accepted) + (l.excess_status === 'Approved' ? num(l.excess) : 0)); add(rej, l.material, num(l.rejected)); if (l.excess_status === 'Rejected') add(rtvx, l.material, num(l.excess)); }));
   // only APPROVED issues deduct stock (a pending request does not); returns add back
   Store.all('issues').forEach(i => {
     if (i.status === 'Pending' || i.status === 'Rejected') return;
@@ -46,8 +46,8 @@ function stockMaps() {
     if (i.type === 'scrap') { add(rejScrap, i.material, -num(i.qty)); return; }
     add(stk, i.material, i.type === 'return' ? num(i.qty) : -num(i.qty));
   });
-  Store.all('rtvs').forEach(r => add(r.source === 'line' ? rejLine : rej, r.material, -num(r.qty)));
-  return { stk, rej, rejLine, rejScrap };
+  Store.all('rtvs').forEach(r => add(r.source === 'line' ? rejLine : r.source === 'excess' ? rtvx : rej, r.material, -num(r.qty)));
+  return { stk, rej, rejLine, rejScrap, rtvx };
 }
 function stockOf(code) { return stockMaps().stk[norm(code)] || 0; }
 // Reserved stock per JC: reserved qty is part of physical stock.
@@ -246,14 +246,15 @@ ACTIONS['print-bom'] = el => {
 };
 ACTIONS['print-grn'] = el => {
   const g = Store.get('grns', el.dataset.id); if (!g) return;
+  if ((g.lines || []).some(l => l.excess_status === 'Pending')) { flash('GRN report is available after the excess approval decision.', 'err'); return; }
   const t = k => g.lines.reduce((a, l) => a + num(l[k] || 0), 0);
   printDoc({
     title: 'Goods Receipt Note', ref: g.no, date: g.date, by: g.by,
-    meta: [['Vendor', g.vendor], ['PO Number', g.po_no], ['Invoice No', g.invoice], ['GRN Date', fmtD(g.date)]],
-    body: pTable([['#'], ['Item Name'], ['Code'], ['JC'], ['Inv Qty', 'n'], ['GRN Qty', 'n'], ['Reject', 'n'], ['Short', 'n'], ['Excess', 'n'], ['Rack']],
-      g.lines.map((l, i) => [i + 1, esc((matBy(l.material) || {}).name || ''), esc(l.material), esc(l.jc_no || ''), qtyFmt(l.inv_qty || 0), qtyFmt(l.accepted), qtyFmt(l.rejected), qtyFmt(l.short || 0), qtyFmt(l.excess || 0), esc(l.rack || '')]),
-      ['', 'Total', '', '', qtyFmt(t('inv_qty')), qtyFmt(t('accepted')), qtyFmt(t('rejected')), qtyFmt(t('short')), qtyFmt(t('excess')), '']),
-    note: (g.reject_reason ? 'Reject reason: ' + g.reject_reason + '. ' : '') + 'Accepted qty has been added to stock; rejected qty is in rejection stock.'
+    meta: [['Vendor', g.vendor], ['PO Number', g.po_no], ['Invoice No', g.invoice], ['Invoice Date', fmtD(g.invoice_date)], ['Gate Entry', g.inward_no || ''], ['GRN Date', fmtD(g.date)]],
+    body: pTable([['#'], ['Item Code'], ['Item Name'], ['UOM'], ['Invoice Qty', 'n'], ['Received', 'n'], ['Short', 'n'], ['Reject', 'n'], ['GRN Qty', 'n'], ['Excess', 'n'], ['Excess Status'], ['Rack']],
+      g.lines.map((l, i) => [i + 1, esc(l.material), esc((matBy(l.material) || {}).name || ''), esc(l.uom || (matBy(l.material) || {}).uom || ''), qtyFmt(l.inv_qty || 0), qtyFmt(l.recv_qty != null ? l.recv_qty : num(l.accepted) + num(l.rejected)), qtyFmt(l.short || 0), qtyFmt(l.rejected || 0), qtyFmt(l.accepted || 0), qtyFmt(l.excess || 0), esc(num(l.excess) > 0 ? l.excess_status || '' : ''), esc(l.rack || '')]),
+      ['', 'Total', '', '', qtyFmt(t('inv_qty')), qtyFmt(t('recv_qty')), qtyFmt(t('short')), qtyFmt(t('rejected')), qtyFmt(t('accepted')), qtyFmt(t('excess')), '', '']),
+    note: g.reject_reason ? 'Reject reason: ' + g.reject_reason : ''
   });
 };
 ACTIONS['print-req'] = el => {
@@ -325,8 +326,8 @@ VIEWS.po = {
     });
     let h = subTitle('Purchase Orders', 'GRN/followup only after approval') + '<div class="toolbar">' + seg('f', [{ v: 'appr', l: 'For approval' }, { v: 'open', l: 'Open' }, { v: 'done', l: 'Received' }, { v: 'cancel', l: 'Rejected/Cancelled' }, { v: 'all', l: 'All' }], PO_UI.f) +
       '<input id="poQ" placeholder="PO / vendor / material…" value="' + esc(PO_UI.q || '') + '"><span class="grow"></span>' + (edit ? newBtn('New PO', 'po-new') : '') + '</div>';
-    if (PO_UI.form && edit) h += poForm();
-    h += '<div class="tbl-wrap"><table class="bomflat"><tr><th>PO No</th><th>PO Date</th><th>Vendor</th><th class="num">Sr</th><th>Item Name</th><th>Item Code</th><th>Brand</th><th>UOM</th><th class="num">Qty</th><th class="num">Received</th><th class="num">Pending</th><th>Expected</th><th>Status</th><th>Raised By</th><th>Approved By</th><th></th></tr>' +
+    if (PO_UI.form && edit) h = poForm();
+    else h += '<div class="tbl-wrap"><table class="bomflat"><tr><th>PO No</th><th>PO Date</th><th>Vendor</th><th class="num">Sr</th><th>Item Name</th><th>Item Code</th><th>Brand</th><th>UOM</th><th class="num">Qty</th><th class="num">Received</th><th class="num">Pending</th><th>Expected</th><th>Status</th><th>Raised By</th><th>Approved By</th><th></th></tr>' +
       (rows.length ? rows.map(p => {
         const st = poStatus(p);
         const act = (st === 'Amend' && edit && (poOwn(p) || isSuperAdmin()) ? '<button class="btn sm primary" data-act="po-edit" data-id="' + esc(p.id) + '">Edit</button>' : '') +
@@ -338,7 +339,7 @@ VIEWS.po = {
     setMain(h);
     if (PO_UI.form && edit) poFormSetup();
     onSeg(e => { if (e.target.dataset.seg === 'poMode') { PO_UI.mode = e.detail; poFormSetup(); const v = vendorBy($('#npVen').value); if (v && e.detail === 'jc') poFillJc(v.name); return; } PO_UI.f = e.detail; VIEWS.po.render(); });
-    $('#poQ').addEventListener('input', e => { PO_UI.q = e.target.value; clearTimeout(PO_UI.t); PO_UI.t = setTimeout(() => { VIEWS.po.render(); const i = $('#poQ'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }, 250); });
+    const poQ = $('#poQ'); if (poQ) poQ.addEventListener('input', e => { PO_UI.q = e.target.value; clearTimeout(PO_UI.t); PO_UI.t = setTimeout(() => { VIEWS.po.render(); const i = $('#poQ'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }, 250); });
   }
 };
 // the person who raised a PO never approves it; only the Super Admin (system role) is exempt
@@ -966,19 +967,25 @@ ACTIONS['stock-csv'] = () => downloadCsv('stock-' + todayYmd() + '.csv', [['Mate
 
 VIEWS.rejstock = {
   mod: 'store', render() {
-    const { rej, rejLine, rejScrap } = stockMaps(); const edit = can('store', 'edit');
+    const { rej, rejLine, rejScrap, rtvx } = stockMaps(); const edit = can('store', 'edit');
     const list = mp => Object.entries(mp).filter(([, q]) => q > 0.0001).map(([k, q]) => ({ m: matBy(k) || { code: k.toUpperCase(), name: '', uom: '' }, q }));
     const g = list(rej);
     const codes = Array.from(new Set(Object.keys(rejLine).concat(Object.keys(rejScrap)))).filter(k => (rejLine[k] || 0) > 0.0001 || (rejScrap[k] || 0) > 0.0001);
     let h = subTitle('Rejection Stock') +
-      '<h2 style="margin-top:0">1. GRN rejection <span class="muted">(rejected at receiving — goes back to the vendor)</span></h2><div class="tbl-wrap"><table><tr><th>Material</th><th>Name</th><th>UOM</th><th class="num">Rejected qty</th><th></th></tr>' +
+      '<h2 style="margin-top:0">GRN rejection</h2><div class="tbl-wrap"><table><tr><th>Material</th><th>Name</th><th>UOM</th><th class="num">Rejected qty</th><th></th></tr>' +
       (g.length ? g.map(x => '<tr><td><b>' + esc(x.m.code) + '</b></td><td>' + esc(x.m.name) + '</td><td>' + esc(x.m.uom || '') + '</td><td class="num late-txt">' + qtyFmt(x.q) + '</td><td class="right">' + (edit ? '<a href="#/rtv">RTV \u2192</a>' : '') + '</td></tr>').join('') : '<tr><td colspan="5" class="empty">No GRN rejection stock</td></tr>') + '</table></div>' +
-      '<h2>2. Line rejection <span class="muted">(rejected on the production line)</span></h2><div class="tbl-wrap"><table><tr><th>Material</th><th>Name</th><th>UOM</th><th class="num">Unused \u2014 back to vendor</th><th class="num">Used \u2014 not returnable</th><th></th></tr>' +
+      '<h2>Line rejection</h2><div class="tbl-wrap"><table><tr><th>Material</th><th>Name</th><th>UOM</th><th class="num">Unused (returnable)</th><th class="num">Used (not returnable)</th><th></th></tr>' +
       (codes.length ? codes.map(k => { const m = matBy(k) || { code: k.toUpperCase(), name: '', uom: '' }; const a = rejLine[k] || 0, b = rejScrap[k] || 0;
         return '<tr><td><b>' + esc(m.code) + '</b></td><td>' + esc(m.name) + '</td><td>' + esc(m.uom || '') + '</td><td class="num">' + (a > 0.0001 ? qtyFmt(a) : '\u2014') + '</td><td class="num late-txt">' + (b > 0.0001 ? qtyFmt(b) : '\u2014') + '</td>' +
           '<td class="right nowrap">' + (edit && a > 0.0001 ? '<a href="#/rtv">RTV \u2192</a> ' : '') + (edit && b > 0.0001 ? '<button class="btn sm ghost" data-act="scrap-open" data-c="' + esc(m.code) + '">Write off</button>' : '') + '</td></tr>' +
           (VIEWS.rejstock.scrap === m.code ? '<tr class="inline-form"><td colspan="6"><div class="row"><label>Write-off qty * (max ' + qtyFmt(b) + ')<input id="scQty" type="number" min="0" step="any" value="' + b + '"></label><label>Remark<input id="scRem" placeholder="e.g. scrapped / sold as waste"></label><button class="btn primary sm" data-act="scrap-save" data-c="' + esc(m.code) + '" data-max="' + b + '">Write off</button></div></td></tr>' : ''); }).join('')
         : '<tr><td colspan="6" class="empty">No line rejection stock</td></tr>') + '</table></div>';
+    const xs = []; Store.all('grns').forEach(g2 => (g2.lines || []).forEach(l => { if (l.excess_status === 'Rejected' && num(l.excess) > 0) xs.push({ g: g2, l }); }));
+    const xret = {}; Store.all('rtvs').filter(r => r.source === 'excess').forEach(r => { const k = norm(r.vendor + '|' + r.material); xret[k] = (xret[k] || 0) + num(r.qty); });
+    h += '<h2>Excess RTV stock</h2><div class="tbl-wrap"><table><tr><th>GRN No</th><th>GRN Date</th><th>Vendor</th><th>Invoice No</th><th>Item Code</th><th>Item Name</th><th>UOM</th><th class="num">Excess Rejected</th><th>Rejected By</th><th class="num">Balance to Return</th><th></th></tr>' +
+      (xs.length ? xs.map(({ g: g2, l }) => { const k = norm(g2.vendor + '|' + l.material); const back = Math.min(num(l.excess), xret[k] || 0); xret[k] = Math.max(0, (xret[k] || 0) - num(l.excess)); const m = matBy(l.material) || {}; const bal = num(l.excess) - back;
+        return '<tr><td><b>' + esc(g2.no) + '</b></td><td>' + fmtD(g2.date) + '</td><td>' + esc(g2.vendor) + '</td><td>' + esc(g2.invoice || '') + '</td><td>' + esc(l.material) + '</td><td>' + esc(m.name || '') + '</td><td>' + esc(m.uom || '') + '</td><td class="num">' + qtyFmt(l.excess) + '</td><td>' + esc(l.excess_by || '') + '</td><td class="num late-txt">' + qtyFmt(bal) + '</td><td class="right">' + (edit && bal > 0.0001 ? '<a href="#/rtv">RTV \u2192</a>' : '') + '</td></tr>'; }).join('')
+        : '<tr><td colspan="11" class="empty">No excess RTV stock</td></tr>') + '</table></div>';
     const log = Store.all('issues').filter(i => i.type === 'line_reject').slice().sort((a, b) => (b.at || '') < (a.at || '') ? -1 : 1).slice(0, 20);
     h += '<h2>Recent line rejections</h2><div class="tbl-wrap"><table><tr><th>No</th><th>Date</th><th>Job Card</th><th>Material</th><th class="num">Qty</th><th>Reason</th><th>Condition</th><th>Vendor</th><th>By</th></tr>' +
       (log.length ? log.map(i => '<tr><td><b>' + esc(i.no) + '</b></td><td class="nowrap">' + fmtD(i.date) + '</td><td>' + esc(i.to_jc || '') + '</td><td>' + esc(i.material) + '</td><td class="num">' + qtyFmt(i.qty) + '</td><td>' + esc(i.reason || '') + '</td><td>' + (i.returnable ? 'Unused \u2014 back to vendor' : 'Used \u2014 not returnable') + '</td><td>' + esc(i.vendor || '') + '</td><td>' + esc(i.by) + '</td></tr>').join('') : '<tr><td colspan="9" class="empty">No line rejections yet</td></tr>') + '</table></div>';
@@ -1003,7 +1010,7 @@ VIEWS.rtv = {
     if (RTV_UI.form && edit) {
       // vendor-wise rejection sources from GRNs
       const srcRows = [];
-      Store.all('grns').forEach(g => g.lines.forEach(l => { if (num(l.rejected) > 0) srcRows.push({ vendor: g.vendor, material: l.material, invoice: g.invoice, date: g.date, qty: num(l.rejected), source: 'grn' }); }));
+      Store.all('grns').forEach(g => g.lines.forEach(l => { if (num(l.rejected) > 0) srcRows.push({ vendor: g.vendor, material: l.material, invoice: g.invoice, date: g.date, qty: num(l.rejected), source: 'grn' }); if (l.excess_status === 'Rejected' && num(l.excess) > 0) srcRows.push({ vendor: g.vendor, material: l.material, invoice: g.invoice, date: g.date, qty: num(l.excess), source: 'excess' }); }));
       Store.all('issues').filter(i => i.type === 'line_reject' && i.returnable && i.vendor).forEach(i => srcRows.push({ vendor: i.vendor, material: i.material, invoice: 'LINE ' + (i.to_jc || ''), date: i.date, qty: num(i.qty), source: 'line' }));
       const returned = {};
       Store.all('rtvs').forEach(r => { const k = norm(r.vendor + '|' + r.material + '|' + (r.source || 'grn')); returned[k] = (returned[k] || 0) + num(r.qty); });

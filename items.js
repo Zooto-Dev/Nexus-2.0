@@ -76,7 +76,7 @@ function icCreateHtml(edit) {
   });
   if (t) {
     const inp = (k, label, def, type) => '<tr><td class="k">' + label + '</td><td><input data-icx="' + k + '"' + (type ? ' type="' + type + '" min="0" step="any"' : '') + ' value="' + esc(X[k] != null ? X[k] : def) + '"></td></tr>';
-    rows += '<tr><td class="k">Photo</td><td><label class="icphoto">' + (IC_UI.photo ? '<img src="' + IC_UI.photo + '">' : '<span class="muted">Add photo (optional)</span>') + '<input type="file" id="icPhoto" accept="image/*" style="display:none"></label>' + (IC_UI.photo ? ' <a class="small" data-act="ic-photo-clear">Remove</a>' : '') + '</td></tr>' +
+    rows += '<tr><td class="k">Photo</td><td>' + attachBox('id="icPhoto" accept="image/*"', IC_UI.photo, 'Attach photo') + (IC_UI.photo ? ' <a class="small" data-act="ic-photo-clear">Remove</a>' : '') + '</td></tr>' +
       '<tr><td class="k">UOM</td><td><select data-icx="uom">' + UOMS.map(u => '<option' + (u === (X.uom || t.uom || 'PCS') ? ' selected' : '') + '>' + u + '</option>').join('') + '</select></td></tr>' +
       inp('price', 'Price ₹', '', 'number') + inp('gst', 'GST %', t.gst || '', 'number') + inp('hsn', 'HSN', t.hsn || '') + inp('rack', 'Rack No.', '') + inp('min', 'Min Level', '', 'number');
   }

@@ -29,7 +29,7 @@ VIEWS.home = {
     const reqs = Store.all('requisitions').filter(r => r.status === 'Pending');
     const swPend = Store.all('job_cards').filter(j => j.swatch_status === 'Pending' && j.status !== 'Closed');
     const jcCorr = Store.all('job_cards').filter(j => (j.corrections || []).some(c => !c.resolved));
-    const smPend = Store.all('inwards').filter(i => i.status === 'Pending GRN' && (i.qc || []).some(q => !q.result));
+    const smPend = Store.all('inwards').filter(i => i.status === 'Pending GRN' && i.inv_status === 'Approved' && (i.qc || []).some(q => !q.result));
     const payPend = Store.all('dispatches').filter(d => !d.cancelled && d.payment !== 'Received');
     const chkDue = myChecklistDue();
 

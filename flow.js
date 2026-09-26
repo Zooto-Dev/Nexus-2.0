@@ -74,7 +74,7 @@ const PO_DOC_CSS = '.po2 table{width:auto;border:0;background:none;border-collap
 ACTIONS['po-print'] = el => {
   const p = Store.get('purchase_orders', el.dataset.id); if (!p) return;
   const w = window.open('');
-  w.document.write('<html><head><title>' + esc(p.no) + '</title><style>@page{size:A4;margin:8mm}html,body{margin:0}*{-webkit-print-color-adjust:exact;print-color-adjust:exact}' + PO_DOC_CSS + '</style></head><body>' + poDocHtml(p) + '<script>window.onload=function(){window.print()}</' + 'script></body></html>');
+  w.document.write('<html><head><title>' + esc(p.no) + '</title><style>@page{size:A4 landscape;margin:8mm}html,body{margin:0}*{-webkit-print-color-adjust:exact;print-color-adjust:exact}' + PO_DOC_CSS + '</style></head><body>' + poDocHtml(p) + '<script>window.onload=function(){window.print()}</' + 'script></body></html>');
   w.document.close();
 };
 
@@ -157,6 +157,40 @@ document.addEventListener('change', e => {
   const v = vendorBy(e.target.value); if (v && vendorMissing(v).length) vendorDialog(v);
 });
 
+/* ================= Attach control ================= */
+// A clear drop-zone style picker: paper-clip + "Attach …" when empty, thumbnail + "Change" when filled.
+function attachBox(attrs, src, label) {
+  return '<label class="attach' + (src ? ' has' : '') + '">' + (src ? docThumb(src) + '<span class="attach-t">Change</span>' : '<span class="attach-i">&#128206;</span><span class="attach-t">' + esc(label || 'Attach file') + '</span>') + '<input type="file" ' + attrs + ' style="display:none"></label>';
+}
+
+/* ================= GRN number (reserved at gate entry) ================= */
+function reserveGrnNo() {
+  const co = (settings().company_code || 'ZF').toUpperCase();
+  const d = new Date(); const y = d.getMonth() >= 3 ? d.getFullYear() : d.getFullYear() - 1;
+  const head = co + '/GRN/' + y + '-' + String((y + 1) % 100).padStart(2, '0') + '/';
+  const nos = Store.all('grns').map(g => g.no).concat(Store.all('inwards').map(i => i.grn_no));
+  const max = nos.reduce((m, n) => n && n.startsWith(head) ? Math.max(m, parseInt(n.slice(head.length), 10) || 0) : m, 0);
+  return head + String(max + 1).padStart(4, '0');
+}
+
+/* ================= Stage of a gate entry ================= */
+// Gate entry → Invoice approval → QC (QC categories) → Merchant approval (QC mismatch) → GRN
+function inwardQcState(i) {
+  const qs = i.qc || [];
+  if (qs.some(q => !q.result)) return { ok: false, label: 'QC pending' };
+  if (qs.some(q => q.result === 'Mismatch' && !q.m_status)) return { ok: false, label: 'Merchant approval pending' };
+  return { ok: true, label: qs.length ? 'QC done' : 'No QC needed' };
+}
+function inwardStage(i) {
+  if (i.status === 'GRN Done') return 'GRN Done';
+  if (i.status === 'Invoice Rejected' || i.inv_status === 'Rejected') return 'Invoice Rejected';
+  if (i.inv_status === 'Hold') return 'Invoice on Hold';
+  if (i.inv_status !== 'Approved') return 'Invoice Approval Pending';
+  const q = inwardQcState(i);
+  return q.ok ? 'Ready for GRN' : q.label;
+}
+const invApproved = i => i.status === 'Pending GRN' && i.inv_status === 'Approved';
+
 /* ================= Gate entry (Invoice / Sample) ================= */
 const INW_UI = { form: false, bt: 'Invoice', ven: '', po: '', f: {}, photo: '', qcDoc: '' };
 VIEWS.inward = {
@@ -169,7 +203,6 @@ VIEWS.inward = {
       const qc = !!(vendorBy(U.ven) || {}).qc_required;
       const sel = (id, opts, val, ph, dis) => '<select id="' + id + '"' + (dis ? ' disabled' : '') + '><option value="">' + ph + '</option>' + opts.map(o => '<option' + (o === val ? ' selected' : '') + '>' + esc(o) + '</option>').join('') + '</select>';
       const inp = (k, type) => '<input data-f="' + k + '"' + (type ? ' type="' + type + '"' + (type === 'number' ? ' min="0" step="any"' : '') : '') + ' value="' + esc(F[k] || '') + '" autocomplete="off">';
-      const file = (id, src, accept) => '<label class="icphoto">' + (src ? docThumb(src) + ' <span class="small">change</span>' : '<span class="muted">Attach</span>') + '<input type="file" id="' + id + '" accept="' + accept + '" style="display:none"></label>';
       const left = [
         ['Bill Type', seg('inwBt', ['Invoice', 'Sample'], U.bt)],
         ['Vendor *', sel('inwVen', vendors, U.ven, vendors.length ? 'Select vendor…' : 'No open PO')],
@@ -179,15 +212,15 @@ VIEWS.inward = {
         ['Inwarding Date', '<input value="' + fmtD(todayYmd()) + '" readonly>']
       ];
       const right = [['Invoice Qty *', inp('qty', 'number')]]
-        .concat(qc ? [['QC No *', inp('qc_no')], ['QC Report *', file('inwQc', U.qcDoc, 'image/*,application/pdf')]] : [])
-        .concat([['Invoice Photo *', file('inwPhoto', U.photo, 'image/*')], ['Remark', inp('remark')]]);
+        .concat(qc ? [['QC No *', inp('qc_no')], ['QC Report *', attachBox('id="inwQc" accept="image/*,application/pdf"', U.qcDoc, 'Attach QC report')]] : [])
+        .concat([['Invoice Photo *', attachBox('id="inwPhoto" accept="image/*"', U.photo, 'Attach invoice photo')], ['Remark', inp('remark')]]);
       h += '<div class="card"><div class="card-b"><div class="inwform">' + kvTable(left) + kvTable(right) + '</div></div>' +
         '<div class="card-f"><button class="btn primary" data-act="inw-save">Save</button><span id="niMsg" class="small"></span></div></div>';
     }
     const rows = Store.all('inwards').slice().sort((a, b) => (b.at || b.date || '') < (a.at || a.date || '') ? -1 : 1);
-    h += '<h2>Previous gate entry logs</h2><div class="tbl-wrap"><table><tr><th>Timestamp</th><th>Bill Type</th><th>Vendor</th><th>PO Number</th><th>Invoice No</th><th>Invoice Date</th><th class="num">Aging (Days)</th><th class="num">Invoice Qty</th><th>Photo</th><th>Remark</th></tr>' +
-      (rows.length ? rows.map(i => { const ts = i.at || i.date; return '<tr><td class="nowrap">' + fmtDT(ts) + '</td><td>' + esc(i.bill_type || 'Invoice') + '</td><td>' + esc(i.vendor) + '</td><td>' + esc(i.po_no || '') + '</td><td>' + esc(i.bill_no || '') + '</td><td class="nowrap">' + fmtD(i.bill_date) + '</td><td class="num">' + Math.max(0, Math.floor((Date.now() - new Date(ts)) / 86400000)) + '</td><td class="num">' + qtyFmt(i.qty) + '</td><td>' + photoThumb(i.photo) + '</td><td class="small">' + esc(i.remark || '') + '</td></tr>'; }).join('')
-        : '<tr><td colspan="10" class="empty">No gate entries</td></tr>') + '</table></div>';
+    h += '<h2>Previous gate entry logs</h2><div class="tbl-wrap"><table><tr><th>Timestamp</th><th>Bill Type</th><th>Vendor</th><th>PO Number</th><th>Invoice No</th><th>Invoice Date</th><th class="num">Aging (Days)</th><th class="num">Invoice Qty</th><th>Photo</th><th>Remark</th><th>GRN No</th><th>Stage</th></tr>' +
+      (rows.length ? rows.map(i => { const ts = i.at || i.date; return '<tr><td>' + fmtDT(ts) + '</td><td>' + esc(i.bill_type || 'Invoice') + '</td><td>' + esc(i.vendor) + '</td><td>' + esc(i.po_no || '') + '</td><td>' + esc(i.bill_no || '') + '</td><td>' + fmtD(i.bill_date) + '</td><td class="num">' + Math.max(0, Math.floor((Date.now() - new Date(ts)) / 86400000)) + '</td><td class="num">' + qtyFmt(i.qty) + '</td><td>' + photoThumb(i.photo) + '</td><td>' + esc(i.remark || '') + '</td><td>' + esc(i.grn_no || '') + '</td><td>' + esc(inwardStage(i)) + '</td></tr>'; }).join('')
+        : '<tr><td colspan="12" class="empty">No gate entries</td></tr>') + '</table></div>';
     const m = setMain(h);
     onSeg(e => { if (e.target.dataset.seg === 'inwBt') { U.bt = e.detail; VIEWS.inward.render(); } });
     m.addEventListener('change', e => {
@@ -212,7 +245,6 @@ ACTIONS['inw-save'] = () => {
   if (Store.all('inwards').some(x => norm(x.vendor) === norm(U.ven) && norm(x.bill_no) === norm(billNo))) { $('#niMsg').innerHTML = '<span class="late-txt">' + esc(U.ven) + ' already has ' + esc(billNo) + '.</span>'; return; }
   if (pendingInwardOf(U.po)) { $('#niMsg').innerHTML = '<span class="late-txt">' + esc(U.po) + ' already has a gate entry waiting for GRN.</span>'; return; }
   const p = Store.all('purchase_orders').find(x => norm(x.no) === norm(U.po)); if (!p) return;
-  // QC lines for materials whose category needs a QC check; merchants come from the PO line brands (CDB)
   const qcl = [];
   p.lines.forEach(l => {
     const m = matBy(l.material); if (!m || !isQcCat(m.group)) return;
@@ -221,11 +253,73 @@ ACTIONS['inw-save'] = () => {
     String(l.brand || '').split(',').map(x => x.trim()).filter(Boolean).forEach(b => { if (!q.brands.includes(b)) q.brands.push(b); });
   });
   qcl.forEach(q => { q.merchants = Array.from(new Set(q.brands.map(brandMerchant).filter(Boolean))); });
-  const i = Store.put('inwards', { id: uid(), no: nextNo('inwards', 'INW'), at: nowIso(), date: todayYmd(), bill_type: U.bt, vendor: U.ven, po_no: U.po, bill_no: billNo, bill_date: F.bill_date, qty: num(F.qty),
-    qc_no: String(F.qc_no || '').trim(), qc_report: U.qcDoc || '', photo: U.photo, remark: String(F.remark || '').trim(), status: 'Pending GRN', qc: qcl, by: ME.name });
-  audit('inward.create', i.no, U.bt + ' · ' + U.ven + ' · ' + U.po + ' · ' + billNo);
+  const grnNo = reserveGrnNo();
+  const i = Store.put('inwards', { id: uid(), no: nextNo('inwards', 'INW'), grn_no: grnNo, at: nowIso(), date: todayYmd(), bill_type: U.bt, vendor: U.ven, po_no: U.po, bill_no: billNo, bill_date: F.bill_date, qty: num(F.qty),
+    qc_no: String(F.qc_no || '').trim(), qc_report: U.qcDoc || '', photo: U.photo, remark: String(F.remark || '').trim(), status: 'Pending GRN', inv_status: '', qc: qcl, by: ME.name });
+  audit('inward.create', i.no, U.bt + ' · ' + U.ven + ' · ' + U.po + ' · ' + billNo + ' · ' + grnNo);
   Object.assign(U, { form: false, ven: '', po: '', f: {}, photo: '', qcDoc: '' });
-  flash(esc(i.no) + ' saved' + (qcl.length ? ' — QC check pending for ' + qcl.length + ' item(s).' : '.')); VIEWS.inward.render();
+  flash(esc(i.no) + ' saved — GRN No ' + esc(grnNo) + '. Invoice approval pending.'); VIEWS.inward.render();
+};
+
+/* ================= Invoice approval (purchase) ================= */
+const IA_UI = { view: null, act: null, notes: [] };
+VIEWS.invapproval = {
+  mod: 'purchase', render() {
+    const edit = can('purchase', 'edit');
+    const list = Store.all('inwards').filter(i => i.status === 'Pending GRN' && i.inv_status !== 'Approved' && i.inv_status !== 'Rejected').sort((a, b) => (a.at || '') < (b.at || '') ? -1 : 1);
+    const i = IA_UI.view ? list.find(x => x.id === IA_UI.view) : null;
+    if (!i) {
+      IA_UI.view = null;
+      setMain('<div class="tbl-wrap"><table><tr><th>Gate Entry</th><th>Timestamp</th><th>Bill Type</th><th>Vendor</th><th>PO Number</th><th>Invoice No</th><th>Invoice Date</th><th class="num">Invoice Qty</th><th>GRN No</th><th>Status</th><th>Hold Reason</th><th></th></tr>' +
+        (list.length ? list.map(x => '<tr><td><b>' + esc(x.no) + '</b></td><td>' + fmtDT(x.at) + '</td><td>' + esc(x.bill_type || 'Invoice') + '</td><td>' + esc(x.vendor) + '</td><td>' + esc(x.po_no) + '</td><td>' + esc(x.bill_no) + '</td><td>' + fmtD(x.bill_date) + '</td><td class="num">' + qtyFmt(x.qty) + '</td><td>' + esc(x.grn_no || '') + '</td><td><span class="st ' + (x.inv_status === 'Hold' ? 'Late' : 'Pending') + '">' + (x.inv_status === 'Hold' ? 'On Hold' : 'Pending') + '</span></td><td>' + esc(x.inv_status === 'Hold' ? x.inv_hold_reason || '' : '') + '</td><td class="right"><button class="btn sm primary" data-act="ia-view" data-id="' + esc(x.id) + '">View</button></td></tr>').join('')
+          : '<tr><td colspan="12" class="empty">No invoices waiting for approval</td></tr>') + '</table></div>');
+      return;
+    }
+    const p = Store.all('purchase_orders').find(x => norm(x.no) === norm(i.po_no)) || { lines: [] };
+    const codes = p.lines.map(l => l.material);
+    if (!IA_UI.notes.length) IA_UI.notes = (i.grn_notes || []).length ? i.grn_notes.map(x => Object.assign({}, x)) : [{ inv_item: '', code: '', note: '' }];
+    let h = '<div class="toolbar"><button class="btn" data-act="ia-back">‹ Back</button><span class="grow"></span>';
+    if (edit && IA_UI.act) h += '<input id="iaRem" style="min-width:320px" placeholder="' + (IA_UI.act === 'hold' ? 'Reason for hold' : 'Reason for rejection') + '"><button class="btn ' + (IA_UI.act === 'hold' ? 'primary' : 'danger') + '" data-act="ia-confirm" data-id="' + esc(i.id) + '">' + (IA_UI.act === 'hold' ? 'Put on Hold' : 'Reject Invoice') + '</button><button class="btn" data-act="ia-cancel">Cancel</button>';
+    else if (edit) h += '<button class="btn primary" data-act="ia-approve" data-id="' + esc(i.id) + '">Approve</button><button class="btn" data-act="ia-open" data-a="hold">Hold</button><button class="btn danger" data-act="ia-open" data-a="reject">Reject</button>';
+    h += '</div>';
+    h += '<div class="grid2"><div>' + kvTable([['Gate Entry', esc(i.no)], ['GRN No', esc(i.grn_no || '')], ['Bill Type', esc(i.bill_type || 'Invoice')], ['Vendor', '<b>' + esc(i.vendor) + '</b>'], ['PO Number', esc(i.po_no)], ['Invoice No', esc(i.bill_no)], ['Invoice Date', fmtD(i.bill_date)], ['Invoice Qty', qtyFmt(i.qty)], ['Inwarding', fmtDT(i.at)], ['Remark', esc(i.remark || '')]].concat(i.inv_status === 'Hold' ? [['Hold Reason', esc(i.inv_hold_reason || '')]] : [])) + '</div>' +
+      '<div class="ia-photo">' + (i.photo ? '<img src="' + i.photo + '" data-act="img-view" data-src="' + esc(i.photo) + '">' : '') + '</div></div>';
+    h += '<h2>PO items</h2><div class="tbl-wrap"><table><tr><th class="num">Sr</th><th>Item Code</th><th>Item Name</th><th>UOM</th><th class="num">PO Qty</th><th class="num">Received</th><th class="num">Pending</th></tr>' +
+      p.lines.map((l, k) => '<tr><td class="num">' + (k + 1) + '</td><td>' + esc(l.material) + '</td><td>' + esc((matBy(l.material) || {}).name || '') + '</td><td>' + esc(l.uom || '') + '</td><td class="num">' + qtyFmt(l.qty) + '</td><td class="num">' + qtyFmt(num(l.received)) + '</td><td class="num">' + qtyFmt(Math.max(0, num(l.qty) - num(l.received))) + '</td></tr>').join('') + '</table></div>';
+    h += '<h2>GRN notes</h2><div class="tbl-wrap"><table id="iaNotes"><tr><th class="num">Sr</th><th>Item name on invoice</th><th>Item Code</th><th>Item Name</th><th>Note</th><th></th></tr>' +
+      IA_UI.notes.map((n, k) => '<tr data-ian="' + k + '"><td class="num">' + (k + 1) + '</td><td><input data-ia="inv_item" value="' + esc(n.inv_item) + '" style="min-width:220px"' + (edit ? '' : ' disabled') + '></td><td><select data-ia="code"' + (edit ? '' : ' disabled') + '><option value="">Select…</option>' + codes.map(c => '<option' + (norm(c) === norm(n.code) ? ' selected' : '') + '>' + esc(c) + '</option>').join('') + '</select></td><td>' + esc((matBy(n.code) || {}).name || '') + '</td><td><input data-ia="note" value="' + esc(n.note) + '" style="min-width:220px"' + (edit ? '' : ' disabled') + '></td><td>' + (edit ? '<button class="btn ghost sm danger" data-act="ia-del" data-k="' + k + '">×</button>' : '') + '</td></tr>').join('') + '</table></div>' +
+      (edit ? '<a class="small" data-act="ia-add">+ add item</a>' : '');
+    const m = setMain(h);
+    m.addEventListener('input', e => { const tr = e.target.closest('tr[data-ian]'); if (tr && e.target.dataset.ia) IA_UI.notes[+tr.dataset.ian][e.target.dataset.ia] = e.target.value; });
+    m.addEventListener('change', e => { const tr = e.target.closest('tr[data-ian]'); if (tr && e.target.dataset.ia === 'code') { IA_UI.notes[+tr.dataset.ian].code = e.target.value; VIEWS.invapproval.render(); } });
+    const r = $('#iaRem'); if (r) r.focus();
+  }
+};
+ACTIONS['ia-view'] = el => { IA_UI.view = el.dataset.id; IA_UI.act = null; IA_UI.notes = []; VIEWS.invapproval.render(); };
+ACTIONS['ia-back'] = () => { IA_UI.view = null; IA_UI.act = null; IA_UI.notes = []; VIEWS.invapproval.render(); };
+ACTIONS['ia-add'] = () => { IA_UI.notes.push({ inv_item: '', code: '', note: '' }); VIEWS.invapproval.render(); };
+ACTIONS['ia-del'] = el => { IA_UI.notes.splice(+el.dataset.k, 1); if (!IA_UI.notes.length) IA_UI.notes.push({ inv_item: '', code: '', note: '' }); VIEWS.invapproval.render(); };
+ACTIONS['ia-open'] = el => { IA_UI.act = el.dataset.a; VIEWS.invapproval.render(); };
+ACTIONS['ia-cancel'] = () => { IA_UI.act = null; VIEWS.invapproval.render(); };
+ACTIONS['ia-approve'] = el => {
+  if (!requirePerm('purchase', 'edit')) return;
+  const i = Store.get('inwards', el.dataset.id); if (!i || i.status !== 'Pending GRN') return;
+  const notes = IA_UI.notes.map(n => ({ inv_item: String(n.inv_item || '').trim(), code: String(n.code || '').trim(), note: String(n.note || '').trim() })).filter(n => n.inv_item || n.code || n.note);
+  const bad = notes.find(n => !n.inv_item || !n.code);
+  if (!notes.length) { flash('Add the GRN note: invoice item name and its item code.', 'err'); return; }
+  if (bad) { flash('Every note row needs the invoice item name and the item code.', 'err'); return; }
+  i.inv_status = 'Approved'; i.grn_notes = notes; i.inv_by = ME.name; i.inv_at = nowIso(); i.inv_hold_reason = '';
+  Store.put('inwards', i); audit('inward.invoice_approve', i.no, i.bill_no + ' · ' + notes.length + ' note(s)');
+  IA_UI.view = null; IA_UI.notes = []; flash(esc(i.bill_no) + ' approved.' + ((i.qc || []).length ? ' QC check pending.' : ' Ready for GRN.')); VIEWS.invapproval.render();
+};
+ACTIONS['ia-confirm'] = el => {
+  if (!requirePerm('purchase', 'edit')) return;
+  const i = Store.get('inwards', el.dataset.id); if (!i) return;
+  const rem = ($('#iaRem') || { value: '' }).value.trim();
+  if (!rem) { flash(IA_UI.act === 'hold' ? 'Write why the invoice is on hold.' : 'Write the reason for rejection.', 'err'); return; }
+  if (IA_UI.act === 'hold') { i.inv_status = 'Hold'; i.inv_hold_reason = rem; i.inv_hold_by = ME.name; i.inv_hold_at = nowIso(); audit('inward.invoice_hold', i.no, rem); flash(esc(i.bill_no) + ' put on hold.'); }
+  else { i.inv_status = 'Rejected'; i.status = 'Invoice Rejected'; i.inv_reject_reason = rem; i.inv_by = ME.name; i.inv_at = nowIso(); audit('inward.invoice_reject', i.no, rem); flash(esc(i.bill_no) + ' rejected.'); }
+  Store.put('inwards', i); IA_UI.view = null; IA_UI.act = null; IA_UI.notes = []; VIEWS.invapproval.render();
 };
 
 /* ================= QC check (store) ================= */
@@ -234,18 +328,18 @@ VIEWS.swatchmatch = {
   mod: 'store', render() {
     const edit = can('store', 'edit');
     const pend = []; const done = [];
-    Store.all('inwards').filter(i => i.status === 'Pending GRN').forEach(i => (i.qc || []).forEach(q => (q.result ? done : pend).push({ i, q })));
-    Store.all('inwards').filter(i => i.status !== 'Pending GRN').forEach(i => (i.qc || []).forEach(q => { if (q.result) done.push({ i, q }); }));
-    let h = '<div class="tbl-wrap"><table><tr><th>Inward</th><th>Timestamp</th><th>Vendor</th><th>PO</th><th>Item</th><th>Category</th><th>Brand</th><th>Material Photo</th>' + (edit ? '<th></th>' : '') + '</tr>' +
+    Store.all('inwards').filter(invApproved).forEach(i => (i.qc || []).forEach(q => (q.result ? done : pend).push({ i, q })));
+    Store.all('inwards').filter(i => i.status === 'GRN Done').forEach(i => (i.qc || []).forEach(q => { if (q.result) done.push({ i, q }); }));
+    let h = '<div class="tbl-wrap"><table><tr><th>Inward</th><th>Timestamp</th><th>Vendor</th><th>PO</th><th>Item Code</th><th>Item Name</th><th>Category</th><th>Brand</th><th>Material Photo</th>' + (edit ? '<th></th>' : '') + '</tr>' +
       (pend.length ? pend.map(({ i, q }) => { const k = i.id + '|' + q.material; const m = matBy(q.material) || {};
-        return '<tr><td><b>' + esc(i.no) + '</b></td><td class="nowrap">' + fmtDT(i.at || i.date) + '</td><td>' + esc(i.vendor) + '</td><td>' + esc(i.po_no) + '</td><td>' + esc(m.name || q.material) + '</td><td>' + esc(q.category) + '</td><td>' + esc(q.brands.join(', ')) + '</td>' +
-          '<td>' + (edit ? '<label class="icphoto">' + (QC_UI.ph[k] ? photoThumb(QC_UI.ph[k]) + ' <span class="small">change</span>' : '<span class="muted">Attach</span>') + '<input type="file" accept="image/*" data-qcf="' + esc(k) + '" style="display:none"></label>' : '') + '</td>' +
-          (edit ? '<td class="right nowrap"><button class="btn sm primary" data-act="qc-set" data-k="' + esc(k) + '" data-r="Match">Match</button> <button class="btn sm danger" data-act="qc-set" data-k="' + esc(k) + '" data-r="Mismatch">Mismatch</button></td>' : '') + '</tr>'; }).join('')
-        : '<tr><td colspan="9" class="empty">No items waiting for QC</td></tr>') + '</table></div>';
+        return '<tr><td><b>' + esc(i.no) + '</b></td><td>' + fmtDT(i.at || i.date) + '</td><td>' + esc(i.vendor) + '</td><td>' + esc(i.po_no) + '</td><td>' + esc(q.material) + '</td><td>' + esc(m.name || '') + '</td><td>' + esc(q.category) + '</td><td>' + esc(q.brands.join(', ')) + '</td>' +
+          '<td>' + (edit ? attachBox('accept="image/*" data-qcf="' + esc(k) + '"', QC_UI.ph[k], 'Attach photo') : '') + '</td>' +
+          (edit ? '<td class="right"><button class="btn sm primary" data-act="qc-set" data-k="' + esc(k) + '" data-r="Match">Match</button> <button class="btn sm danger" data-act="qc-set" data-k="' + esc(k) + '" data-r="Mismatch">Mismatch</button></td>' : '') + '</tr>'; }).join('')
+        : '<tr><td colspan="10" class="empty">No items waiting for QC</td></tr>') + '</table></div>';
     done.sort((a, b) => (b.q.at || '') < (a.q.at || '') ? -1 : 1);
-    h += '<h2>Recent QC results</h2><div class="tbl-wrap"><table><tr><th>Inward</th><th>Item</th><th>Result</th><th>Photo</th><th>Merchant</th><th>Merchant decision</th><th>Approval photo</th></tr>' +
-      (done.length ? done.slice(0, 20).map(({ i, q }) => '<tr><td>' + esc(i.no) + '</td><td>' + esc((matBy(q.material) || {}).name || q.material) + '</td><td><span class="st ' + (q.result === 'Match' ? 'Done' : 'Late') + '">' + esc(q.result) + '</span></td><td>' + photoThumb(q.photo) + '</td><td>' + esc((q.merchants || []).join(', ')) + '</td><td>' + (q.result === 'Mismatch' ? '<span class="st ' + (q.m_status === 'Approved' ? 'Done' : q.m_status === 'Rejected' ? 'Cancelled' : 'Pending') + '">' + esc(q.m_status || 'Pending') + '</span>' + (q.m_note ? ' <span class="small muted">' + esc(q.m_note) + '</span>' : '') : '') + '</td><td>' + photoThumb(q.m_photo) + '</td></tr>').join('')
-        : '<tr><td colspan="7" class="empty">No QC results yet</td></tr>') + '</table></div>';
+    h += '<h2>Recent QC results</h2><div class="tbl-wrap"><table><tr><th>Inward</th><th>Item Code</th><th>Item Name</th><th>Result</th><th>Photo</th><th>QC By</th><th>QC Date</th><th>Merchant</th><th>Merchant Decision</th><th>Decision By</th><th>Approval Photo</th></tr>' +
+      (done.length ? done.slice(0, 30).map(({ i, q }) => '<tr><td>' + esc(i.no) + '</td><td>' + esc(q.material) + '</td><td>' + esc((matBy(q.material) || {}).name || '') + '</td><td><span class="st ' + (q.result === 'Match' ? 'Done' : 'Late') + '">' + esc(q.result) + '</span></td><td>' + photoThumb(q.photo) + '</td><td>' + esc(q.by || '') + '</td><td>' + fmtDT(q.at) + '</td><td>' + (q.result === 'Mismatch' ? esc((q.merchants || []).join(', ')) : '') + '</td><td>' + (q.result === 'Mismatch' ? '<span class="st ' + (q.m_status === 'Approved' ? 'Done' : q.m_status === 'Rejected' ? 'Cancelled' : 'Pending') + '">' + esc(q.m_status || 'Pending') + '</span>' : '') + '</td><td>' + esc(q.m_by || '') + '</td><td>' + photoThumb(q.m_photo) + '</td></tr>').join('')
+        : '<tr><td colspan="11" class="empty">No QC results yet</td></tr>') + '</table></div>';
     const m = setMain(h);
     m.addEventListener('change', e => { const k = e.target.dataset.qcf; if (k) readImg(e.target.files[0], src => { QC_UI.ph[k] = src; VIEWS.swatchmatch.render(); }); });
   }
@@ -253,7 +347,7 @@ VIEWS.swatchmatch = {
 function qcFind(k) { const [id, code] = k.split('|'); const i = Store.get('inwards', id); return i ? { i, q: (i.qc || []).find(x => x.material === code) } : {}; }
 ACTIONS['qc-set'] = el => {
   if (!requirePerm('store', 'edit')) return;
-  const { i, q } = qcFind(el.dataset.k); if (!q || q.result) return;
+  const { i, q } = qcFind(el.dataset.k); if (!q || q.result || !invApproved(i)) return;
   if (el.dataset.r === 'Match' && !QC_UI.ph[el.dataset.k]) { flash('Attach the material photo to pass QC.', 'err'); return; }
   q.result = el.dataset.r; q.photo = QC_UI.ph[el.dataset.k] || ''; q.by = ME.name; q.at = nowIso();
   Store.put('inwards', i); delete QC_UI.ph[el.dataset.k];
@@ -267,23 +361,23 @@ VIEWS.swatch = {
   mod: 'merchant', render() {
     const edit = can('merchant', 'edit');
     const mine = [];
-    Store.all('inwards').filter(i => i.status === 'Pending GRN').forEach(i => (i.qc || []).forEach(q => {
+    Store.all('inwards').filter(invApproved).forEach(i => (i.qc || []).forEach(q => {
       if (q.result !== 'Mismatch' || q.m_status) return;
       const ms = q.merchants || [];
       if (isSuperAdmin() || ms.some(isMyMerchant) || (!ms.length && canApprove())) mine.push({ i, q });
     }));
-    let h = '<h2 style="margin-top:0">Material QC mismatch</h2><div class="tbl-wrap"><table><tr><th>Inward</th><th>Vendor</th><th>PO</th><th>Item</th><th>Brand</th><th>Merchant</th><th>Approval card + sample photo</th><th>Note</th>' + (edit ? '<th></th>' : '') + '</tr>' +
+    let h = '<h2 style="margin-top:0">Material QC mismatch</h2><div class="tbl-wrap"><table><tr><th>Inward</th><th>Vendor</th><th>PO</th><th>Item Code</th><th>Item Name</th><th>Brand</th><th>Merchant</th><th>QC By</th><th>Approval Card + Sample Photo</th><th>Note</th>' + (edit ? '<th></th>' : '') + '</tr>' +
       (mine.length ? mine.map(({ i, q }) => { const k = i.id + '|' + q.material;
-        return '<tr><td><b>' + esc(i.no) + '</b></td><td>' + esc(i.vendor) + '</td><td>' + esc(i.po_no) + '</td><td>' + esc((matBy(q.material) || {}).name || q.material) + '</td><td>' + esc(q.brands.join(', ')) + '</td><td>' + esc((q.merchants || []).join(', ')) + '</td>' +
-          '<td>' + (edit ? '<label class="icphoto">' + (SW_UI.ph[k] ? photoThumb(SW_UI.ph[k]) + ' <span class="small">change</span>' : '<span class="muted">Attach</span>') + '<input type="file" accept="image/*" data-swf="' + esc(k) + '" style="display:none"></label>' : '') + '</td>' +
+        return '<tr><td><b>' + esc(i.no) + '</b></td><td>' + esc(i.vendor) + '</td><td>' + esc(i.po_no) + '</td><td>' + esc(q.material) + '</td><td>' + esc((matBy(q.material) || {}).name || '') + '</td><td>' + esc(q.brands.join(', ')) + '</td><td>' + esc((q.merchants || []).join(', ')) + '</td><td>' + esc(q.by || '') + '</td>' +
+          '<td>' + (edit ? attachBox('accept="image/*" data-swf="' + esc(k) + '"', SW_UI.ph[k], 'Attach approval card') : '') + '</td>' +
           '<td>' + (edit ? '<input data-swn="' + esc(k) + '">' : '') + '</td>' +
-          (edit ? '<td class="right nowrap"><button class="btn sm primary" data-act="qcm-set" data-k="' + esc(k) + '" data-s="Approved">Approve</button> <button class="btn sm danger" data-act="qcm-set" data-k="' + esc(k) + '" data-s="Rejected">Reject</button></td>' : '') + '</tr>'; }).join('')
-        : '<tr><td colspan="9" class="empty">Nothing waiting for you</td></tr>') + '</table></div>';
+          (edit ? '<td class="right"><button class="btn sm primary" data-act="qcm-set" data-k="' + esc(k) + '" data-s="Approved">Approve</button> <button class="btn sm danger" data-act="qcm-set" data-k="' + esc(k) + '" data-s="Rejected">Reject</button></td>' : '') + '</tr>'; }).join('')
+        : '<tr><td colspan="11" class="empty">Nothing waiting for you</td></tr>') + '</table></div>';
     const rows = Store.all('job_cards').filter(j => j.swatch_status === 'Pending' || j.swatch_status === 'Rejected');
     h += '<h2>Job card swatch</h2><div class="tbl-wrap"><table><tr><th>JC No</th><th>Brand</th><th>Article</th><th>Colour</th><th class="num">Qty</th><th>Status</th><th>Note</th>' + (edit ? '<th></th>' : '') + '</tr>' +
       (rows.length ? rows.map(j => '<tr><td><b>' + esc(j.no) + '</b></td><td>' + esc(j.brand) + '</td><td>' + esc(j.article) + '</td><td>' + esc(j.colour) + '</td><td class="num">' + qtyFmt(j.qty) + '</td><td><span class="st ' + (j.swatch_status === 'Rejected' ? 'Late' : 'Pending') + '">' + esc(j.swatch_status) + '</span></td>' +
         '<td>' + (edit ? '<input data-sw-note value="' + esc(j.swatch_note || '') + '">' : esc(j.swatch_note || '')) + '</td>' +
-        (edit ? '<td class="right nowrap"><button class="btn sm primary" data-act="sw-set" data-id="' + esc(j.id) + '" data-s="Approved">Approve</button> <button class="btn sm danger" data-act="sw-set" data-id="' + esc(j.id) + '" data-s="Rejected">Reject</button></td>' : '') + '</tr>').join('') : '<tr><td colspan="8" class="empty">No swatches pending</td></tr>') + '</table></div>';
+        (edit ? '<td class="right"><button class="btn sm primary" data-act="sw-set" data-id="' + esc(j.id) + '" data-s="Approved">Approve</button> <button class="btn sm danger" data-act="sw-set" data-id="' + esc(j.id) + '" data-s="Rejected">Reject</button></td>' : '') + '</tr>').join('') : '<tr><td colspan="8" class="empty">No swatches pending</td></tr>') + '</table></div>';
     const m = setMain(h);
     m.addEventListener('change', e => { const k = e.target.dataset.swf; if (k) readImg(e.target.files[0], src => { SW_UI.ph[k] = src; VIEWS.swatch.render(); }); });
   }
@@ -303,80 +397,140 @@ ACTIONS['sw-set'] = el => {
   Store.put('job_cards', j); audit('jc.swatch', j.no, el.dataset.s + (j.swatch_note ? ' — ' + j.swatch_note : '')); flash(esc(j.no) + ' swatch ' + el.dataset.s.toLowerCase() + '.'); VIEWS.swatch.render();
 };
 
-/* ================= GRN (one per gate entry) ================= */
-const GRN_UI = { open: null };
-function inwardQcState(i) {
-  const qs = i.qc || [];
-  if (qs.some(q => !q.result)) return { ok: false, label: 'QC pending' };
-  if (qs.some(q => q.result === 'Mismatch' && !q.m_status)) return { ok: false, label: 'Merchant approval pending' };
-  return { ok: true, label: qs.length ? 'QC done' : 'No QC needed' };
-}
+/* ================= GRN ================= */
+// Vendor → PO (every step cleared, still open) → invoice (gate entry) → items from that PO only.
+// Per item: Short = Invoice − Received; Excess = received beyond PO pending; GRN = Received − Excess − Reject;
+// Total = GRN + Reject + Short + Excess, which always equals the item's invoice qty.
+// Save is allowed only when the grand total equals the gate-entry invoice qty.
+const GRN_UI = { ven: '', po: '', inw: '', rows: [], why: '' };
 function qcBlocked(i, code) { const q = (i.qc || []).find(x => norm(x.material) === norm(code)); return q && q.result === 'Mismatch' && q.m_status === 'Rejected'; }
+function grnReady() { return Store.all('inwards').filter(i => invApproved(i) && inwardQcState(i).ok).filter(i => { const p = Store.all('purchase_orders').find(x => norm(x.no) === norm(i.po_no)); return p && !p.cancelled && p.approval === 'Approved' && poPending(p) > 0; }); }
+function grnCalc(r, pen) {
+  const inv = num(r.inv), rec = num(r.recv), rej = num(r.rej);
+  const short = Math.max(0, inv - rec);
+  const got = Math.min(rec, inv);
+  const excess = Math.max(0, got - pen);
+  const grn = Math.max(0, got - excess - rej);
+  return { inv, rec, rej, short, excess, grn, total: grn + rej + short + excess };
+}
+function grnDialog(p, k, done) {
+  const l = p.lines[k]; const m = matBy(l.material) || {}; const pen = Math.max(0, num(l.qty) - num(l.received));
+  const old = $('#grnDlg'); if (old) old.remove();
+  const d = document.createElement('div'); d.id = 'grnDlg'; d.className = 'dlg-back';
+  d.innerHTML = '<div class="dlg"><div class="dlg-h">' + esc(l.material) + ' — ' + esc(m.name || '') + '</div><table class="jckv"><tr><td class="k">PO Pending</td><td class="v">' + qtyFmt(pen) + ' ' + esc(l.uom || m.uom || '') + '</td></tr>' +
+    '<tr><td class="k">Invoice Qty *</td><td class="v"><input data-gd="inv" type="number" min="0" step="any"></td></tr><tr><td class="k">Received Qty *</td><td class="v"><input data-gd="recv" type="number" min="0" step="any"></td></tr></table>' +
+    '<div class="dlg-f"><span id="gdMsg" class="small late-txt"></span><span class="grow"></span><button class="btn" data-gd-cancel>Cancel</button><button class="btn primary" data-gd-ok>Add</button></div></div>';
+  document.body.appendChild(d); $('[data-gd="inv"]', d).focus();
+  d.addEventListener('click', ev => {
+    if (ev.target.closest('[data-gd-cancel]')) { d.remove(); return; }
+    if (!ev.target.closest('[data-gd-ok]')) return;
+    const inv = num($('[data-gd="inv"]', d).value), recv = num($('[data-gd="recv"]', d).value);
+    if (inv <= 0) { $('#gdMsg', d).textContent = 'Enter the invoice qty.'; return; }
+    if ($('[data-gd="recv"]', d).value === '') { $('#gdMsg', d).textContent = 'Enter the received qty.'; return; }
+    d.remove(); done({ i: k, inv, recv, rej: 0, rack: m.rack || '' });
+  });
+  d.addEventListener('keydown', ev => { if (ev.key === 'Escape') d.remove(); if (ev.key === 'Enter') { ev.preventDefault(); $('[data-gd-ok]', d).click(); } });
+}
 VIEWS.grn = {
   mod: 'store', render() {
-    const edit = can('store', 'edit');
-    const ins = Store.all('inwards').filter(i => i.status === 'Pending GRN').sort((a, b) => (a.at || '') < (b.at || '') ? -1 : 1);
-    let h = '<div class="tbl-wrap"><table><tr><th>Inward</th><th>Timestamp</th><th>Vendor</th><th>PO</th><th>Invoice No</th><th class="num">Invoice Qty</th><th>QC</th><th></th></tr>' +
-      (ins.length ? ins.map(i => {
-        const st = inwardQcState(i); const p = Store.all('purchase_orders').find(x => norm(x.no) === norm(i.po_no));
-        let row = '<tr><td><b>' + esc(i.no) + '</b></td><td class="nowrap">' + fmtDT(i.at || i.date) + '</td><td>' + esc(i.vendor) + '</td><td>' + esc(i.po_no) + '</td><td>' + esc(i.bill_no) + '</td><td class="num">' + qtyFmt(i.qty) + '</td>' +
-          '<td><span class="st ' + (st.ok ? 'Done' : 'Pending') + '">' + st.label + '</span></td><td class="right">' + (edit && p ? '<button class="btn sm ' + (GRN_UI.open === i.id ? '' : 'primary') + '" data-act="grn-open" data-id="' + esc(i.id) + '"' + (st.ok ? '' : ' disabled') + '>' + (GRN_UI.open === i.id ? 'Close' : 'Make GRN') + '</button>' : '') + '</td></tr>';
-        if (GRN_UI.open === i.id && p) row += '<tr class="inline-form"><td colspan="8"><table style="max-width:960px;margin:6px 0"><tr><th>Item</th><th>Brand</th><th class="num">PO Pending</th><th class="num">Inv Qty</th><th class="num">GRN Qty</th><th class="num">Reject</th><th class="num">Short</th><th class="num">Excess</th><th>Rack</th></tr>' +
-          p.lines.map((l, k) => {
-            const pen = Math.max(0, num(l.qty) - num(l.received)); const mt = matBy(l.material) || {}; const blocked = qcBlocked(i, l.material); const on = pen > 0 && !blocked;
-            return '<tr data-i="' + k + '" data-pen="' + pen + '"' + (blocked ? ' class="muted"' : '') + '><td>' + esc(mt.name || l.material) + (blocked ? ' <span class="st Cancelled">Rejected by merchant</span>' : '') + '</td><td class="small">' + esc(l.brand || '') + '</td><td class="num">' + qtyFmt(pen) + '</td>' +
-              '<td><input class="qty" type="number" min="0" step="any" data-gi value="' + (on ? pen : '') + '"' + (on ? '' : ' disabled') + '></td><td><input class="qty" type="number" min="0" step="any" data-ga value="' + (on ? pen : '') + '"' + (on ? '' : ' disabled') + '></td><td><input class="qty" type="number" min="0" step="any" data-gr value="0"' + (on ? '' : ' disabled') + '></td>' +
-              '<td class="num muted" data-gs>—</td><td class="num muted" data-gx>—</td><td><input data-grack value="' + esc(mt.rack || '') + '" style="width:60px"' + (on ? '' : ' disabled') + '></td></tr>';
-          }).join('') +
-          '</table><div class="row"><label>GRN Date<input id="grnDate" type="date" value="' + todayYmd() + '"></label><button class="btn primary" data-act="grn-save" data-id="' + esc(i.id) + '">Save GRN</button><span id="grnMsg" class="small"></span></div><div class="row" id="grnWhyBox" style="display:none;margin-top:4px"><label style="flex:1">Reject reason *<input id="grnWhy"></label></div></td></tr>';
-        return row;
-      }).join('') : '<tr><td colspan="8" class="empty">No gate entries waiting for GRN</td></tr>') + '</table></div>';
-    const gs = Store.all('grns').slice().sort((a, b) => b.no < a.no ? -1 : 1).slice(0, 15);
-    h += '<h2>Recent GRNs</h2><div class="tbl-wrap"><table><tr><th>GRN No</th><th>GRN Date</th><th>Inward</th><th>PO No</th><th>Vendor</th><th>Invoice No</th><th class="num">Sr</th><th>Item Name</th><th>Item Code</th><th>Brand</th><th class="num">Inv Qty</th><th class="num">Accepted</th><th class="num">Rejected</th><th class="num">Short</th><th class="num">Excess</th><th>Rack</th><th>By</th><th></th></tr>' +
-      (gs.length ? gs.map(g => g.lines.map((l, i) => '<tr' + (i === 0 ? ' class="bomfirst"' : '') + '><td><b>' + esc(g.no) + '</b></td><td>' + fmtD(g.date) + '</td><td>' + esc(g.inward_no || '') + '</td><td>' + esc(g.po_no) + '</td><td>' + esc(g.vendor) + '</td><td>' + esc(g.invoice || '') + '</td><td class="num">' + (i + 1) + '</td><td>' + esc((matBy(l.material) || {}).name || '') + '</td><td>' + esc(l.material) + '</td><td>' + esc(l.brand || '') + '</td><td class="num">' + qtyFmt(l.inv_qty || 0) + '</td><td class="num">' + qtyFmt(l.accepted || 0) + '</td><td class="num">' + qtyFmt(l.rejected || 0) + '</td><td class="num">' + qtyFmt(l.short || 0) + '</td><td class="num">' + qtyFmt(l.excess || 0) + '</td><td>' + esc(l.rack || '') + '</td><td>' + esc(g.by) + '</td><td class="right">' + (i === 0 ? '<button class="btn sm ghost" data-act="print-grn" data-id="' + esc(g.id) + '">Print</button>' : '') + '</td></tr>').join('')).join('') : '<tr><td colspan="18" class="empty">No GRNs yet</td></tr>') + '</table></div>';
-    setMain(h);
+    const edit = can('store', 'edit'); const U = GRN_UI;
+    const ready = grnReady();
+    const vendors = Array.from(new Set(ready.map(i => i.vendor))).sort();
+    if (U.ven && !vendors.includes(U.ven)) Object.assign(U, { ven: '', po: '', inw: '', rows: [] });
+    const pos = Array.from(new Set(ready.filter(i => i.vendor === U.ven).map(i => i.po_no)));
+    const invs = ready.filter(i => i.vendor === U.ven && i.po_no === U.po);
+    const iw = invs.find(i => i.id === U.inw) || null;
+    const p = iw ? Store.all('purchase_orders').find(x => norm(x.no) === norm(iw.po_no)) : null;
+    const opt = (list, val, ph, dis) => '<option value="">' + ph + '</option>' + list.map(([v, l]) => '<option value="' + esc(v) + '"' + (v === val ? ' selected' : '') + '>' + esc(l) + '</option>').join('');
+    let h = '';
+    if (edit) {
+      const items = p ? p.lines.map((l, k) => ({ l, k, pen: Math.max(0, num(l.qty) - num(l.received)) })).filter(x => x.pen > 0 && !qcBlocked(iw, x.l.material) && !U.rows.some(r => r.i === x.k)) : [];
+      const left = [
+        ['Vendor Name *', '<select id="grVen">' + opt(vendors.map(v => [v, v]), U.ven, vendors.length ? 'Select vendor…' : 'Nothing ready for GRN') + '</select>'],
+        ['PO Number *', '<select id="grPo"' + (U.ven ? '' : ' disabled') + '>' + opt(pos.map(x => [x, x]), U.po, U.ven ? 'Select PO…' : '—') + '</select>'],
+        ['Invoice No *', '<select id="grInv"' + (U.po ? '' : ' disabled') + '>' + opt(invs.map(i => [i.id, i.bill_no + ' · ' + fmtD(i.bill_date) + ' · Qty ' + qtyFmt(i.qty)]), U.inw, U.po ? 'Select invoice…' : '—') + '</select>'],
+        ['Item *', '<select id="grItem"' + (iw ? '' : ' disabled') + '>' + opt(items.map(x => [String(x.k), x.l.material + ' — ' + ((matBy(x.l.material) || {}).name || '')]), '', iw ? (items.length ? 'Select item…' : 'All items added') : '—') + '</select>']
+      ];
+      const right = iw ? [['Gate Entry', esc(iw.no)], ['Invoice Qty', '<b>' + qtyFmt(iw.qty) + '</b>'], ['Invoice Date', fmtD(iw.bill_date)], ['Invoice Photo', photoThumb(iw.photo)], ['Invoice Approved By', esc(iw.inv_by || '')]] : [];
+      h += '<div class="card"><div class="card-b"><div class="inwform">' + kvTable(left) + (iw ? kvTable(right) : '<div></div>') + '</div>';
+      if (iw && (iw.grn_notes || []).length) h += '<h2>GRN notes</h2><div class="tbl-wrap"><table><tr><th class="num">Sr</th><th>Item name on invoice</th><th>Item Code</th><th>Item Name</th><th>Note</th></tr>' + iw.grn_notes.map((n, k) => '<tr><td class="num">' + (k + 1) + '</td><td>' + esc(n.inv_item) + '</td><td><b>' + esc(n.code) + '</b></td><td>' + esc((matBy(n.code) || {}).name || '') + '</td><td>' + esc(n.note || '') + '</td></tr>').join('') + '</table></div>';
+      if (iw) {
+        const tot = { inv: 0, rec: 0, rej: 0, short: 0, excess: 0, grn: 0, total: 0 };
+        const body = U.rows.map((r, n) => { const l = p.lines[r.i]; const mt = matBy(l.material) || {}; const pen = Math.max(0, num(l.qty) - num(l.received)); const c = grnCalc(r, pen); Object.keys(tot).forEach(k => { tot[k] += c[k]; });
+          return '<tr data-gr="' + n + '"><td class="num">' + (n + 1) + '</td><td><b>' + esc(l.material) + '</b></td><td>' + esc(mt.name || '') + '</td><td>' + esc(l.uom || mt.uom || '') + '</td><td class="num">' + qtyFmt(pen) + '</td><td class="num">' + qtyFmt(c.inv) + '</td><td class="num">' + qtyFmt(c.rec) + '</td><td class="num late-txt">' + (c.short ? qtyFmt(c.short) : '') + '</td>' +
+            '<td><input class="qty" type="number" min="0" step="any" data-grrej value="' + (r.rej || '') + '"></td><td class="num"><b>' + qtyFmt(c.grn) + '</b></td><td class="num">' + (c.excess ? qtyFmt(c.excess) : '') + '</td><td class="num">' + qtyFmt(c.total) + '</td><td><input data-grrack value="' + esc(r.rack || '') + '" style="width:80px"></td><td><button class="btn ghost sm danger" data-act="gr-del" data-n="' + n + '">×</button></td></tr>'; }).join('');
+        const match = U.rows.length && Math.abs(tot.total - num(iw.qty)) < 1e-6;
+        const badRej = U.rows.some(r => { const c = grnCalc(r, Math.max(0, num(p.lines[r.i].qty) - num(p.lines[r.i].received))); return num(r.rej) > Math.min(c.rec, c.inv) - c.excess + 1e-9; });
+        h += '<div class="tbl-wrap" style="margin-top:12px"><table><tr><th class="num">Sr</th><th>Item Code</th><th>Item Name</th><th>UOM</th><th class="num">PO Pending</th><th class="num">Invoice Qty</th><th class="num">Received Qty</th><th class="num">Short</th><th class="num">Reject</th><th class="num">GRN Qty</th><th class="num">Excess</th><th class="num">Total</th><th>Rack</th><th></th></tr>' +
+          (body || '<tr><td colspan="14" class="empty">Select an item</td></tr>') +
+          '<tr class="tt"><td></td><td colspan="4"><b>Grand Total</b></td><td class="num"><b>' + qtyFmt(tot.inv) + '</b></td><td class="num"><b>' + qtyFmt(tot.rec) + '</b></td><td class="num"><b>' + qtyFmt(tot.short) + '</b></td><td class="num"><b>' + qtyFmt(tot.rej) + '</b></td><td class="num"><b>' + qtyFmt(tot.grn) + '</b></td><td class="num"><b>' + qtyFmt(tot.excess) + '</b></td><td class="num"><b>' + qtyFmt(tot.total) + '</b></td><td></td><td></td></tr></table></div>' +
+          (tot.rej > 0 ? '<div class="row" style="margin-top:8px"><label style="flex:1">Reject Reason *<input id="grWhy" value="' + esc(U.why || '') + '"></label></div>' : '');
+        h += '</div><div class="card-f"><span class="grn-no">GRN No: <b>' + (match && !badRej ? esc(iw.grn_no || '') : '—') + '</b></span><span class="small muted">Invoice Qty ' + qtyFmt(iw.qty) + ' · Total ' + qtyFmt(tot.total) + '</span><span class="grow"></span><button class="btn primary" data-act="grn-save"' + (match && !badRej ? '' : ' disabled') + '>Save GRN</button><span id="grnMsg" class="small">' + (badRej ? '<span class="late-txt">Reject is more than the qty received against the PO.</span>' : '') + '</span></div></div>';
+      } else h += '</div></div>';
+    }
+    const gs = Store.all('grns').slice().sort((a, b) => b.no < a.no ? -1 : 1).slice(0, 20);
+    h += '<h2>Recent GRNs</h2><div class="tbl-wrap"><table><tr><th>GRN No</th><th>GRN Date</th><th>Inward</th><th>PO No</th><th>Vendor</th><th>Invoice No</th><th class="num">Sr</th><th>Item Code</th><th>Item Name</th><th class="num">Invoice Qty</th><th class="num">Received</th><th class="num">Short</th><th class="num">Reject</th><th class="num">GRN Qty</th><th class="num">Excess</th><th>Excess Status</th><th>Rack</th><th>By</th><th>Report</th></tr>' +
+      (gs.length ? gs.map(g => { const pend = (g.lines || []).some(l => l.excess_status === 'Pending'); return g.lines.map((l, i) => '<tr' + (i === 0 ? ' class="bomfirst"' : '') + '><td><b>' + esc(g.no) + '</b></td><td>' + fmtD(g.date) + '</td><td>' + esc(g.inward_no || '') + '</td><td>' + esc(g.po_no) + '</td><td>' + esc(g.vendor) + '</td><td>' + esc(g.invoice || '') + '</td><td class="num">' + (i + 1) + '</td><td>' + esc(l.material) + '</td><td>' + esc((matBy(l.material) || {}).name || '') + '</td><td class="num">' + qtyFmt(l.inv_qty || 0) + '</td><td class="num">' + qtyFmt(l.recv_qty != null ? l.recv_qty : num(l.accepted) + num(l.rejected)) + '</td><td class="num">' + qtyFmt(l.short || 0) + '</td><td class="num">' + qtyFmt(l.rejected || 0) + '</td><td class="num">' + qtyFmt(l.accepted || 0) + '</td><td class="num">' + qtyFmt(l.excess || 0) + '</td><td>' + (num(l.excess) > 0 ? '<span class="st ' + (l.excess_status === 'Approved' ? 'Done' : l.excess_status === 'Rejected' ? 'Late' : 'Pending') + '">' + esc(l.excess_status || 'Pending') + '</span>' : '') + '</td><td>' + esc(l.rack || '') + '</td><td>' + esc(g.by) + '</td><td>' + (i === 0 ? (pend ? '<span class="st Pending">Excess approval pending</span>' : '<button class="btn sm ghost" data-act="print-grn" data-id="' + esc(g.id) + '">Print</button>') : '') + '</td></tr>').join(''); }).join('') : '<tr><td colspan="19" class="empty">No GRNs yet</td></tr>') + '</table></div>';
+    const m = setMain(h);
+    m.addEventListener('change', e => {
+      const t = e.target;
+      if (t.id === 'grVen') { Object.assign(U, { ven: t.value, po: '', inw: '', rows: [], why: '' }); VIEWS.grn.render(); }
+      if (t.id === 'grPo') { Object.assign(U, { po: t.value, inw: '', rows: [], why: '' }); VIEWS.grn.render(); }
+      if (t.id === 'grInv') { Object.assign(U, { inw: t.value, rows: [], why: '' }); VIEWS.grn.render(); }
+      if (t.id === 'grItem' && t.value !== '') { const k = +t.value; t.value = ''; grnDialog(p, k, r => { U.rows.push(r); VIEWS.grn.render(); }); }
+      const tr = t.closest && t.closest('tr[data-gr]');
+      if (tr && t.dataset.grrej != null) { U.rows[+tr.dataset.gr].rej = num(t.value); VIEWS.grn.render(); }
+    });
+    m.addEventListener('input', e => { const tr = e.target.closest('tr[data-gr]'); if (tr && e.target.dataset.grrack != null) U.rows[+tr.dataset.gr].rack = e.target.value; if (e.target.id === 'grWhy') U.why = e.target.value; });
   }
 };
-ACTIONS['grn-open'] = el => { GRN_UI.open = GRN_UI.open === el.dataset.id ? null : el.dataset.id; VIEWS.grn.render(); };
-function grnCalcRow(tr) {
-  const inv = num($('[data-gi]', tr).value), acc = num($('[data-ga]', tr).value), rej = num($('[data-gr]', tr).value), pen = num(tr.dataset.pen);
-  const excess = Math.max(0, inv - pen);                       // billed beyond PO balance
-  const short = Math.max(0, inv - acc - rej);                  // billed but not physically received
-  $('[data-gx]', tr).textContent = excess ? qtyFmt(excess) : '—';
-  $('[data-gs]', tr).textContent = short ? qtyFmt(short) : '—';
-  return { inv, acc, rej, excess, short };
-}
-document.addEventListener('input', e => { const tr = e.target.closest && e.target.closest('tr[data-pen]'); if (tr && (e.target.dataset.gi != null || e.target.dataset.ga != null || e.target.dataset.gr != null)) { grnCalcRow(tr); const anyRej = $$('tr[data-pen]').some(t => num(($('[data-gr]', t) || {}).value) > 0); const box = $('#grnWhyBox'); if (box) box.style.display = anyRej ? '' : 'none'; } });
-ACTIONS['grn-save'] = el => {
+ACTIONS['gr-del'] = el => { GRN_UI.rows.splice(+el.dataset.n, 1); VIEWS.grn.render(); };
+ACTIONS['grn-save'] = () => {
   if (!requirePerm('store', 'edit')) return;
-  const iw = Store.get('inwards', el.dataset.id); if (!iw || iw.status !== 'Pending GRN') return;
-  if (!inwardQcState(iw).ok) { flash('QC is not complete for ' + esc(iw.no) + '.', 'err'); return; }
+  const U = GRN_UI; const iw = Store.get('inwards', U.inw);
+  if (!iw || !invApproved(iw) || !inwardQcState(iw).ok) { flash('This invoice is not ready for GRN.', 'err'); return; }
   const p = Store.all('purchase_orders').find(x => norm(x.no) === norm(iw.po_no)); if (!p) return;
-  const rows = $$('tr[data-pen]').filter(tr => !$('[data-gi]', tr).disabled).map(tr => Object.assign({ i: +tr.dataset.i, tr, material: p.lines[+tr.dataset.i].material }, grnCalcRow(tr))).filter(r => r.inv > 0 || r.acc > 0 || r.rej > 0);
-  if (!rows.length) { $('#grnMsg').innerHTML = '<span class="late-txt">Enter invoice qty or accept/reject qty.</span>'; return; }
-  for (const r of rows) {
-    const pen = Math.max(0, num(p.lines[r.i].qty) - num(p.lines[r.i].received));
-    if (qcBlocked(iw, r.material)) { $('#grnMsg').innerHTML = '<span class="late-txt">' + esc(r.material) + ' was rejected by the merchant.</span>'; return; }
-    if (r.acc + r.rej > r.inv + 1e-9) { $('#grnMsg').innerHTML = '<span class="late-txt">' + esc(r.material) + ': accept + reject exceeds invoice qty.</span>'; return; }
-    if (r.acc + r.rej > pen + r.excess + 1e-9) { $('#grnMsg').innerHTML = '<span class="late-txt">' + esc(r.material) + ': qty exceeds PO pending + excess.</span>'; return; }
-  }
-  const why = ($('#grnWhy') || { value: '' }).value.trim();
-  if (rows.some(r => r.rej > 0) && !why) { $('#grnMsg').innerHTML = '<span class="late-txt">Reject reason is required.</span>'; return; }
-  const inv = iw.bill_no;
-  if (Store.all('grns').some(g => norm(g.vendor) === norm(p.vendor) && norm(g.invoice) === norm(inv))) { $('#grnMsg').innerHTML = '<span class="late-txt">This vendor invoice already has a GRN.</span>'; return; }
-  rows.forEach(r => { const pl = p.lines[r.i]; pl.received = num(pl.received) + r.acc + r.rej; pl.rejected = num(pl.rejected) + r.rej; });
+  const calc = U.rows.map(r => { const l = p.lines[r.i]; const pen = Math.max(0, num(l.qty) - num(l.received)); return Object.assign({ r, l, pen }, grnCalc(r, pen)); });
+  const total = calc.reduce((a, c) => a + c.total, 0);
+  if (!calc.length || Math.abs(total - num(iw.qty)) > 1e-6) { flash('Grand total must equal the invoice qty (' + qtyFmt(iw.qty) + ').', 'err'); return; }
+  if (calc.some(c => qcBlocked(iw, c.l.material))) { flash('An item rejected by the merchant cannot be taken in GRN.', 'err'); return; }
+  const why = String(U.why || '').trim();
+  if (calc.some(c => c.rej > 0) && !why) { flash('Reject reason is required.', 'err'); return; }
+  if (Store.all('grns').some(g => g.inward_id === iw.id)) { flash('This invoice already has a GRN.', 'err'); return; }
+  calc.forEach(c => { c.l.received = num(c.l.received) + c.grn + c.rej; c.l.rejected = num(c.l.rejected) + c.rej; });
   Store.put('purchase_orders', p);
-  const lines = rows.map(r => ({ material: r.material, jc_no: p.lines[r.i].jc_no || '', brand: p.lines[r.i].brand || '', inv_qty: r.inv, accepted: r.acc, rejected: r.rej, short: r.short, excess: r.excess, rack: ($('[data-grack]', r.tr) || { value: '' }).value.trim() }));
-  const g = Store.put('grns', { id: uid(), no: fyNo('grns', 'GRN', 4), date: $('#grnDate').value || todayYmd(), inward_id: iw.id, inward_no: iw.no, po_id: p.id, po_no: p.no, vendor: p.vendor, invoice: inv, reject_reason: why, lines, by: ME.name });
-  iw.status = 'GRN Done'; iw.grn_no = g.no; Store.put('inwards', iw);
-  const totRej = rows.reduce((x, r) => x + r.rej, 0), totShort = rows.reduce((x, r) => x + r.short, 0), totExcess = rows.reduce((x, r) => x + r.excess, 0);
-  if (totRej > 0 || totShort > 0) {
-    autoTask('Debit Note — ' + inv + ' (' + p.vendor + '): reject ' + qtyFmt(totRej) + ', short ' + qtyFmt(totShort), 'ACCOUNTS', 0);
-    if (totRej > 0) autoTask('RTV — ' + p.vendor + ' inv ' + inv + ': ' + rows.filter(r => r.rej).map(r => r.material + ' × ' + qtyFmt(r.rej)).join(', '), 'STORE', 1);
-  }
-  autoTask('Tally Entry — GRN ' + g.no + ' (' + p.vendor + ', inv ' + inv + ')', 'ACCOUNTS', 1);
-  audit('grn.create', g.no, iw.no + ' · ' + p.no + ' · inv ' + inv + ' · acc ' + qtyFmt(rows.reduce((x, r) => x + r.acc, 0)) + (totRej ? ' / rej ' + qtyFmt(totRej) : '') + (totShort ? ' / short ' + qtyFmt(totShort) : '') + (totExcess ? ' / excess ' + qtyFmt(totExcess) : ''));
-  GRN_UI.open = null;
-  flash(esc(g.no) + ' saved — stock updated.' + (poPending(p) <= 0 ? ' ' + esc(p.no) + ' fully received.' : ''));
+  const lines = calc.map(c => ({ material: c.l.material, jc_no: c.l.jc_no || '', brand: c.l.brand || '', uom: c.l.uom || '', po_pending: c.pen, inv_qty: c.inv, recv_qty: c.rec, short: c.short, rejected: c.rej, accepted: c.grn, excess: c.excess, excess_status: c.excess > 0 ? 'Pending' : '', rack: String(c.r.rack || '').trim() }));
+  const g = Store.put('grns', { id: uid(), no: iw.grn_no || reserveGrnNo(), date: todayYmd(), at: nowIso(), inward_id: iw.id, inward_no: iw.no, po_id: p.id, po_no: p.no, vendor: p.vendor, invoice: iw.bill_no, invoice_date: iw.bill_date, reject_reason: why, lines, by: ME.name });
+  iw.status = 'GRN Done'; Store.put('inwards', iw);
+  const totRej = calc.reduce((x, c) => x + c.rej, 0), totShort = calc.reduce((x, c) => x + c.short, 0), totEx = calc.reduce((x, c) => x + c.excess, 0);
+  if (totRej > 0 || totShort > 0) autoTask('Debit Note — ' + iw.bill_no + ' (' + p.vendor + '): reject ' + qtyFmt(totRej) + ', short ' + qtyFmt(totShort), 'ACCOUNTS', 0);
+  if (totRej > 0) autoTask('RTV — ' + p.vendor + ' inv ' + iw.bill_no + ': ' + calc.filter(c => c.rej).map(c => c.l.material + ' × ' + qtyFmt(c.rej)).join(', '), 'STORE', 1);
+  autoTask('Tally Entry — GRN ' + g.no + ' (' + p.vendor + ', inv ' + iw.bill_no + ')', 'ACCOUNTS', 1);
+  audit('grn.create', g.no, iw.no + ' · ' + p.no + ' · inv ' + iw.bill_no + ' · GRN ' + qtyFmt(calc.reduce((x, c) => x + c.grn, 0)) + (totRej ? ' / rej ' + qtyFmt(totRej) : '') + (totShort ? ' / short ' + qtyFmt(totShort) : '') + (totEx ? ' / excess ' + qtyFmt(totEx) : ''));
+  Object.assign(U, { ven: '', po: '', inw: '', rows: [], why: '' });
   VIEWS.grn.render();
+  if (totEx > 0) flash(esc(g.no) + ' saved — stock updated. Excess ' + qtyFmt(totEx) + ' sent for approval; GRN report after the decision.');
+  else { flash(esc(g.no) + ' saved — stock updated.'); ACTIONS['print-grn']({ dataset: { id: g.id } }); }
+};
+
+/* ================= Excess approval (CEO) ================= */
+function canApproveExcess() { const r = myRole(); return !!r && (r.system || norm(r.name) === 'ceo'); }
+VIEWS.excessapproval = {
+  mod: 'purchase', render() {
+    const ok = canApproveExcess(); const rows = [];
+    Store.all('grns').forEach(g => (g.lines || []).forEach((l, k) => { if (l.excess_status === 'Pending') rows.push({ g, l, k }); }));
+    setMain('<div class="tbl-wrap"><table><tr><th>GRN No</th><th>GRN Date</th><th>Vendor</th><th>PO No</th><th>Invoice No</th><th>Item Code</th><th>Item Name</th><th>UOM</th><th class="num">PO Pending</th><th class="num">Invoice Qty</th><th class="num">Received</th><th class="num">Excess</th><th>GRN By</th>' + (ok ? '<th></th>' : '') + '</tr>' +
+      (rows.length ? rows.map(({ g, l, k }) => '<tr><td><b>' + esc(g.no) + '</b></td><td>' + fmtD(g.date) + '</td><td>' + esc(g.vendor) + '</td><td>' + esc(g.po_no) + '</td><td>' + esc(g.invoice || '') + '</td><td>' + esc(l.material) + '</td><td>' + esc((matBy(l.material) || {}).name || '') + '</td><td>' + esc(l.uom || '') + '</td><td class="num">' + qtyFmt(l.po_pending || 0) + '</td><td class="num">' + qtyFmt(l.inv_qty || 0) + '</td><td class="num">' + qtyFmt(l.recv_qty || 0) + '</td><td class="num late-txt"><b>' + qtyFmt(l.excess) + '</b></td><td>' + esc(g.by) + '</td>' +
+        (ok ? '<td class="right"><button class="btn sm primary" data-act="ex-set" data-id="' + esc(g.id) + '" data-k="' + k + '" data-s="Approved">Accept</button> <button class="btn sm danger" data-act="ex-set" data-id="' + esc(g.id) + '" data-k="' + k + '" data-s="Rejected">Reject</button></td>' : '') + '</tr>').join('')
+        : '<tr><td colspan="14" class="empty">No excess waiting for approval</td></tr>') + '</table></div>');
+  }
+};
+ACTIONS['ex-set'] = el => {
+  if (!canApproveExcess()) { flash('Only the CEO can decide excess material.', 'err'); return; }
+  const g = Store.get('grns', el.dataset.id); const l = g && g.lines[+el.dataset.k]; if (!l || l.excess_status !== 'Pending') return;
+  l.excess_status = el.dataset.s; l.excess_by = ME.name; l.excess_at = nowIso(); Store.put('grns', g);
+  audit('grn.excess_' + el.dataset.s.toLowerCase(), g.no, l.material + ' × ' + qtyFmt(l.excess));
+  const done = !g.lines.some(x => x.excess_status === 'Pending');
+  flash(esc(l.material) + ': excess ' + (el.dataset.s === 'Approved' ? 'accepted — added to stock.' : 'rejected — moved to RTV stock.') + (done ? ' GRN ' + esc(g.no) + ' report is ready.' : ''));
+  VIEWS.excessapproval.render();
 };

@@ -344,6 +344,8 @@ const NAV = [
     { v: 'netreq', l: 'Net Requirement', mod: 'purchase' },
     { v: 'po', l: 'Purchase Order', mod: 'purchase' },
     { v: 'poapproval', l: 'PO Approval', mod: 'purchase' },
+    { v: 'invapproval', l: 'Invoice Approval', mod: 'purchase' },
+    { v: 'excessapproval', l: 'Excess Approval', mod: 'purchase' },
     { v: 'sourcing', l: 'Sourcing', mod: 'purchase' },
     { v: 'followup', l: 'Followup', mod: 'purchase' },
     { v: 'vendors', l: 'Vendors', mod: 'purchase' }] },

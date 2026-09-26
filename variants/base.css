@@ -304,3 +304,9 @@ tr.moqrow td { background: #fff8e6; }
 .dlg-f{display:flex;align-items:center;gap:8px;margin-top:12px}
 .po2-card{padding:0;overflow-x:auto;max-width:1100px;margin:0 auto}
 .dlg .jckv input{width:100%;border:1px solid #cfd8dc;border-radius:4px;padding:5px 8px;background:#fff;height:30px}
+.attach{display:inline-flex;align-items:center;gap:8px;min-width:190px;padding:7px 12px;border:1.5px dashed #6aa9ad;border-radius:6px;background:#f2f9f9;color:#0e6a73;font-weight:600;font-size:12px;cursor:pointer}
+.attach:hover{background:#e3f2f2;border-color:#0e6a73}.attach-i{font-size:16px;line-height:1}.attach.has{border-style:solid;background:#fff;min-width:0}.attach.has img{height:30px;border-radius:3px}
+.ia-photo img{max-width:100%;max-height:420px;border:1px solid #d5dfe2;border-radius:6px;cursor:zoom-in}
+.grn-no{font-size:14px;margin-right:12px}.grn-no b{color:#0e6a73}
+label.attach{flex-direction:row!important;width:auto}
+.jckv td.k{white-space:nowrap}
