@@ -203,3 +203,30 @@ td input.right, input.right { text-align: right; }
 
 /* table pager */
 .pager { display: flex; gap: 8px; align-items: center; justify-content: flex-end; margin: 6px 0 12px; }
+
+/* Job Card document (screen = print) */
+.jcdoc { max-width: 1150px; }
+.jcdoc table { border-collapse: collapse; }
+.jcban { background: #0d7377; color: #fff; text-align: center; font-weight: bold; font-size: 15px; padding: 6px; border-radius: 4px; }
+.jcmid { display: flex; gap: 10px; margin: 10px 0; align-items: stretch; }
+.jcl { flex: none; width: 305px; }
+.jcr { flex: none; }
+.jckv { width: 100%; }
+.jckv td { border: 1px solid #b9d4d4; font-size: 12px; padding: 3px 8px; white-space: normal; }
+.jckv .k { font-weight: bold; width: 100px; background: #e3f2f2; color: #0a5c5f; }
+.jckv .b { font-weight: bold; }
+.jcph { border: 1px solid #b9d4d4; border-radius: 4px; flex: 1; min-height: 230px; min-width: 0; display: flex; align-items: center; justify-content: center; color: #98a2ae; font-size: 12px; letter-spacing: .2em; overflow: hidden; }
+.jcph img { max-width: 100%; max-height: 260px; object-fit: contain; height: auto !important; }
+.jcph.jcph-form { flex-direction: column; gap: 10px; letter-spacing: normal; padding: 12px; }
+.jcph.jcph-form label { font-size: 11.5px; }
+.jcszt { height: 100%; }
+.jcszt th, .jcszt td { border: 1px solid #b9d4d4; font-size: 12px; padding: 3px 7px; text-align: center; white-space: nowrap; }
+.jcszt .hd th { background: #0d7377; color: #fff; position: static; }
+.jcszt .tt td { font-weight: bold; background: #e3f2f2; }
+.jcszt .hl { background: #e3f2f2; font-weight: bold; }
+.jcbom { width: 100%; }
+.jcbom th, .jcbom td { border: 1px solid #b9d4d4; font-size: 11.5px; padding: 3.5px 7px; }
+.jcbom .hd th { background: #0d7377; color: #fff; text-align: center; position: static; }
+.jcbom .c { text-align: center; }
+.jcbom tr:last-child td, .jckv tr:last-child td, .jcszt tr:last-child td { border-bottom: 1px solid #b9d4d4; }
+@media (max-width: 900px) { .jcmid { flex-direction: column; } .jcl, .jcr { width: auto; } }

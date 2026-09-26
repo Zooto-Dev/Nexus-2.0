@@ -93,9 +93,9 @@ function pTable(heads, rows, foot) {
     rows.map(r => '<tr>' + r.map((c, i) => '<td' + ((heads[i] && heads[i][1]) === 'n' ? ' class="n"' : '') + '>' + c + '</td>').join('') + '</tr>').join('') + '</tbody>' +
     (foot ? '<tfoot><tr>' + foot.map((c, i) => '<td' + ((heads[i] && heads[i][1]) === 'n' ? ' class="n"' : '') + '>' + c + '</td>').join('') + '</tr></tfoot>' : '') + '</table>';
 }
-// Job Card print: fixed A4-landscape format (teal) — left details, photo, size table with 2% extra, BOM
-ACTIONS['print-jc'] = el => {
-  const j = Store.get('job_cards', el.dataset.id); if (!j) return;
+// Job Card document: one fixed layout shared by the screen view and the print/PDF.
+// Teal banner, 12-field details table, product photo, size table with 2% extra, full-width BOM.
+function jcDocHtml(j) {
   const o = Store.all('orders').find(x => norm(x.no) === norm(j.order_no)) || {};
   const ol = (o.lines || []).find(l => norm(l.article) === norm(j.article) && (!j.colour || norm(l.colour || '') === norm(j.colour))) || (o.lines || [])[0] || {};
   const sizes = j.sizes || [];
@@ -105,7 +105,7 @@ ACTIONS['print-jc'] = el => {
   const leftRows = [['JOB CARD', j.no], ['Date', fmtD(j.at)], ['Brand', j.brand], ['Style Name', j.style || ol.style || ''], ['Colour', j.colour || ol.colour || ''], ['Gender', j.gender || ol.gender || ''],
     ['Category', j.category || o.category || ''], ['Last/Tooling', o.tooling_no || ''], ['Mean Size', mean], ['Article', j.article], ['Size Run', run], ['Style Code/No.', j.style_code || 'NA']];
   let szRows = '';
-  const nRows = Math.max(7, sizes.length);
+  const nRows = Math.max(10, sizes.length);   // pad so the size box matches the photo/details height
   for (let i = 0; i < nRows; i++) {
     const s = sizes[i]; let c0 = '', c1 = '', hl = '';
     if (i === 0) { c0 = esc(j.order_no || ''); c1 = esc(fmtD(o.order_date || o.created_at)); }
@@ -113,29 +113,34 @@ ACTIONS['print-jc'] = el => {
     else if (i === 5) { c0 = esc(j.remarks || (ol.pack ? ol.pack.toUpperCase() + ' PACKING' : '')); hl = ' class="hl"'; }
     szRows += '<tr><td' + hl + '>' + c0 + '</td><td' + hl + '>' + c1 + '</td><td>' + (s ? esc(s.size) : '') + '</td><td>' + (s ? qtyFmt(s.act) : '') + '</td><td>' + (s ? qtyFmt(s.extra) : '') + '</td></tr>';
   }
+  return '<div class="jcdoc"><div class="jcban">JOB CARD</div>' +
+    '<div class="jcmid"><div class="jcl"><table class="jckv">' + leftRows.map((r, i) => '<tr><td class="k">' + esc(r[0]) + '</td><td class="v' + (i === 0 ? ' b' : '') + '">' + esc(String(r[1] || '')) + '</td></tr>').join('') + '</table></div>' +
+    '<div class="jcph">' + (j.photo ? '<img src="' + j.photo + '">' : 'PRODUCT PHOTO') + '</div>' +
+    '<div class="jcr"><table class="jcszt"><tr class="hd"><th>Order No</th><th>Order Date</th><th>SIZE</th><th>Act.Ord</th><th>With 2% Extra</th></tr>' + szRows +
+    '<tr class="tt"><td></td><td>Total</td><td></td><td>' + qtyFmt(actT) + '</td><td>' + qtyFmt(extT) + '</td></tr></table></div></div>' +
+    '<table class="jcbom"><tr class="hd"><th>Sr No</th><th>Process</th><th>Section</th><th>Item Category</th><th>Item Name</th><th>Item Code</th><th>Uom</th><th>Norms</th><th>Required Qty</th><th>Supplier</th></tr>' +
+    (j.lines || []).map((l, i) => '<tr><td class="c">' + (i + 1) + '</td><td>' + esc(l.process || '') + '</td><td>' + esc(l.section || '') + '</td><td>' + esc(l.category || '') + '</td><td>' + esc((matBy(l.material) || {}).name || l.material) + '</td><td class="c">' + esc(l.material) + '</td><td class="c">' + esc(l.uom || '') + '</td><td class="c">' + l.norms + '</td><td class="c">' + qtyFmt(l.required) + '</td><td>' + esc(l.supplier || '') + '</td></tr>').join('') +
+    '</table></div>';
+}
+const JC_DOC_CSS =
+  '.jcdoc table{border-collapse:collapse}' +
+  '.jcban{background:#0d7377;color:#fff;text-align:center;font-weight:bold;font-size:15px;padding:6px;border-radius:4px}' +
+  '.jcmid{display:flex;gap:10px;margin:10px 0;align-items:stretch}' +
+  '.jcl,.jcr{flex:none;display:flex}' +
+  '.jckv{width:100%}.jckv td{border:1px solid #b9d4d4;font-size:11px;padding:3px 8px}.jckv .k{font-weight:bold;width:95px;background:#e3f2f2;color:#0a5c5f}.jckv .b{font-weight:bold}' +
+  '.jcph{border:1px solid #b9d4d4;border-radius:4px;flex:1;min-height:220px;display:flex;align-items:center;justify-content:center;color:#999;font-size:12px;letter-spacing:.2em;overflow:hidden}' +
+  '.jcph img{max-width:100%;max-height:250px;object-fit:contain}' +
+  '.jcszt{height:100%}.jcszt th,.jcszt td{border:1px solid #b9d4d4;font-size:11px;padding:3px 7px;text-align:center}.jcszt .hd th{background:#0d7377;color:#fff}.jcszt .tt td{font-weight:bold;background:#e3f2f2}.jcszt .hl{background:#e3f2f2;font-weight:bold}' +
+  '.jcbom{width:100%}.jcbom th,.jcbom td{border:1px solid #b9d4d4;font-size:10.5px;padding:3.5px 7px}.jcbom .hd th{background:#0d7377;color:#fff;text-align:center}.jcbom .c{text-align:center}';
+ACTIONS['print-jc'] = el => {
+  const j = Store.get('job_cards', el.dataset.id); if (!j) return;
   const w = window.open('');
   w.document.write('<html><head><title>' + esc(j.no) + '</title><style>' +
     '@page{size:A4 landscape;margin:8mm}' +
     'html,body{margin:0;font-family:Helvetica,Arial,sans-serif;color:#000}' +
-    'table{border-collapse:collapse}' +
-    '.ban{background:#0d7377;color:#fff;text-align:center;font-weight:bold;font-size:15px;padding:6px;border-radius:4px;-webkit-print-color-adjust:exact;print-color-adjust:exact}' +
-    '.ban span{float:right;font-weight:normal;font-size:12px}' +
-    '.mid{display:flex;gap:10px;margin:10px 0}' +
-    '.kvt td{border:1px solid #b9d4d4;font-size:10.5px;padding:3px 7px}.kvt .k{font-weight:bold;width:95px;background:#e3f2f2;color:#0a5c5f}.kvt .b{font-weight:bold}' +
-    '.ph{border:1px solid #b9d4d4;border-radius:4px;flex:1;min-height:200px;display:flex;align-items:center;justify-content:center;color:#999;font-size:12px;letter-spacing:.2em;overflow:hidden}' +
-    '.ph img{max-width:100%;max-height:230px;object-fit:contain}' +
-    '.szt th,.szt td{border:1px solid #b9d4d4;font-size:10.5px;padding:3px 6px;text-align:center}.szt .hd th{background:#0d7377;color:#fff}.szt .tt td{font-weight:bold;background:#e3f2f2}.szt .hl{background:#e3f2f2;font-weight:bold}' +
-    '.bomt{width:100%}.bomt th,.bomt td{border:1px solid #b9d4d4;font-size:10px;padding:3.5px 6px}.bomt .hd th{background:#0d7377;color:#fff;text-align:center}.bomt .c{text-align:center}' +
+    JC_DOC_CSS +
     '*{-webkit-print-color-adjust:exact;print-color-adjust:exact}' +
-    '</style></head><body>' +
-    '<div class="ban">JOB CARD <span>' + esc(j.no) + ' · ' + esc(fmtD(j.at)) + '</span></div>' +
-    '<div class="mid"><div><table class="kvt">' + leftRows.map((r, i) => '<tr><td class="k">' + esc(r[0]) + '</td><td class="v' + (i === 0 ? ' b' : '') + '">' + esc(String(r[1] || '')) + '</td></tr>').join('') + '</table></div>' +
-    '<div class="ph">' + (j.photo ? '<img src="' + j.photo + '">' : 'PRODUCT PHOTO') + '</div>' +
-    '<div><table class="szt"><tr class="hd"><th>Order No</th><th>Order Date</th><th>SIZE</th><th>Act.Ord</th><th>With 2% Extra</th></tr>' + szRows +
-    '<tr class="tt"><td></td><td>Total</td><td></td><td>' + qtyFmt(actT) + '</td><td>' + qtyFmt(extT) + '</td></tr></table></div></div>' +
-    '<table class="bomt"><tr class="hd"><th>Sr No</th><th>Process</th><th>Section</th><th>Item Category</th><th>Item Name</th><th>Item Code</th><th>Uom</th><th>Norms</th><th>Required Qty</th><th>Supplier</th></tr>' +
-    (j.lines || []).map((l, i) => '<tr><td class="c">' + (i + 1) + '</td><td>' + esc(l.process || '') + '</td><td>' + esc(l.section || '') + '</td><td>' + esc(l.category || '') + '</td><td>' + esc((matBy(l.material) || {}).name || l.material) + '</td><td class="c">' + esc(l.material) + '</td><td class="c">' + esc(l.uom || '') + '</td><td class="c">' + l.norms + '</td><td class="c">' + qtyFmt(l.required) + '</td><td>' + esc(l.supplier || '') + '</td></tr>').join('') +
-    '</table>' +
+    '</style></head><body>' + jcDocHtml(j) +
     '<script>window.print()</' + 'script></body></html>');
   w.document.close();
 };
@@ -435,26 +440,27 @@ VIEWS.jobcards = {
   }
 };
 function jcDetail(j) {
-  let h = '';
-  if (j.photo) h += '<div style="margin:4px 0">' + photoThumb(j.photo) + '</div>';
-  if ((j.sizes || []).length) h += '<table style="max-width:420px;margin:4px 0"><tr><th>SIZE</th><th class="num">Act.Ord</th><th class="num">Extra(2%)</th></tr>' + j.sizes.map(sz => '<tr><td>' + esc(sz.size) + '</td><td class="num">' + qtyFmt(sz.act) + '</td><td class="num">' + qtyFmt(sz.extra) + '</td></tr>').join('') + '<tr><td><b>Total</b></td><td class="num"><b>' + qtyFmt(j.sizes.reduce((s2, x) => s2 + num(x.act), 0)) + '</b></td><td class="num"><b>' + qtyFmt(j.sizes.reduce((s2, x) => s2 + num(x.extra), 0)) + '</b></td></tr></table>';
+  // Screen view mirrors the printed Job Card exactly; procurement numbers follow below.
+  let h = jcDocHtml(j);
   const L = j.lines || [];
-  h += L.length ? '<table style="max-width:1020px;margin:4px 0"><tr><th>Process</th><th>Section</th><th>Category</th><th>Item</th><th>Code</th><th>UOM</th><th class="num">Norms</th><th class="num">Req.Qty</th><th>Supplier</th><th class="num">PO raised</th><th class="num">Transit</th><th class="num">Reserved</th><th class="num">Issued</th><th class="num">Pending PO</th></tr>' +
-    L.map(l => { const issd = issuedToJc(j.no, l.material); const pen = Math.max(0, num(l.required) - num(l.po_raised)); const m = matBy(l.material) || {}; return '<tr><td class="small">' + esc(l.process || '') + '</td><td class="small">' + esc(l.section || '') + '</td><td class="small">' + esc(l.category || m.group || '') + '</td><td>' + esc(m.name || '') + '</td><td>' + esc(l.material) + '</td><td>' + esc(l.uom) + '</td><td class="num">' + l.norms + '</td><td class="num">' + qtyFmt(l.required) + '</td><td class="small">' + esc(l.supplier || '') + '</td><td class="num">' + qtyFmt(l.po_raised) + '</td><td class="num muted">' + qtyFmt(transitOf(l.material)) + '</td><td class="num">' + qtyFmt(reservedOf(l.material, j.no)) + '</td><td class="num">' + qtyFmt(issd) + '</td><td class="num ' + (pen ? 'late-txt' : '') + '">' + (pen ? qtyFmt(pen) : '—') + '</td></tr>'; }).join('') + '</table>'
-    : '<span class="muted small">No BOM was found — create the BOM in Development, then recreate the JC.</span>';
-  if (j.remarks) h += '<div class="small"><b>Remarks:</b> ' + esc(j.remarks) + '</div>';
-  h += '<div class="toolbar noprint" style="margin:8px 0 2px"><button class="btn sm" data-act="print-jc" data-id="' + esc(j.id) + '">Print Job Card</button></div>';
+  if (!L.length) h += '<div class="muted small" style="margin:6px 0">No BOM was found — create the BOM in Development, then recreate the JC.</div>';
+  if (L.length) {
+    h += '<h2>Material Status</h2><table style="max-width:860px;margin:4px 0"><tr><th>Item</th><th>Code</th><th class="num">Req.Qty</th><th class="num">PO raised</th><th class="num">Transit</th><th class="num">Reserved</th><th class="num">Issued</th><th class="num">Pending PO</th></tr>' +
+      L.map(l => { const issd = issuedToJc(j.no, l.material); const pen = Math.max(0, num(l.required) - num(l.po_raised)); const m = matBy(l.material) || {}; return '<tr><td>' + esc(m.name || l.material) + '</td><td>' + esc(l.material) + '</td><td class="num">' + qtyFmt(l.required) + '</td><td class="num">' + qtyFmt(l.po_raised) + '</td><td class="num muted">' + qtyFmt(transitOf(l.material)) + '</td><td class="num">' + qtyFmt(reservedOf(l.material, j.no)) + '</td><td class="num">' + qtyFmt(issd) + '</td><td class="num ' + (pen ? 'late-txt' : '') + '">' + (pen ? qtyFmt(pen) : '—') + '</td></tr>'; }).join('') + '</table>';
+  }
+  h += '<div class="toolbar noprint" style="margin:8px 0 2px"><button class="btn sm primary" data-act="print-jc" data-id="' + esc(j.id) + '">Print Job Card</button></div>';
   return h;
 }
 function jcForm() {
   const orders = Store.all('orders').filter(o => orderState(o).open);
   return '<div class="card"><div class="card-h"><b>New Job Card</b><span class="muted small">' + jcNo() + '</span></div><div class="card-b"><datalist id="dlOrdJc">' + orders.map(o => '<option value="' + esc(o.no) + '">' + esc(o.customer_name) + '</option>').join('') + '</datalist>' +
     '<div class="row"><label>Order *<input id="jfOrd" list="dlOrdJc" placeholder="Select order..."></label><label>Article line *<select id="jfLine" disabled><option value="">—</option></select></label><label>JC No <span class="muted small">(auto from order)</span><input id="jfNo" value="" readonly style="width:100px"></label></div>' +
-    '<div class="grid2" style="margin-top:10px"><div><h2 style="margin-top:0">Order details</h2><table class="kv" id="jfDetails"><tr><td class="muted">Select an order and article first</td></tr></table>' +
-    '<div class="row" style="margin-top:8px">' + imgField('jfPhoto', 'Product Image') + '<span id="jfPhotoTag" class="muted small"></span></div></div>' +
-    '<div><h2 style="margin-top:0">Sizes</h2><table id="jfSizes" style="max-width:420px"><tr><th>SIZE</th><th class="num">Act.Ord</th><th class="num">Extra(2%)</th><th></th></tr><tr id="jfSzTotal"><td><b>Total</b></td><td class="num"><b id="jfActT">0</b></td><td class="num"><b id="jfExtT">0</b></td><td></td></tr></table>' +
+    '<div class="jcdoc" style="margin-top:10px"><div class="jcban">JOB CARD</div><div class="jcmid">' +
+    '<div class="jcl"><table class="jckv" id="jfDetails"><tr><td class="muted" style="border:0">Select an order and article first</td></tr></table></div>' +
+    '<div class="jcph jcph-form"><span id="jfPhotoTag"></span>' + imgField('jfPhoto', 'Product Image') + '</div>' +
+    '<div class="jcr"><div><table id="jfSizes" class="jcszt"><tr class="hd"><th>SIZE</th><th>Act.Ord</th><th>Extra(2%)</th><th></th></tr><tr id="jfSzTotal" class="tt"><td><b>Total</b></td><td class="num"><b id="jfActT">0</b></td><td class="num"><b id="jfExtT">0</b></td><td></td></tr></table>' +
     '<a class="small" data-act="jcf-size">+ size row</a> <span id="jfSzMsg" class="small"></span>' +
-    '<div class="row" style="margin-top:8px"><label>Status' + seg('jfStatus', ['NA', 'ONLINE', 'OFFLINE'], 'NA') + '</label><label style="flex:1">Remarks<input id="jfRem" placeholder="Remarks..."></label></div></div></div>' +
+    '<div class="row" style="margin-top:8px"><label>Status' + seg('jfStatus', ['NA', 'ONLINE', 'OFFLINE'], 'NA') + '</label><label>Remarks<input id="jfRem" placeholder="Remarks..."></label></div></div></div></div></div>' +
     '<h2>Material Requirements BOM</h2><div class="toolbar"><a class="small" data-act="jcf-bomrow">+ Add</a><a class="small" data-act="jcf-paste">Bulk Paste</a><span id="jfBomTag" class="muted small"></span></div>' +
     '<div id="jfPasteBox" class="hidden" style="margin-bottom:6px"><textarea id="jfPaste" rows="5" class="mono" placeholder="PROCESS | SECTION | ITEM NAME | NORMS | SUPPLIER  (one row per line; separate with Tab or | — Excel/Sheets paste works directly. Item name alone also works.)"></textarea> <button class="btn sm" data-act="jcf-paste-go">Import</button></div>' +
     dlMat('dlMatJc') + dlVendor() +
@@ -511,8 +517,8 @@ function jcfFillFromOrder() {
   const o = Store.all('orders').find(x => norm(x.no) === norm($('#jfOrd').value)); if (!o) return;
   const li = num($('#jfLine').value); const l = jcOrderLine(o, li);
   if ($('#jfNo')) $('#jfNo').value = l.jc_no || jcNo();
-  $('#jfDetails').innerHTML = [['Date', fmtD(o.order_date)], ['Brand', o.customer_name], ['Style', l.style], ['Colour', l.colour], ['Gender', l.gender], ['Category', o.category], ['Tooling', o.tooling_no], ['Article', l.article], ['Size Run', l.size], ['Order Qty', qtyFmt(l.qty)]]
-    .map(([k, v]) => '<tr><td class="muted" style="width:90px">' + k + '</td><td>' + esc(v || '') + '</td></tr>').join('');
+  $('#jfDetails').innerHTML = [['JOB CARD', l.jc_no || jcNo()], ['Date', fmtD(o.order_date)], ['Brand', o.customer_name], ['Style Name', l.style], ['Colour', l.colour], ['Gender', l.gender], ['Category', o.category], ['Last/Tooling', o.tooling_no], ['Article', l.article], ['Size Run', l.size_run || l.size], ['Order Qty', qtyFmt(l.qty)]]
+    .map(([k, v], i) => '<tr><td class="k">' + k + '</td><td class="v' + (i === 0 ? ' b' : '') + '">' + esc(v || '') + '</td></tr>').join('');
   // size rows: prefill from the order line's size-wise breakup (fallback: single row)
   $$('#jfSizes tr[data-szrow]').forEach(tr => tr.remove());
   if (l.sizes && l.sizes.length) l.sizes.forEach(sz => $('#jfSzTotal').insertAdjacentHTML('beforebegin', jcfSizeRow(sz.size, sz.qty)));
