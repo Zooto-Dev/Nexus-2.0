@@ -15,7 +15,7 @@ const nowIso = () => new Date().toISOString();
 const todayYmd = () => ymdOf(new Date());
 function ymdOf(d) { d = new Date(d); const p = n => String(n).padStart(2, '0'); return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()); }
 const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-function fmtD(v) { if (!v) return ''; const d = new Date(v); if (isNaN(d)) return ''; return d.getDate() + ' ' + MON[d.getMonth()] + (d.getFullYear() !== new Date().getFullYear() ? ' ' + d.getFullYear() : ''); }
+function fmtD(v) { if (!v) return ''; const d = new Date(v); if (isNaN(d)) return ''; return d.getDate() + ' ' + MON[d.getMonth()] + ' ' + d.getFullYear(); }
 function fmtDT(v) { if (!v) return ''; const d = new Date(v); if (isNaN(d)) return ''; const p = n => String(n).padStart(2, '0'); return fmtD(d) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes()); }
 function fmtDelay(min) {
   if (!min) return '';
