@@ -93,19 +93,51 @@ function pTable(heads, rows, foot) {
     rows.map(r => '<tr>' + r.map((c, i) => '<td' + ((heads[i] && heads[i][1]) === 'n' ? ' class="n"' : '') + '>' + c + '</td>').join('') + '</tr>').join('') + '</tbody>' +
     (foot ? '<tfoot><tr>' + foot.map((c, i) => '<td' + ((heads[i] && heads[i][1]) === 'n' ? ' class="n"' : '') + '>' + c + '</td>').join('') + '</tr></tfoot>' : '') + '</table>';
 }
+// Job Card print: fixed A4-landscape format (teal) — left details, photo, size table with 2% extra, BOM
 ACTIONS['print-jc'] = el => {
   const j = Store.get('job_cards', el.dataset.id); if (!j) return;
-  const sizes = (j.sizes || []);
-  printDoc({
-    title: 'Job Card', ref: j.no, date: j.at, by: j.by,
-    meta: [['Order No', j.order_no], ['Brand', j.brand], ['Article', j.article], ['Style', j.style], ['Colour', j.colour], ['Gender', j.gender], ['Category', j.category], ['Order Qty', qtyFmt(j.qty)], ['Swatch', j.swatch_status], ['Status', j.status]],
-    body: (j.photo ? '<img src="' + j.photo + '" style="max-height:110px;border:1px solid #ccc;border-radius:4px;margin-bottom:6px">' : '') +
-      (sizes.length ? '<h3 style="margin:10px 0 0;font-size:13px">Sizes</h3>' + pTable([['Size'], ['Act. Order', 'n'], ['Extra (2%)', 'n']], sizes.map(x => [esc(x.size), qtyFmt(x.act), qtyFmt(x.extra)]), ['Total', qtyFmt(sizes.reduce((a, x) => a + num(x.act), 0)), qtyFmt(sizes.reduce((a, x) => a + num(x.extra), 0))]) : '') +
-      '<h3 style="margin:12px 0 0;font-size:13px">Material Requirements (BOM)</h3>' +
-      pTable([['#'], ['Section'], ['Category'], ['Item Name'], ['Code'], ['UOM'], ['Norms', 'n'], ['Req. Qty', 'n'], ['Supplier']],
-        (j.lines || []).map((l, i) => [i + 1, esc(l.section || ''), esc(l.category || ''), esc((matBy(l.material) || {}).name || ''), esc(l.material), esc(l.uom), l.norms, qtyFmt(l.required), esc(l.supplier || '')])),
-    note: j.remarks ? 'Remarks: ' + j.remarks : ''
-  });
+  const o = Store.all('orders').find(x => norm(x.no) === norm(j.order_no)) || {};
+  const ol = (o.lines || []).find(l => norm(l.article) === norm(j.article) && (!j.colour || norm(l.colour || '') === norm(j.colour))) || (o.lines || [])[0] || {};
+  const sizes = j.sizes || [];
+  const run = ol.size_run || ol.size || (sizes.length ? sizes[0].size + '-' + sizes[sizes.length - 1].size : '');
+  const mean = sizes.length ? sizes[Math.floor((sizes.length - 1) / 2)].size : '';
+  const actT = sizes.reduce((a, x) => a + num(x.act), 0), extT = sizes.reduce((a, x) => a + num(x.extra), 0);
+  const leftRows = [['JOB CARD', j.no], ['Date', fmtD(j.at)], ['Brand', j.brand], ['Style Name', j.style || ol.style || ''], ['Colour', j.colour || ol.colour || ''], ['Gender', j.gender || ol.gender || ''],
+    ['Category', j.category || o.category || ''], ['Last/Tooling', o.tooling_no || ''], ['Mean Size', mean], ['Article', j.article], ['Size Run', run], ['Style Code/No.', j.style_code || 'NA']];
+  let szRows = '';
+  const nRows = Math.max(7, sizes.length);
+  for (let i = 0; i < nRows; i++) {
+    const s = sizes[i]; let c0 = '', c1 = '', hl = '';
+    if (i === 0) { c0 = esc(j.order_no || ''); c1 = esc(fmtD(o.order_date || o.created_at)); }
+    else if (i === 3) c0 = esc(j.line_status && j.line_status !== 'NA' ? j.line_status : (o.channel || '').toUpperCase());
+    else if (i === 5) { c0 = esc(j.remarks || (ol.pack ? ol.pack.toUpperCase() + ' PACKING' : '')); hl = ' class="hl"'; }
+    szRows += '<tr><td' + hl + '>' + c0 + '</td><td' + hl + '>' + c1 + '</td><td>' + (s ? esc(s.size) : '') + '</td><td>' + (s ? qtyFmt(s.act) : '') + '</td><td>' + (s ? qtyFmt(s.extra) : '') + '</td></tr>';
+  }
+  const w = window.open('');
+  w.document.write('<html><head><title>' + esc(j.no) + '</title><style>' +
+    '@page{size:A4 landscape;margin:8mm}' +
+    'html,body{margin:0;font-family:Helvetica,Arial,sans-serif;color:#000}' +
+    'table{border-collapse:collapse}' +
+    '.ban{background:#0d7377;color:#fff;text-align:center;font-weight:bold;font-size:15px;padding:6px;border-radius:4px;-webkit-print-color-adjust:exact;print-color-adjust:exact}' +
+    '.ban span{float:right;font-weight:normal;font-size:12px}' +
+    '.mid{display:flex;gap:10px;margin:10px 0}' +
+    '.kvt td{border:1px solid #b9d4d4;font-size:10.5px;padding:3px 7px}.kvt .k{font-weight:bold;width:95px;background:#e3f2f2;color:#0a5c5f}.kvt .b{font-weight:bold}' +
+    '.ph{border:1px solid #b9d4d4;border-radius:4px;flex:1;min-height:200px;display:flex;align-items:center;justify-content:center;color:#999;font-size:12px;letter-spacing:.2em;overflow:hidden}' +
+    '.ph img{max-width:100%;max-height:230px;object-fit:contain}' +
+    '.szt th,.szt td{border:1px solid #b9d4d4;font-size:10.5px;padding:3px 6px;text-align:center}.szt .hd th{background:#0d7377;color:#fff}.szt .tt td{font-weight:bold;background:#e3f2f2}.szt .hl{background:#e3f2f2;font-weight:bold}' +
+    '.bomt{width:100%}.bomt th,.bomt td{border:1px solid #b9d4d4;font-size:10px;padding:3.5px 6px}.bomt .hd th{background:#0d7377;color:#fff;text-align:center}.bomt .c{text-align:center}' +
+    '*{-webkit-print-color-adjust:exact;print-color-adjust:exact}' +
+    '</style></head><body>' +
+    '<div class="ban">JOB CARD <span>' + esc(j.no) + ' · ' + esc(fmtD(j.at)) + '</span></div>' +
+    '<div class="mid"><div><table class="kvt">' + leftRows.map((r, i) => '<tr><td class="k">' + esc(r[0]) + '</td><td class="v' + (i === 0 ? ' b' : '') + '">' + esc(String(r[1] || '')) + '</td></tr>').join('') + '</table></div>' +
+    '<div class="ph">' + (j.photo ? '<img src="' + j.photo + '">' : 'PRODUCT PHOTO') + '</div>' +
+    '<div><table class="szt"><tr class="hd"><th>Order No</th><th>Order Date</th><th>SIZE</th><th>Act.Ord</th><th>With 2% Extra</th></tr>' + szRows +
+    '<tr class="tt"><td></td><td>Total</td><td></td><td>' + qtyFmt(actT) + '</td><td>' + qtyFmt(extT) + '</td></tr></table></div></div>' +
+    '<table class="bomt"><tr class="hd"><th>Sr No</th><th>Process</th><th>Section</th><th>Item Category</th><th>Item Name</th><th>Item Code</th><th>Uom</th><th>Norms</th><th>Required Qty</th><th>Supplier</th></tr>' +
+    (j.lines || []).map((l, i) => '<tr><td class="c">' + (i + 1) + '</td><td>' + esc(l.process || '') + '</td><td>' + esc(l.section || '') + '</td><td>' + esc(l.category || '') + '</td><td>' + esc((matBy(l.material) || {}).name || l.material) + '</td><td class="c">' + esc(l.material) + '</td><td class="c">' + esc(l.uom || '') + '</td><td class="c">' + l.norms + '</td><td class="c">' + qtyFmt(l.required) + '</td><td>' + esc(l.supplier || '') + '</td></tr>').join('') +
+    '</table>' +
+    '<script>window.print()</' + 'script></body></html>');
+  w.document.close();
 };
 ACTIONS['print-bom'] = el => {
   const b = Store.get('boms', el.dataset.id); if (!b) return;
@@ -114,9 +146,9 @@ ACTIONS['print-bom'] = el => {
     title: 'Bill of Materials', ref: b.article + ' · v' + b.version, date: b.at, by: b.by,
     meta: [['Brand', b.brand], ['Article', b.article], ['Style', b.style], ['Colour', b.colour || 'All'], ['Gender', b.gender], ['Category', b.category], ['Size Run', b.size_run], ['Last (Mould No)', b.mould_no]],
     body: (b.photo ? '<img src="' + b.photo + '" style="max-height:110px;border:1px solid #ccc;border-radius:4px;margin-bottom:6px">' : '') +
-      pTable([['#'], ['Section'], ['Category'], ['Item Name'], ['Code'], ['UOM'], ['Norms', 'n'], ['Price', 'n'], ['Cost', 'n'], ['Supplier'], ['Remark']],
-        b.lines.map((l, i) => [i + 1, esc(l.section || ''), esc(l.category || ''), esc((matBy(l.material) || {}).name || ''), esc(l.material), esc(l.uom), l.qty, money(l.price || 0), money(num(l.qty) * num(l.price || 0)), esc(l.supplier || ''), esc(l.remark || '')]),
-        ['', '', '', '', '', '', '', 'Total RMC/Pair', money(rmc), '', '']),
+      pTable([['#'], ['Process'], ['Section'], ['Category'], ['Item Name'], ['Code'], ['UOM'], ['Norms', 'n'], ['Price', 'n'], ['Cost', 'n'], ['Supplier'], ['Remark']],
+        b.lines.map((l, i) => [i + 1, esc(l.process || ''), esc(l.section || ''), esc(l.category || ''), esc((matBy(l.material) || {}).name || ''), esc(l.material), esc(l.uom), l.qty, money(l.price || 0), money(num(l.qty) * num(l.price || 0)), esc(l.supplier || ''), esc(l.remark || '')]),
+        ['', '', '', '', '', '', '', '', 'Total RMC/Pair', money(rmc), '', '']),
     note: b.remark ? 'Remark: ' + b.remark : ''
   });
 };
@@ -407,8 +439,8 @@ function jcDetail(j) {
   if (j.photo) h += '<div style="margin:4px 0">' + photoThumb(j.photo) + '</div>';
   if ((j.sizes || []).length) h += '<table style="max-width:420px;margin:4px 0"><tr><th>SIZE</th><th class="num">Act.Ord</th><th class="num">Extra(2%)</th></tr>' + j.sizes.map(sz => '<tr><td>' + esc(sz.size) + '</td><td class="num">' + qtyFmt(sz.act) + '</td><td class="num">' + qtyFmt(sz.extra) + '</td></tr>').join('') + '<tr><td><b>Total</b></td><td class="num"><b>' + qtyFmt(j.sizes.reduce((s2, x) => s2 + num(x.act), 0)) + '</b></td><td class="num"><b>' + qtyFmt(j.sizes.reduce((s2, x) => s2 + num(x.extra), 0)) + '</b></td></tr></table>';
   const L = j.lines || [];
-  h += L.length ? '<table style="max-width:960px;margin:4px 0"><tr><th>Section</th><th>Category</th><th>Item</th><th>Code</th><th>UOM</th><th class="num">Norms</th><th class="num">Req.Qty</th><th>Supplier</th><th class="num">PO raised</th><th class="num">Transit</th><th class="num">Reserved</th><th class="num">Issued</th><th class="num">Pending PO</th></tr>' +
-    L.map(l => { const issd = issuedToJc(j.no, l.material); const pen = Math.max(0, num(l.required) - num(l.po_raised)); const m = matBy(l.material) || {}; return '<tr><td class="small">' + esc(l.section || '') + '</td><td class="small">' + esc(l.category || m.group || '') + '</td><td>' + esc(m.name || '') + '</td><td>' + esc(l.material) + '</td><td>' + esc(l.uom) + '</td><td class="num">' + l.norms + '</td><td class="num">' + qtyFmt(l.required) + '</td><td class="small">' + esc(l.supplier || '') + '</td><td class="num">' + qtyFmt(l.po_raised) + '</td><td class="num muted">' + qtyFmt(transitOf(l.material)) + '</td><td class="num">' + qtyFmt(reservedOf(l.material, j.no)) + '</td><td class="num">' + qtyFmt(issd) + '</td><td class="num ' + (pen ? 'late-txt' : '') + '">' + (pen ? qtyFmt(pen) : '—') + '</td></tr>'; }).join('') + '</table>'
+  h += L.length ? '<table style="max-width:1020px;margin:4px 0"><tr><th>Process</th><th>Section</th><th>Category</th><th>Item</th><th>Code</th><th>UOM</th><th class="num">Norms</th><th class="num">Req.Qty</th><th>Supplier</th><th class="num">PO raised</th><th class="num">Transit</th><th class="num">Reserved</th><th class="num">Issued</th><th class="num">Pending PO</th></tr>' +
+    L.map(l => { const issd = issuedToJc(j.no, l.material); const pen = Math.max(0, num(l.required) - num(l.po_raised)); const m = matBy(l.material) || {}; return '<tr><td class="small">' + esc(l.process || '') + '</td><td class="small">' + esc(l.section || '') + '</td><td class="small">' + esc(l.category || m.group || '') + '</td><td>' + esc(m.name || '') + '</td><td>' + esc(l.material) + '</td><td>' + esc(l.uom) + '</td><td class="num">' + l.norms + '</td><td class="num">' + qtyFmt(l.required) + '</td><td class="small">' + esc(l.supplier || '') + '</td><td class="num">' + qtyFmt(l.po_raised) + '</td><td class="num muted">' + qtyFmt(transitOf(l.material)) + '</td><td class="num">' + qtyFmt(reservedOf(l.material, j.no)) + '</td><td class="num">' + qtyFmt(issd) + '</td><td class="num ' + (pen ? 'late-txt' : '') + '">' + (pen ? qtyFmt(pen) : '—') + '</td></tr>'; }).join('') + '</table>'
     : '<span class="muted small">No BOM was found — create the BOM in Development, then recreate the JC.</span>';
   if (j.remarks) h += '<div class="small"><b>Remarks:</b> ' + esc(j.remarks) + '</div>';
   h += '<div class="toolbar noprint" style="margin:8px 0 2px"><button class="btn sm" data-act="print-jc" data-id="' + esc(j.id) + '">Print Job Card</button></div>';
@@ -426,7 +458,7 @@ function jcForm() {
     '<h2>Material Requirements BOM</h2><div class="toolbar"><a class="small" data-act="jcf-bomrow">+ Add</a><a class="small" data-act="jcf-paste">Bulk Paste</a><span id="jfBomTag" class="muted small"></span></div>' +
     '<div id="jfPasteBox" class="hidden" style="margin-bottom:6px"><textarea id="jfPaste" rows="4" class="mono" placeholder="One item name per line (or Name[TAB]Norms[TAB]Supplier)"></textarea> <button class="btn sm" data-act="jcf-paste-go">Import</button></div>' +
     dlMat('dlMatJc') + dlVendor() +
-    '<div class="tbl-wrap"><table id="jfBom"><tr><th>#</th><th style="width:120px">Section</th><th style="width:130px">Category</th><th>Item Name</th><th style="width:90px">Item Code</th><th style="width:60px">Uom</th><th class="num" style="width:80px">Stock</th><th class="num" style="width:90px">Norms</th><th class="num" style="width:90px">Req.Qty</th><th style="width:150px">Supplier</th><th style="width:30px"></th></tr></table></div>' +
+    '<div class="tbl-wrap"><table id="jfBom"><tr><th>#</th><th style="width:100px">Process</th><th style="width:120px">Section</th><th style="width:130px">Category</th><th>Item Name</th><th style="width:90px">Item Code</th><th style="width:60px">Uom</th><th class="num" style="width:80px">Stock</th><th class="num" style="width:90px">Norms</th><th class="num" style="width:90px">Req.Qty</th><th style="width:150px">Supplier</th><th style="width:30px"></th></tr></table></div>' +
     '</div><div class="card-f"><button class="btn primary" data-save data-act="jc-save">Submit Job Card</button><button class="btn" data-act="jc-new">Close</button><span id="njMsg" class="small"></span></div></div>';
 }
 function jcfSizeRow(size, act) {
@@ -434,7 +466,7 @@ function jcfSizeRow(size, act) {
 }
 function jcfBomRow(l) {
   l = l || {}; const m = matBy(l.material) || {};
-  return '<tr data-bomrow><td class="muted" data-idx></td><td><input data-b="section" value="' + esc(l.section || '') + '"></td><td><input data-b="category" list="dlCatJc" value="' + esc(l.category || m.group || '') + '"></td>' +
+  return '<tr data-bomrow><td class="muted" data-idx></td><td><input data-b="process" value="' + esc(l.process || '') + '"></td><td><input data-b="section" value="' + esc(l.section || '') + '"></td><td><input data-b="category" list="dlCatJc" value="' + esc(l.category || m.group || '') + '"></td>' +
     '<td><input data-b="mat" list="dlMatJc" value="' + esc(m.name || l.material || '') + '"></td><td class="muted" data-b-code>' + esc(l.material || '') + '</td><td class="muted" data-b-uom>' + esc(l.uom || m.uom || '') + '</td><td class="num muted" data-b-stock>' + (l.material ? qtyFmt(stockOf(l.material)) : '') + '</td>' +
     '<td><input data-b="norms" type="number" min="0" step="any" class="right" value="' + esc(l.norms || l.qty || '') + '"></td><td class="num" data-b-req>0</td><td><input data-b="supplier" list="dlVen" value="' + esc(l.supplier || '') + '"></td><td><button class="btn ghost sm" data-act="jcf-bom-del">×</button></td></tr>';
 }
@@ -519,7 +551,7 @@ ACTIONS['jc-save'] = () => {
   const sizes = $$('#jfSizes tr[data-szrow]').map(tr => ({ size: $('[data-sz="size"]', tr).value.trim().toUpperCase(), act: num($('[data-sz="act"]', tr).value), extra: Math.ceil(num($('[data-sz="act"]', tr).value) * 1.02) })).filter(x => x.act > 0);
   const lines = $$('#jfBom tr[data-bomrow]').map(tr => {
     const m = matBy($('[data-b="mat"]', tr).value); const n = num($('[data-b="norms"]', tr).value);
-    return m && n > 0 ? { section: $('[data-b="section"]', tr).value.trim(), category: $('[data-b="category"]', tr).value.trim() || m.group || '', material: m.code, uom: m.uom, norms: n, required: Math.ceil(n * ext * 1000) / 1000, supplier: $('[data-b="supplier"]', tr).value.trim(), po_raised: 0 } : null;
+    return m && n > 0 ? { process: $('[data-b="process"]', tr).value.trim(), section: $('[data-b="section"]', tr).value.trim(), category: $('[data-b="category"]', tr).value.trim() || m.group || '', material: m.code, uom: m.uom, norms: n, required: Math.ceil(n * ext * 1000) / 1000, supplier: $('[data-b="supplier"]', tr).value.trim(), po_raised: 0 } : null;
   }).filter(Boolean);
   const badNorm = $$('#jfBom tr[data-bomrow]').some(tr => matBy($('[data-b="mat"]', tr).value) && num($('[data-b="norms"]', tr).value) <= 0);
   if (badNorm) { $('#njMsg').innerHTML = '<span class="late-txt">Norms must be greater than 0 for every item.</span>'; return; }
@@ -937,7 +969,7 @@ VIEWS.bom = {
       '<div class="toolbar" style="margin-top:10px"><a class="small" data-act="bom-line">+ Add Row</a><a class="small" data-act="bom-paste-t">Bulk Paste</a>' +
       '<label class="small" style="flex-direction:row;align-items:center;gap:4px">Copy items from <select id="nbCopy"><option value="">—</option>' + Store.all('boms').map(x => '<option value="' + esc(x.id) + '">' + esc(x.article + (x.colour ? ' · ' + x.colour : '') + ' v' + x.version) + '</option>').join('') + '</select></label><span class="grow"></span><span id="nbRmc" class="small"></span></div>' +
       '<div id="nbPasteBox" class="hidden"><textarea id="nbPaste" rows="4" class="mono" placeholder="Section[TAB]Category[TAB]Item Name[TAB]Norms[TAB]Price[TAB]Supplier[TAB]Remark — one item per line"></textarea> <button class="btn sm" data-act="bom-paste-go">Import</button></div>' +
-      '<div class="tbl-wrap"><table id="nbTable"><tr><th>Sr</th><th style="width:110px">Section</th><th style="width:140px">Category</th><th>Item Name</th><th style="width:90px">Item Code</th><th style="width:60px">UOM</th><th class="num" style="width:90px">Norms</th><th class="num" style="width:90px">Price</th><th class="num" style="width:90px">Cost</th><th style="width:150px">Supplier</th><th style="width:130px">Remark</th><th style="width:30px"></th></tr>' +
+      '<div class="tbl-wrap"><table id="nbTable"><tr><th>Sr</th><th style="width:100px">Process</th><th style="width:110px">Section</th><th style="width:140px">Category</th><th>Item Name</th><th style="width:90px">Item Code</th><th style="width:60px">UOM</th><th class="num" style="width:90px">Norms</th><th class="num" style="width:90px">Price</th><th class="num" style="width:90px">Cost</th><th style="width:150px">Supplier</th><th style="width:130px">Remark</th><th style="width:30px"></th></tr>' +
       '</table></div>' +
       '</div><div class="card-f"><button class="btn primary" data-act="bom-save">Save BOM</button><span id="nbMsg" class="small"></span></div></div>';
     setMain(h);
@@ -953,7 +985,7 @@ VIEWS.bom = {
 };
 function bomRow(l) {
   l = l || {}; const m = matBy(l.material) || {};
-  return '<tr data-bline><td class="muted" data-sr></td><td><input data-nb="section" value="' + esc(l.section || '') + '"></td><td><input data-nb="cat" list="dlCatJc2" value="' + esc(l.category || m.group || '') + '"></td><td><input data-nb="mat" list="dlMatB" value="' + esc(m.name || '') + '"></td><td class="muted" data-nb-code>' + esc(l.material || '') + '</td><td class="muted" data-nb-uom>' + esc(l.uom || '') + '</td>' +
+  return '<tr data-bline><td class="muted" data-sr></td><td><input data-nb="process" value="' + esc(l.process || '') + '"></td><td><input data-nb="section" value="' + esc(l.section || '') + '"></td><td><input data-nb="cat" list="dlCatJc2" value="' + esc(l.category || m.group || '') + '"></td><td><input data-nb="mat" list="dlMatB" value="' + esc(m.name || '') + '"></td><td class="muted" data-nb-code>' + esc(l.material || '') + '</td><td class="muted" data-nb-uom>' + esc(l.uom || '') + '</td>' +
     '<td><input data-nb="qty" type="number" min="0" step="any" class="right" value="' + esc(l.qty || '') + '"></td><td><input data-nb="price" type="number" min="0" step="any" class="right" value="' + esc(l.price || '') + '"></td><td class="num muted" data-nb-cost>0</td><td><input data-nb="sup" list="dlVen" value="' + esc(l.supplier || '') + '"></td><td><input data-nb="rem" value="' + esc(l.remark || '') + '"></td><td><button class="btn ghost sm" data-act="bom-line-del">×</button></td></tr>';
 }
 function bomRecalc() {
@@ -983,7 +1015,7 @@ ACTIONS['bom-save'] = () => {
   const style = $('#nbStyle').value.trim(), col = $('#nbCol').value.trim(), gen = $('#nbGen').value, cat = $('#nbCat').value.trim();
   const lines = $$('#nbTable tr[data-bline]').map(tr => {
     const m = Store.all('materials').find(x => norm(x.name) === norm($('[data-nb="mat"]', tr).value) || norm(x.code) === norm($('[data-nb="mat"]', tr).value));
-    return m ? { section: $('[data-nb="section"]', tr).value.trim(), category: $('[data-nb="cat"]', tr).value.trim() || m.group || '', material: m.code, uom: m.uom, qty: num($('[data-nb="qty"]', tr).value), price: num($('[data-nb="price"]', tr).value), supplier: $('[data-nb="sup"]', tr).value.trim(), remark: $('[data-nb="rem"]', tr).value.trim() } : null;
+    return m ? { process: $('[data-nb="process"]', tr).value.trim(), section: $('[data-nb="section"]', tr).value.trim(), category: $('[data-nb="cat"]', tr).value.trim() || m.group || '', material: m.code, uom: m.uom, qty: num($('[data-nb="qty"]', tr).value), price: num($('[data-nb="price"]', tr).value), supplier: $('[data-nb="sup"]', tr).value.trim(), remark: $('[data-nb="rem"]', tr).value.trim() } : null;
   }).filter(l => l && l.qty > 0);
   if (!brand || !art || !lines.length) { $('#nbMsg').innerHTML = '<span class="late-txt">Brand, Article and at least one item line (Norms > 0) are required.</span>'; return; }
   const dupKey = lines.map(l => norm(l.section + '|' + l.material)).filter((x, i, a2) => a2.indexOf(x) !== i);
