@@ -5,10 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Nexus 2.0</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230d7377'/%3E%3Ctext x='16' y='22' font-family='Arial' font-size='18' font-weight='bold' fill='white' text-anchor='middle'%3EN%3C/text%3E%3C/svg%3E">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
-<link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="styles.css?v=27">
 </head>
 <body>
 <div id="login" class="hidden">
@@ -19,6 +16,7 @@
     <label><span id="pinLabel">PIN</span><input name="pin" type="password" required></label>
     <button class="btn primary" type="submit">Sign in</button>
     <div id="loginMsg" class="muted small"></div>
+    <div class="muted small" id="buildTagLogin"></div>
   </form>
 </div>
 
@@ -29,6 +27,7 @@
       <input id="gsearch" placeholder="Search order no / customer  ( / )" autocomplete="off">
       <span class="grow"></span>
       <span id="syncState" class="muted small"></span>
+      <span id="buildTag" class="muted small"></span>
       <span id="who" class="small"></span>
       <button class="btn ghost" data-act="logout">Sign out</button>
     </header>
@@ -37,14 +36,19 @@
   </div>
 </div>
 
-<script src="config.js"></script>
+<script>window.NX_BUILD = 'build 27';</script>
+<script src="config.js?v=27"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="engine.js"></script>
-<script src="core.js"></script>
-<script src="seed.js"></script>
-<script src="ops.js"></script>
-<script src="fms.js"></script>
-<script src="modules.js"></script>
-<script src="admin.js"></script>
+<script src="engine.js?v=27"></script>
+<script src="core.js?v=27"></script>
+<script src="seed.js?v=27"></script>
+<script src="ops.js?v=27"></script>
+<script src="fms.js?v=27"></script>
+<script src="modules.js?v=27"></script>
+<script src="admin.js?v=27"></script>
+<script>
+document.getElementById('buildTag').textContent = window.NX_BUILD;
+document.getElementById('buildTagLogin').textContent = window.NX_BUILD;
+</script>
 </body>
 </html>
