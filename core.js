@@ -47,7 +47,7 @@ function flash(msg, type) {
 
 /* ================= store ================= */
 const DB_KEY = 'nexus2_db_v8';
-const COLS = ['users', 'roles', 'customers', 'items', 'materials', 'processes', 'orders', 'dispatches', 'purchase_orders', 'sourcing', 'grns', 'inwards', 'vendors', 'issues', 'rsjw', 'rtvs', 'boms', 'job_cards', 'requisitions', 'tickets', 'checklist', 'audit'];
+const COLS = ['users', 'roles', 'customers', 'items', 'materials', 'processes', 'orders', 'dispatches', 'purchase_orders', 'sourcing', 'grns', 'inwards', 'vendors', 'issues', 'rsjw', 'rtvs', 'boms', 'job_cards', 'requisitions', 'tickets', 'checklist', 'attributes', 'item_types', 'audit'];
 let DB = null;
 const CFG = window.NEXUS_CONFIG || {};
 const CLOUD = !!(CFG.SUPABASE_URL && CFG.SUPABASE_ANON_KEY && window.supabase);
@@ -177,7 +177,7 @@ const MODULES = [
   { key: 'purchase', label: 'Purchase', note: 'PO, sourcing, followup' },
   { key: 'merchant', label: 'Merchant', note: 'Job cards, swatch' },
   { key: 'store', label: 'Store', note: 'Inward, GRN, issuance, stock, RTV' },
-  { key: 'development', label: 'Development', note: 'BOM' },
+  { key: 'development', label: 'Development', note: 'Item Creation, BOM' },
   { key: 'production', label: 'Production', note: 'Requisition, tracker, MRS' },
   { key: 'accounts', label: 'Accounts', note: 'Invoices, payments' },
   { key: 'dispatch', label: 'Dispatch' },
@@ -362,6 +362,7 @@ const NAV = [
     { v: 'rtv', l: 'RTV', mod: 'store' },
     { v: 'materials', l: 'Materials', mod: 'masters' }] },
   { menu: 'Development', items: [
+    { v: 'itemcreate', l: 'Item Creation', mod: 'development' },
     { v: 'bom', l: 'BOM', mod: 'development' },
     { v: 'boms', l: 'Created BOM', mod: 'development' }] },
   { menu: 'Production', items: [
@@ -516,6 +517,7 @@ function migrateDb() {
   let cMax = 0;
   Store.all('customers').forEach(c => { const m = /^B(\d+)$/.exec(c.code || ''); if (m) cMax = Math.max(cMax, parseInt(m[1], 10)); });
   Store.all('customers').forEach(c => { if (!c.code) { cMax += 1; c.code = 'B' + String(cMax).padStart(3, '0'); Store.put('customers', c); } });
+  if (typeof seedItemMasters === 'function') seedItemMasters();
 }
 function startApp(u) {
   ME = u; localStorage.setItem('nexus2_me', u.id);

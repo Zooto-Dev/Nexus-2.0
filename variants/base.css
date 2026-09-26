@@ -258,3 +258,13 @@ td input.right, input.right { text-align: right; }
 .jckv input, .jckv select { border: 0; background: transparent; width: 100%; height: 22px; padding: 0 2px; font-size: 12px; border-radius: 0; }
 .jckv input:focus, .jckv select:focus { background: #eef7f7; box-shadow: none; }
 .jcbom a[data-act="bom-line-del"] { color: #c62828; font-weight: bold; text-decoration: none; }
+
+/* Item Creation */
+.icprev { margin-top: 14px; padding: 12px 14px; border: 1px dashed #b9d4d4; border-radius: 6px; background: #f6fbfb; display: flex; flex-direction: column; gap: 6px; }
+.icname { display: flex; gap: 10px; align-items: baseline; }
+.icname b { font-size: 16px; color: #0a5c5f; letter-spacing: .02em; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.chip { display: inline-block; padding: 2px 9px; border: 1px solid #b9d4d4; border-radius: 99px; font-size: 12px; background: #fff; color: #0a5c5f; cursor: pointer; }
+.chip:hover { background: #e3f2f2; text-decoration: none; }
+.chip.sm { cursor: default; padding: 0 7px; font-size: 11px; background: #e3f2f2; }
+td.wrap { white-space: normal; max-width: 520px; }

@@ -586,7 +586,7 @@ function jcfRecalc() {
 }
 function jcFormWire() {
   const m = $('#main');
-  m.insertAdjacentHTML('beforeend', '<datalist id="dlCatJc">' + ITEM_CATS.map(c => '<option>' + c + '</option>').join('') + '</datalist>');
+  m.insertAdjacentHTML('beforeend', '<datalist id="dlCatJc">' + itemCats().map(c => '<option>' + c + '</option>').join('') + '</datalist>');
   m.addEventListener('input', e => { if (e.target.closest('#jfSizes') || e.target.closest('#jfBom')) jcfRecalc(); });
   m.addEventListener('change', e => {
     if (e.target.id === 'jfJc') {
@@ -1062,7 +1062,7 @@ VIEWS.materials = {
     masterView({
       col: 'materials', mod: 'masters', title: 'Materials', view: VIEWS.materials, sort: 'code', paste: true,
       cols: [{ k: 'code', l: 'Item Code', w: 100, upper: true, ph: 'auto' }, { k: 'name', l: 'Item Name', ph: 'Item name' },
-        { k: 'group', l: 'Category', opts: () => [''].concat(ITEM_CATS).map(v => ({ v, l: v || '—' })) },
+        { k: 'group', l: 'Category', opts: () => [''].concat(itemCats()).map(v => ({ v, l: v || '—' })) },
         { k: 'uom', l: 'UOM', opts: () => UOMS.map(v => ({ v, l: v })) },
         { k: 'price', l: 'Price ₹', type: 'number', w: 90 }, { k: 'rack', l: 'Rack No.', w: 80, upper: true },
         { k: 'gst', l: 'GST %', type: 'number', w: 70 }, { k: 'hsn', l: 'HSN', w: 90 },
@@ -1094,7 +1094,7 @@ VIEWS.bom = {
     }));
     const pendBrands = Array.from(new Set(pend.map(p => p.brand)));
     let h = subTitle('Development BOM') + '<div class="card"><div class="card-h"><b>New BOM</b><span class="muted small">' + pend.length + ' article(s) pending BOM</span></div><div class="card-b">' + dlMat('dlMatB') + dlVendor() +
-      '<datalist id="dlCatJc2">' + ITEM_CATS.map(x => '<option>' + x + '</option>').join('') + '</datalist><datalist id="dlCatB">' + fieldOptions('category').map(x => '<option value="' + esc(x) + '">').join('') + '</datalist>' +
+      '<datalist id="dlCatJc2">' + itemCats().map(x => '<option>' + x + '</option>').join('') + '</datalist><datalist id="dlCatB">' + fieldOptions('category').map(x => '<option value="' + esc(x) + '">').join('') + '</datalist>' +
       '<div class="jcdoc"><div class="jcban">BILL OF MATERIALS</div><div class="jcmid">' +
       '<div class="jcl"><table class="jckv">' +
       '<tr><td class="k">Brand *</td><td><select id="nbBrand"><option value="">Select brand…</option>' + pendBrands.map(x => '<option>' + esc(x) + '</option>').join('') + '</select></td></tr>' +
