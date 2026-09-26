@@ -271,3 +271,14 @@ th, td { white-space: nowrap; }
 .jckv input#jfJc:focus { background: #eef7f7; box-shadow: none; }
 .jcszt input#jfRem { width: 100%; text-align: left; font-weight: bold; background: transparent; }
 .jcszt select#jfStatus { border: 0; background: transparent; height: 22px; width: 100%; padding: 0 2px; font-size: 12px; text-align: center; border-radius: 0; }
+
+/* BOM document extras (photo column + remark line, doc-style field inputs) */
+.jcph-wrap { flex: 1; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.jcph-wrap .jcph { flex: 1; }
+.jcrem { border: 1px solid #b9d4d4; border-radius: 4px; padding: 4px 8px; font-size: 12px; font-weight: bold; color: #c62828; text-transform: uppercase; display: flex; gap: 8px; align-items: center; }
+.jcrem .k { color: #0a5c5f; }
+.jcrem input { border: 0; background: transparent; flex: 1; height: 22px; font-weight: bold; color: #c62828; text-transform: uppercase; border-radius: 0; padding: 0 4px; }
+.jcrem input:focus { background: #eef7f7; box-shadow: none; }
+.jckv input, .jckv select { border: 0; background: transparent; width: 100%; height: 22px; padding: 0 2px; font-size: 12px; border-radius: 0; }
+.jckv input:focus, .jckv select:focus { background: #eef7f7; box-shadow: none; }
+.jcbom a[data-act="bom-line-del"] { color: #c62828; font-weight: bold; text-decoration: none; }

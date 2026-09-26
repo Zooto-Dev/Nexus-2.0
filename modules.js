@@ -132,6 +132,33 @@ const JC_DOC_CSS =
   '.jcph img{max-width:100%;max-height:250px;object-fit:contain}' +
   '.jcszt{height:100%}.jcszt th,.jcszt td{border:1px solid #b9d4d4;font-size:11px;padding:3px 7px;text-align:center}.jcszt .hd th{background:#0d7377;color:#fff}.jcszt .tt td{font-weight:bold;background:#e3f2f2}.jcszt .hl{background:#e3f2f2;font-weight:bold}' +
   '.jcbom{width:100%}.jcbom th,.jcbom td{border:1px solid #b9d4d4;font-size:10.5px;padding:3.5px 7px}.jcbom .hd th{background:#0d7377;color:#fff;text-align:center}.jcbom .c{text-align:center}';
+const JC_EXTRA_CSS =
+  '.jcph-wrap{flex:1;display:flex;flex-direction:column;gap:6px;min-width:0}' +
+  '.jcrem{border:1px solid #b9d4d4;border-radius:4px;padding:4px 8px;font-size:12px;font-weight:bold;color:#c62828;text-transform:uppercase;display:flex;gap:8px;align-items:center}' +
+  '.jcrem .k{color:#0a5c5f}';
+/* Excel-style grid: Enter/ArrowDown move down the same column (a new row appears at the end),
+   ArrowUp moves up, and pasting multi-cell clipboard data fills rows directly. */
+function excelGrid(tbl, opts) {
+  if (!tbl) return;
+  tbl.addEventListener('keydown', e => {
+    if (e.key !== 'Enter' && e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+    const inp = e.target.closest('input'); if (!inp) return;
+    const tr = inp.closest('tr'); const rows = $$(opts.rowSel, tbl);
+    const ri = rows.indexOf(tr); if (ri < 0) return;
+    const ci = $$('input,select', tr).indexOf(inp);
+    e.preventDefault();
+    if (e.key === 'ArrowUp') { if (ri > 0) { const t2 = $$('input,select', rows[ri - 1])[ci]; if (t2) t2.focus(); } return; }
+    if (ri === rows.length - 1 && e.key === 'Enter') opts.addRow();
+    const rows2 = $$(opts.rowSel, tbl);
+    if (rows2[ri + 1]) { const t2 = $$('input,select', rows2[ri + 1])[ci]; if (t2) { t2.focus(); if (t2.select) t2.select(); } }
+  });
+  tbl.addEventListener('paste', e => {
+    const txt = e.clipboardData ? e.clipboardData.getData('text') : '';
+    if (!/\t|\n/.test(txt)) return;   // single-cell paste behaves normally
+    e.preventDefault();
+    opts.importText(txt);
+  });
+}
 ACTIONS['print-jc'] = el => {
   const j = Store.get('job_cards', el.dataset.id); if (!j) return;
   const w = window.open('');
@@ -144,18 +171,28 @@ ACTIONS['print-jc'] = el => {
     '<script>window.print()</' + 'script></body></html>');
   w.document.close();
 };
+// BOM document: same fixed layout for the screen form and the print/PDF (mirrors the Job Card document)
+function bomDocHtml(b) {
+  const leftRows = [['Brand', b.brand || ''], ['Article Name', b.article || ''], ['Style Name', b.style || ''], ['Colour Wise', b.colour || 'All'], ['Gender', b.gender || ''],
+    ['Category', b.category || ''], ['Size Run', b.size_run || ''], ['Last (Mould No)', b.mould_no || ''], ['Version', 'v' + b.version], ['Date', fmtD(b.at)]];
+  const rmc = (b.lines || []).reduce((a, l) => a + num(l.qty) * num(l.price || 0), 0);
+  return '<div class="jcdoc"><div class="jcban">BILL OF MATERIALS</div><div class="jcmid">' +
+    '<div class="jcl"><table class="jckv">' + leftRows.map(([k, v], i) => '<tr><td class="k">' + k + '</td><td class="v' + (i === 0 ? ' b' : '') + '">' + esc(String(v)) + '</td></tr>').join('') + '</table></div>' +
+    '<div class="jcph-wrap"><div class="jcph">' + (b.photo ? '<img src="' + b.photo + '">' : 'PRODUCT PHOTO') + '</div>' +
+    '<div class="jcrem"><span class="k">REMARK</span><span>' + esc(b.remark || '') + '</span></div></div></div>' +
+    '<table class="jcbom"><tr class="hd"><th>Sr No</th><th>Process</th><th>Section</th><th>Category</th><th>Item Name</th><th>Item Code</th><th>UOM</th><th>Norms</th><th>Price</th><th>Cost</th><th>Supplier</th><th>Remark</th></tr>' +
+    (b.lines || []).map((l, i) => '<tr><td class="c">' + (i + 1) + '</td><td>' + esc(l.process || '') + '</td><td>' + esc(l.section || '') + '</td><td>' + esc(l.category || '') + '</td><td>' + esc((matBy(l.material) || {}).name || l.material) + '</td><td class="c">' + esc(l.material) + '</td><td class="c">' + esc(l.uom || '') + '</td><td class="c">' + l.qty + '</td><td class="c">' + money(l.price || 0) + '</td><td class="c">' + money(num(l.qty) * num(l.price || 0)) + '</td><td>' + esc(l.supplier || '') + '</td><td>' + esc(l.remark || '') + '</td></tr>').join('') +
+    '<tr><td colspan="9" style="text-align:right;font-weight:bold;background:#e3f2f2">Total RMC/Pair</td><td class="c" style="font-weight:bold;background:#e3f2f2">' + money(rmc) + '</td><td style="background:#e3f2f2"></td><td style="background:#e3f2f2"></td></tr>' +
+    '</table></div>';
+}
 ACTIONS['print-bom'] = el => {
   const b = Store.get('boms', el.dataset.id); if (!b) return;
-  const rmc = b.lines.reduce((a, l) => a + num(l.qty) * num(l.price || 0), 0);
-  printDoc({
-    title: 'Bill of Materials', ref: b.article + ' · v' + b.version, date: b.at, by: b.by,
-    meta: [['Brand', b.brand], ['Article', b.article], ['Style', b.style], ['Colour', b.colour || 'All'], ['Gender', b.gender], ['Category', b.category], ['Size Run', b.size_run], ['Last (Mould No)', b.mould_no]],
-    body: (b.photo ? '<img src="' + b.photo + '" style="max-height:110px;border:1px solid #ccc;border-radius:4px;margin-bottom:6px">' : '') +
-      pTable([['#'], ['Process'], ['Section'], ['Category'], ['Item Name'], ['Code'], ['UOM'], ['Norms', 'n'], ['Price', 'n'], ['Cost', 'n'], ['Supplier'], ['Remark']],
-        b.lines.map((l, i) => [i + 1, esc(l.process || ''), esc(l.section || ''), esc(l.category || ''), esc((matBy(l.material) || {}).name || ''), esc(l.material), esc(l.uom), l.qty, money(l.price || 0), money(num(l.qty) * num(l.price || 0)), esc(l.supplier || ''), esc(l.remark || '')]),
-        ['', '', '', '', '', '', '', '', 'Total RMC/Pair', money(rmc), '', '']),
-    note: b.remark ? 'Remark: ' + b.remark : ''
-  });
+  const w = window.open('');
+  w.document.write('<html><head><title>BOM ' + esc(b.article) + ' v' + b.version + '</title><style>' +
+    '@page{size:A4 landscape;margin:8mm}html,body{margin:0;font-family:Helvetica,Arial,sans-serif;color:#000}' +
+    JC_DOC_CSS + JC_EXTRA_CSS + '*{-webkit-print-color-adjust:exact;print-color-adjust:exact}' +
+    '</style></head><body>' + bomDocHtml(b) + '<script>window.print()</' + 'script></body></html>');
+  w.document.close();
 };
 ACTIONS['print-grn'] = el => {
   const g = Store.get('grns', el.dataset.id); if (!g) return;
@@ -558,7 +595,8 @@ function jcFormWire() {
     }
   });
   JCF = { photo: '', rem: '' };
-  jcfRecalc();   // draw filler rows + remarks cell so the empty form already looks like the document
+  excelGrid($('#jfBom'), { rowSel: 'tr[data-bomrow]', addRow: () => $('#jfBom').insertAdjacentHTML('beforeend', jcfBomRow()), importText: jcfImportText });
+  jcfRecalc();
 }
 function jcfFillFromOrder() {
   const o = Store.all('orders').find(x => norm(x.no) === norm($('#jfOrd').value)); if (!o) return;
@@ -584,10 +622,10 @@ ACTIONS['jcf-size-del'] = el => { el.closest('tr').remove(); jcfRecalc(); };
 ACTIONS['jcf-bomrow'] = () => { $('#jfBom').insertAdjacentHTML('beforeend', jcfBomRow()); jcfRecalc(); };
 ACTIONS['jcf-bom-del'] = el => { el.closest('tr').remove(); jcfRecalc(); };
 ACTIONS['jcf-paste'] = () => $('#jfPasteBox').classList.toggle('hidden');
-ACTIONS['jcf-paste-go'] = () => {
+function jcfImportText(text) {
   let ok = 0, bad = [];
   const matOf = c => Store.all('materials').find(x => norm(x.name) === norm(c) || norm(x.code) === norm(c));
-  $('#jfPaste').value.split(/\r?\n/).forEach(line => {
+  text.split(/\r?\n/).forEach(line => {
     const cells = line.split(/\t|\s*\|\s*/).map(x => x.trim());
     if (!cells.join('')) return;
     // find the item-name cell; cells before it are Process, Section; after it Norms (number) and Supplier
@@ -595,18 +633,20 @@ ACTIONS['jcf-paste-go'] = () => {
     if (mi < 0) { bad.push(cells.find(Boolean) || line.trim()); return; }
     const m = matOf(cells[mi]);
     const before = cells.slice(0, mi), after = cells.slice(mi + 1);
-    const ni = after.findIndex(c => c !== '' && !isNaN(parseFloat(c)));
+    const isNum = c => /^\d*\.?\d+$/.test(c);
+    const ni = after.findIndex(isNum);
     $('#jfBom').insertAdjacentHTML('beforeend', jcfBomRow({
       process: before[0] || '', section: before[1] || '',
       material: m.code, uom: m.uom,
       norms: ni >= 0 ? after[ni] : '',
-      supplier: after.find((c, k) => k !== ni && c && isNaN(parseFloat(c))) || ''
+      supplier: after.find((c, k) => k !== ni && c && !isNum(c)) || ''
     })); ok++;
   });
   if (ok) $$('#jfBom tr[data-bomrow]').forEach(tr => { if (!$('[data-b="mat"]', tr).value.trim() && !$('[data-b="norms"]', tr).value) tr.remove(); });
-  $('#jfPasteBox').classList.add('hidden'); jcfRecalc();
+  jcfRecalc();
   flash(ok + ' items imported.' + (bad.length ? ' Not matched: ' + esc(bad.join(', ')) : ''), bad.length ? 'err' : '');
-};
+}
+ACTIONS['jcf-paste-go'] = () => { $('#jfPasteBox').classList.add('hidden'); jcfImportText($('#jfPaste').value); };
 ACTIONS['jc-new'] = () => { JC_UI.form = !JC_UI.form; VIEWS.jobcards.render(); };
 ACTIONS['jc-toggle'] = (el, ev) => { if (ev.target.closest('button')) return; JC_UI.open = JC_UI.open === el.dataset.id ? null : el.dataset.id; VIEWS.jobcards.render(); };
 ACTIONS['jc-save'] = () => {
@@ -1027,34 +1067,48 @@ VIEWS.bom = {
     const edit = can('development', 'edit');
     if (!edit) { go('boms'); return; }
     const brands = Store.all('customers').map(c => c.name);
-    let h = subTitle('Development BOM') + '<div class="card"><div class="card-h"><b>New BOM</b><span class="muted small">master recipe per article + brand — Job Cards are built from it</span></div><div class="card-b">' + dlMat('dlMatB') + dlVendor() +
+    const kvIn = (id, list, ph) => '<input id="' + id + '"' + (list ? ' list="' + list + '"' : '') + (ph ? ' placeholder="' + esc(ph) + '"' : '') + ' autocomplete="off">';
+    let h = subTitle('Development BOM') + '<div class="card"><div class="card-h"><b>New BOM</b></div><div class="card-b">' + dlMat('dlMatB') + dlVendor() +
       '<datalist id="dlArtB">' + Store.all('items').map(i => '<option value="' + esc(i.code) + '">' + esc(i.name) + '</option>').join('') + '</datalist>' +
       '<datalist id="dlBrandB">' + brands.map(x => '<option value="' + esc(x) + '">').join('') + '</datalist>' +
       '<datalist id="dlCatJc2">' + ITEM_CATS.map(x => '<option>' + x + '</option>').join('') + '</datalist><datalist id="dlCatB">' + fieldOptions('category').map(x => '<option value="' + esc(x) + '">').join('') + '</datalist>' +
-      '<div class="row"><label>Brand *<input id="nbBrand" list="dlBrandB"></label><label>Article Name *<input id="nbArt" list="dlArtB"></label><label>Style Name<input id="nbStyle"></label><label>Colour Wise<input id="nbCol" placeholder="blank = all colours"></label>' +
-      '<label>Gender<select id="nbGen"><option value=""></option>' + GENDERS.map(g => '<option>' + g + '</option>').join('') + '</select></label><label>Category<input id="nbCat" list="dlCatB"></label></div>' +
-      '<div class="row" style="margin-top:8px"><label>Size Run<input id="nbRun" placeholder="e.g. 6X10"></label><label>Last (Mould No)<input id="nbMould"></label>' + imgField('nbPhoto', 'Photo') + '<span id="nbPhotoTag"></span><label style="flex:1">Remark<input id="nbRem" style="text-transform:uppercase;color:var(--late)"></label></div>' +
+      '<div class="jcdoc"><div class="jcban">BILL OF MATERIALS</div><div class="jcmid">' +
+      '<div class="jcl"><table class="jckv">' +
+      '<tr><td class="k">Brand *</td><td>' + kvIn('nbBrand', 'dlBrandB', 'Select brand…') + '</td></tr>' +
+      '<tr><td class="k">Article Name *</td><td>' + kvIn('nbArt', 'dlArtB', 'Select article…') + '</td></tr>' +
+      '<tr><td class="k">Style Name</td><td>' + kvIn('nbStyle') + '</td></tr>' +
+      '<tr><td class="k">Colour Wise</td><td>' + kvIn('nbCol', '', 'blank = all colours') + '</td></tr>' +
+      '<tr><td class="k">Gender</td><td><select id="nbGen"><option value=""></option>' + GENDERS_().map(g => '<option>' + g + '</option>').join('') + '</select></td></tr>' +
+      '<tr><td class="k">Category</td><td>' + kvIn('nbCat', 'dlCatB') + '</td></tr>' +
+      '<tr><td class="k">Size Run</td><td>' + kvIn('nbRun', '', 'e.g. 6X10') + '</td></tr>' +
+      '<tr><td class="k">Last (Mould No)</td><td>' + kvIn('nbMould') + '</td></tr>' +
+      '<tr><td class="k">Date</td><td>' + fmtD(new Date()) + '</td></tr></table></div>' +
+      '<div class="jcph-wrap"><label class="jcph jcph-form" title="Click to add the product photo"><span id="nbPhotoTag">PRODUCT PHOTO</span><input type="file" id="nbPhoto" accept="image/*" style="display:none"></label>' +
+      '<div class="jcrem"><span class="k">REMARK</span><input id="nbRem"></div></div></div>' +
       '<div class="toolbar" style="margin-top:10px"><a class="small" data-act="bom-line">+ Add Row</a><a class="small" data-act="bom-paste-t">Bulk Paste</a>' +
-      '<label class="small" style="flex-direction:row;align-items:center;gap:4px">Copy items from <select id="nbCopy"><option value="">—</option>' + Store.all('boms').map(x => '<option value="' + esc(x.id) + '">' + esc(x.article + (x.colour ? ' · ' + x.colour : '') + ' v' + x.version) + '</option>').join('') + '</select></label><span class="grow"></span><span id="nbRmc" class="small"></span></div>' +
-      '<div id="nbPasteBox" class="hidden"><textarea id="nbPaste" rows="4" class="mono" placeholder="Section[TAB]Category[TAB]Item Name[TAB]Norms[TAB]Price[TAB]Supplier[TAB]Remark — one item per line"></textarea> <button class="btn sm" data-act="bom-paste-go">Import</button></div>' +
-      '<div class="tbl-wrap"><table id="nbTable"><tr><th>Sr</th><th style="width:100px">Process</th><th style="width:110px">Section</th><th style="width:140px">Category</th><th>Item Name</th><th style="width:90px">Item Code</th><th style="width:60px">UOM</th><th class="num" style="width:90px">Norms</th><th class="num" style="width:90px">Price</th><th class="num" style="width:90px">Cost</th><th style="width:150px">Supplier</th><th style="width:130px">Remark</th><th style="width:30px"></th></tr>' +
+      '<label class="small" style="flex-direction:row;align-items:center;gap:4px">Copy items from <select id="nbCopy" style="height:26px"><option value="">—</option>' + Store.all('boms').map(x => '<option value="' + esc(x.id) + '">' + esc(x.article + (x.colour ? ' · ' + x.colour : '') + ' v' + x.version) + '</option>').join('') + '</select></label><span class="grow"></span><span id="nbRmc" class="small"></span></div>' +
+      '<div id="nbPasteBox" class="hidden"><textarea id="nbPaste" rows="5" class="mono" placeholder="PROCESS | SECTION | CATEGORY | ITEM NAME | NORMS | PRICE | SUPPLIER | REMARK  (Tab or | separated — Excel/Sheets paste works directly; you can also paste straight into the table below)"></textarea> <button class="btn sm" data-act="bom-paste-go">Import</button></div>' +
+      '<table id="nbTable" class="jcbom"><tr class="hd"><th style="width:36px">Sr No</th><th style="width:95px">Process</th><th style="width:100px">Section</th><th style="width:110px">Category</th><th>Item Name</th><th style="width:85px">Item Code</th><th style="width:55px">UOM</th><th style="width:80px">Norms</th><th style="width:80px">Price</th><th style="width:85px">Cost</th><th style="width:140px">Supplier</th><th style="width:120px">Remark</th><th style="width:40px">Action</th></tr>' +
       '</table></div>' +
       '</div><div class="card-f"><button class="btn primary" data-act="bom-save">Save BOM</button><span id="nbMsg" class="small"></span></div></div>';
     setMain(h);
-    $('#nbTable').insertAdjacentHTML('beforeend', bomRow());
+    for (let i = 0; i < 5; i++) $('#nbTable').insertAdjacentHTML('beforeend', bomRow());
     const m = $('#main'); window.NBF = { photo: '' };
     m.addEventListener('input', e => { if (e.target.closest('#nbTable')) bomRecalc(); });
     m.addEventListener('change', e => {
       if (e.target.dataset.nb === 'mat') { const mt = Store.all('materials').find(x => norm(x.name) === norm(e.target.value) || norm(x.code) === norm(e.target.value)); const tr = e.target.closest('tr'); if (mt) { e.target.value = mt.name; $('[data-nb-code]', tr).textContent = mt.code; $('[data-nb-uom]', tr).textContent = mt.uom; const pr = $('[data-nb="price"]', tr); if (!pr.value) pr.value = mt.price || ''; const c = $('[data-nb="cat"]', tr); if (!c.value) c.value = mt.group || ''; } bomRecalc(); }
-      if (e.target.id === 'nbPhoto') readImg(e.target.files[0], src => { NBF.photo = src; $('#nbPhotoTag').innerHTML = photoThumb(src); });
+      if (e.target.id === 'nbPhoto') readImg(e.target.files[0], src => { NBF.photo = src; $('#nbPhotoTag').innerHTML = '<img src="' + src + '">'; });
       if (e.target.id === 'nbCopy' && e.target.value) { const src = Store.get('boms', e.target.value); $$('#nbTable tr[data-bline]').forEach(tr => tr.remove()); src.lines.forEach(l => $('#nbTable').insertAdjacentHTML('beforeend', bomRow(l))); bomRecalc(); }
     });
+    excelGrid($('#nbTable'), { rowSel: 'tr[data-bline]', addRow: () => $('#nbTable').insertAdjacentHTML('beforeend', bomRow()), importText: bomImportText });
+    bomRecalc();
+    $('#nbBrand').focus();
   }
 };
 function bomRow(l) {
   l = l || {}; const m = matBy(l.material) || {};
-  return '<tr data-bline><td class="muted" data-sr></td><td><input data-nb="process" value="' + esc(l.process || '') + '"></td><td><input data-nb="section" value="' + esc(l.section || '') + '"></td><td><input data-nb="cat" list="dlCatJc2" value="' + esc(l.category || m.group || '') + '"></td><td><input data-nb="mat" list="dlMatB" value="' + esc(m.name || '') + '"></td><td class="muted" data-nb-code>' + esc(l.material || '') + '</td><td class="muted" data-nb-uom>' + esc(l.uom || '') + '</td>' +
-    '<td><input data-nb="qty" type="number" min="0" step="any" class="right" value="' + esc(l.qty || '') + '"></td><td><input data-nb="price" type="number" min="0" step="any" class="right" value="' + esc(l.price || '') + '"></td><td class="num muted" data-nb-cost>0</td><td><input data-nb="sup" list="dlVen" value="' + esc(l.supplier || '') + '"></td><td><input data-nb="rem" value="' + esc(l.remark || '') + '"></td><td><button class="btn ghost sm" data-act="bom-line-del">×</button></td></tr>';
+  return '<tr data-bline><td class="c" data-sr></td><td><input data-nb="process" value="' + esc(l.process || '') + '"></td><td><input data-nb="section" value="' + esc(l.section || '') + '"></td><td><input data-nb="cat" list="dlCatJc2" value="' + esc(l.category || m.group || '') + '"></td><td><input data-nb="mat" list="dlMatB" value="' + esc(m.name || '') + '"></td><td class="c muted" data-nb-code>' + esc(l.material || '') + '</td><td class="c muted" data-nb-uom>' + esc(l.uom || '') + '</td>' +
+    '<td><input data-nb="qty" type="number" min="0" step="any" class="right" value="' + esc(l.qty || '') + '"></td><td><input data-nb="price" type="number" min="0" step="any" class="right" value="' + esc(l.price || '') + '"></td><td class="c muted" data-nb-cost>0</td><td><input data-nb="sup" list="dlVen" value="' + esc(l.supplier || '') + '"></td><td><input data-nb="rem" value="' + esc(l.remark || '') + '"></td><td class="c"><a data-act="bom-line-del" title="Remove">×</a></td></tr>';
 }
 function bomRecalc() {
   let rmc = 0;
@@ -1064,18 +1118,34 @@ function bomRecalc() {
 ACTIONS['bom-line'] = () => { $('#nbTable').insertAdjacentHTML('beforeend', bomRow()); bomRecalc(); };
 ACTIONS['bom-line-del'] = el => { el.closest('tr').remove(); bomRecalc(); };
 ACTIONS['bom-paste-t'] = () => $('#nbPasteBox').classList.toggle('hidden');
-ACTIONS['bom-paste-go'] = () => {
+function bomImportText(text) {
   let ok = 0, bad = [];
-  $('#nbPaste').value.split(/\r?\n/).map(x => x.split('\t')).filter(r => r.join('').trim()).forEach(r => {
-    const hasSec = r.length >= 3;
-    const nameIdx = hasSec ? 2 : 0;
-    const m = Store.all('materials').find(x => norm(x.name) === norm(r[nameIdx]) || norm(x.code) === norm(r[nameIdx]));
-    if (!m) { bad.push(r[nameIdx]); return; }
-    $('#nbTable').insertAdjacentHTML('beforeend', bomRow({ section: hasSec ? r[0] : '', category: hasSec ? r[1] : m.group, material: m.code, uom: m.uom, qty: r[hasSec ? 3 : 1] || '', price: r[hasSec ? 4 : 2] || m.price || '', supplier: r[hasSec ? 5 : 3] || '', remark: r[hasSec ? 6 : 4] || '' })); ok++;
+  const matOf = c => Store.all('materials').find(x => norm(x.name) === norm(c) || norm(x.code) === norm(c));
+  const isNum = c => /^\d*\.?\d+$/.test(c);
+  text.split(/\r?\n/).forEach(line => {
+    const cells = line.split(/\t|\s*\|\s*/).map(x => x.trim());
+    if (!cells.join('')) return;
+    // the item-name cell anchors the row; before it: [Process, Section, Category] (right-aligned),
+    // after it: numbers = Norms then Price, texts = Supplier then Remark
+    const mi = cells.findIndex(c => c && matOf(c));
+    if (mi < 0) { bad.push(cells.find(Boolean) || line.trim()); return; }
+    const m = matOf(cells[mi]);
+    const before = cells.slice(0, mi), after = cells.slice(mi + 1);
+    const nums = [], txts = [];
+    after.forEach(c => { if (c === '') return; if (isNum(c)) nums.push(c); else txts.push(c); });
+    $('#nbTable').insertAdjacentHTML('beforeend', bomRow({
+      process: before.length >= 3 ? before[before.length - 3] : '',
+      section: before.length >= 2 ? before[before.length - 2] : '',
+      category: before.length >= 1 ? before[before.length - 1] : (m.group || ''),
+      material: m.code, uom: m.uom, qty: nums[0] || '', price: nums[1] || m.price || '',
+      supplier: txts[0] || '', remark: txts[1] || ''
+    })); ok++;
   });
-  $('#nbPasteBox').classList.add('hidden'); bomRecalc();
+  if (ok) $$('#nbTable tr[data-bline]').forEach(tr => { if (!$('[data-nb="mat"]', tr).value.trim() && !$('[data-nb="qty"]', tr).value) tr.remove(); });
+  bomRecalc();
   flash(ok + ' items imported.' + (bad.length ? ' Not matched: ' + esc(bad.join(', ')) : ''), bad.length ? 'err' : '');
-};
+}
+ACTIONS['bom-paste-go'] = () => { $('#nbPasteBox').classList.add('hidden'); bomImportText($('#nbPaste').value); };
 ACTIONS['bom-save'] = () => {
   if (!requirePerm('development', 'edit')) return;
   const brand = $('#nbBrand').value.trim(); const artIn = $('#nbArt').value.trim().toUpperCase();
