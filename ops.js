@@ -48,18 +48,18 @@ VIEWS.home = {
     h += '<div class="grid2"><div><h2>Escalations</h2>';
     if (!escT.length && !escSteps.length) h += '<div class="panel empty">No escalations</div>';
     else {
-      h += '<div class="tbl-wrap"><table><tr><th>What</th><th>Where</th><th>Owner</th><th class="num">Since</th></tr>' +
-        escT.map(t => '<tr class="click" data-act="go" data-v="tickets"><td><span class="late-txt">●</span> ' + esc(t.no) + ' · ' + esc(t.subject) + '</td><td>' + esc(t.dept) + '</td><td>' + esc(t.by) + '</td><td class="num">' + Math.floor((Date.now() - new Date(t.at)) / 3600000) + 'h</td></tr>').join('') +
-        escSteps.slice(0, 6).map(x => '<tr class="click" data-act="go" data-v="order" data-p="' + esc(x.order.id) + '"><td><span class="late-txt">●</span> ' + esc(x.step.name) + ' late</td><td>' + esc(x.order.no) + ' · ' + esc(x.order.customer_name) + '</td><td>' + esc(x.step.doer || '') + '</td><td class="num late-txt">' + fmtDelay(x.step.delayMinutes) + '</td></tr>').join('') + '</table></div>';
+      h += '<div class="tbl-wrap"><table class="bomflat"><tr><th>Type</th><th>Ref</th><th>Subject / Step</th><th>Brand / Dept</th><th>Owner</th><th class="num">Since</th></tr>' +
+        escT.map(t => '<tr class="click" data-act="go" data-v="tickets"><td>Ticket</td><td>' + esc(t.no) + '</td><td>' + esc(t.subject) + '</td><td>' + esc(t.dept) + '</td><td>' + esc(t.by) + '</td><td class="num">' + Math.floor((Date.now() - new Date(t.at)) / 3600000) + 'h</td></tr>').join('') +
+        escSteps.slice(0, 6).map(x => '<tr class="click" data-act="go" data-v="order" data-p="' + esc(x.order.id) + '"><td>Late step</td><td>' + esc(x.order.no) + '</td><td>' + esc(x.step.name) + '</td><td>' + esc(x.order.customer_name) + '</td><td>' + esc(x.step.doer || '') + '</td><td class="num late-txt">' + fmtDelay(x.step.delayMinutes) + '</td></tr>').join('') + '</table></div>';
     }
     h += '<h2>My tasks</h2>' + taskTable(mine.slice(0, 6), true) + (mine.length > 6 ? '<div class="small" style="margin-top:6px"><a href="#/tasks">All ' + mine.length + ' →</a></div>' : '');
     h += '</div><div>';
     // Department snapshot
-    const dep = (name, view, items) => { const bad = items.some(i => i[2]); return '<tr class="click" data-act="go" data-v="' + view + '"><td>' + name + '</td><td>' + items.map(i => '<span class="' + (i[2] ? 'late-txt' : i[1] ? '' : 'muted') + '">' + i[1] + ' ' + i[0] + '</span>').join(' <span class="muted">·</span> ') + '</td></tr>'; };
-    h += '<h2>Departments</h2><div class="tbl-wrap"><table>' +
+    const dep = (name, view, items) => '<tr class="click" data-act="go" data-v="' + view + '"><td>' + name + '</td>' + [0, 1].map(k => items[k] ? '<td>' + esc(items[k][0]) + '</td><td class="num' + (items[k][2] ? ' late-txt' : '') + '">' + items[k][1] + '</td>' : '<td></td><td></td>').join('') + '</tr>';
+    h += '<h2>Departments</h2><div class="tbl-wrap"><table><tr><th>Department</th><th>Item</th><th class="num">Count</th><th>Item</th><th class="num">Count</th></tr>' +
       dep('Purchase', 'purchasedash', [['open PO', pos.length, false], ['overdue', poOver.length, poOver.length > 0]]) +
       dep('Merchant', 'swatch', [['swatch pending', swPend.length, false], ['corrections', jcCorr.length, jcCorr.length > 0]]) +
-      dep('Store', 'issuance', [['req to issue', reqs.length, false], ['swatch match', smPend.length, false]]) +
+      dep('Store', 'issuance', [['req to issue', reqs.length, false], ['QC pending', smPend.length, false]]) +
       dep('Production', 'prodtracker', [['orders in flow', openOrders.length, false], ['late steps', late.length, late.length > 0]]) +
       dep('Accounts', 'invoices', [['payment pending', payPend.length, false]]) +
       dep('Dispatch', 'dispatch', [['ready', readyForDispatch().length, false]]) + '</table></div>';
@@ -80,9 +80,9 @@ VIEWS.home = {
 const TASK_UI = { who: 'mine', when: 'open', q: '' };
 function taskTable(list, compact) {
   if (!list.length) return '<div class="tbl-wrap"><div class="empty">No open tasks</div></div>';
-  return '<div class="tbl-wrap"><table><tr><th>Order</th><th>Customer</th><th>Step</th>' + (compact ? '' : '<th>Doer</th>') + '<th>Planned</th><th>Status</th><th class="num">Delay</th>' + (compact ? '' : '<th>Note</th>') + '<th></th></tr>' +
-    list.map(x => '<tr><td class="nowrap"><a href="#/order/' + esc(x.order.id) + '">' + esc(x.order.no) + '</a>' + (x.order.priority === 'Urgent' ? ' <span class="late-txt small">URGENT</span>' : '') + '</td><td>' + esc(x.order.customer_name) + '</td>' +
-      '<td>' + esc(x.step.name) + (x.def && x.def.what && !compact ? '<div class="muted small">' + esc(x.def.what) + '</div>' : '') + '</td>' + (compact ? '' : '<td>' + esc(x.step.doer || '') + '</td>') +
+  return '<div class="tbl-wrap"><table class="bomflat"><tr><th>Order</th><th>Brand</th><th>Priority</th><th>Step</th>' + (compact ? '' : '<th>Doer</th>') + '<th>Planned</th><th>Status</th><th class="num">Delay</th>' + (compact ? '' : '<th>Note</th>') + '<th></th></tr>' +
+    list.map(x => '<tr><td><a href="#/order/' + esc(x.order.id) + '">' + esc(x.order.no) + '</a></td><td>' + esc(x.order.customer_name) + '</td><td>' + (x.order.priority === 'Urgent' ? '<span class="late-txt">Urgent</span>' : esc(x.order.priority || '')) + '</td>' +
+      '<td>' + esc(x.step.name) + '</td>' + (compact ? '' : '<td>' + esc(x.step.doer || '') + '</td>') +
       '<td class="nowrap">' + fmtDT(x.step.planned) + '</td><td>' + stHtml(x.step.status) + '</td><td class="num late-txt">' + fmtDelay(x.step.delayMinutes) + '</td>' +
       (compact ? '' : '<td><input data-note placeholder="optional" style="min-width:120px"></td>') + '<td class="right">' + stepDoneBtn(x.order, x.step, x.def, x.spec) + '</td></tr>').join('') + '</table></div>';
 }
@@ -328,21 +328,12 @@ VIEWS.orders = {
     let h = '<div class="toolbar">' + seg('f', [{ v: 'open', l: 'Open' }, { v: 'late', l: 'Late' }, { v: 'hold', l: 'On hold' }, { v: 'done', l: 'Dispatched' }, { v: 'cancel', l: 'Cancelled' }, { v: 'all', l: 'All' }], ORD_UI.f) +
       '<input id="ordQ" placeholder="Order no / brand / PO / article / JC\u2026" value="' + esc(ORD_UI.q) + '"><span class="muted small">' + rows.length + ' order(s)</span><span class="grow"></span>' +
       '<button class="btn" data-act="orders-csv">Export CSV</button>' + (can('orders', 'edit') ? '<a class="btn primary" href="#/punch">+ Punch order</a>' : '') + '</div>';
-    h += '<div class="tbl-wrap"><table><tr><th>Time Stamp</th><th>Job Card No.</th><th>Order Date</th><th>Tooling/Mould No</th><th>Buyer PO NO</th><th>Po Expiry Date</th><th>Brand</th><th>Article</th><th>Style</th><th>Colour</th><th>Gender</th><th class="num">Qty</th><th>Channel</th><th>Size</th><th>Category</th><th>Packing Assortment/Solid</th><th>Assortment Qty /Solid Qty</th></tr>' +
-      (rows.length ? rows.flatMap(x => (x.o.lines || []).map((l, li) => '<tr class="click" data-act="go" data-v="order" data-p="' + esc(x.o.id) + '">' +
-        (li === 0 ? '<td class="nowrap" rowspan="' + x.o.lines.length + '">' + fmtDT(x.o.created_at) + (x.o.priority === 'Urgent' ? ' <span class="late-txt small">URGENT</span>' : '') + '</td>' : '') +
-        '<td class="nowrap"><b>' + esc(l.jc_no || '') + '</b></td>' +
-        (li === 0 ? '<td class="nowrap" rowspan="' + x.o.lines.length + '">' + fmtD(x.o.order_date) + '</td>' +
-          '<td rowspan="' + x.o.lines.length + '">' + esc(x.o.tooling_no || '') + '</td>' +
-          '<td rowspan="' + x.o.lines.length + '">' + esc(x.o.buyer_po || '') + '</td>' +
-          '<td class="nowrap" rowspan="' + x.o.lines.length + '">' + fmtD(x.o.po_expiry_date) + '</td>' +
-          '<td rowspan="' + x.o.lines.length + '">' + esc(x.o.customer_name) + '</td>' : '') +
-        '<td><b>' + esc(l.article) + '</b></td><td>' + esc(l.style || '') + '</td><td>' + esc(l.colour || '') + '</td><td>' + esc(l.gender || '') + '</td><td class="num">' + qtyFmt(l.qty) + '</td>' +
-        (li === 0 ? '<td rowspan="' + x.o.lines.length + '">' + esc(x.o.channel || '') + '</td>' : '') +
-        '<td>' + esc(l.size_run || l.size || '') + '</td>' +
-        (li === 0 ? '<td rowspan="' + x.o.lines.length + '">' + esc(x.o.category || '') + '</td>' : '') +
-        '<td>' + esc(l.pack || '') + '</td><td class="small">' + esc(sizeSummary(l)) + '</td></tr>')).join('') :
-        '<tr><td colspan="17" class="empty">No orders</td></tr>') + '</table></div>';
+    h += '<div class="tbl-wrap"><table class="bomflat"><tr><th>Time Stamp</th><th>Job Card No.</th><th>Order Date</th><th>Tooling/Mould No</th><th>Buyer PO NO</th><th>Po Expiry Date</th><th>Brand</th><th>Article</th><th>Style</th><th>Colour</th><th>Gender</th><th class="num">Qty</th><th>Channel</th><th>Size</th><th>Category</th><th>Packing Assortment/Solid</th><th>Assortment Qty /Solid Qty</th><th>Priority</th></tr>' +
+      (rows.length ? rows.flatMap(x => (x.o.lines || []).map((l, li) => '<tr class="click' + (li === 0 ? ' bomfirst' : '') + '" data-act="go" data-v="order" data-p="' + esc(x.o.id) + '">' +
+        '<td>' + fmtDT(x.o.created_at) + '</td><td><b>' + esc(l.jc_no || '') + '</b></td><td>' + fmtD(x.o.order_date) + '</td><td>' + esc(x.o.tooling_no || '') + '</td><td>' + esc(x.o.buyer_po || '') + '</td><td>' + fmtD(x.o.po_expiry_date) + '</td><td>' + esc(x.o.customer_name) + '</td>' +
+        '<td><b>' + esc(l.article) + '</b></td><td>' + esc(l.style || '') + '</td><td>' + esc(l.colour || '') + '</td><td>' + esc(l.gender || '') + '</td><td class="num">' + qtyFmt(l.qty) + '</td><td>' + esc(x.o.channel || '') + '</td><td>' + esc(l.size_run || l.size || '') + '</td><td>' + esc(x.o.category || '') + '</td>' +
+        '<td>' + esc(l.pack || '') + '</td><td>' + esc(sizeSummary(l)) + '</td><td>' + esc(x.o.priority || '') + '</td></tr>')).join('') :
+        '<tr><td colspan="18" class="empty">No orders</td></tr>') + '</table></div>';
     setMain(h); VIEWS.orders.rows = rows;
     onSeg(e => { ORD_UI.f = e.detail; VIEWS.orders.render(); });
     $('#ordQ').addEventListener('input', e => { ORD_UI.q = e.target.value; clearTimeout(ORD_UI.t); ORD_UI.t = setTimeout(() => { VIEWS.orders.render(); const i = $('#ordQ'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }, 250); });
@@ -369,23 +360,23 @@ VIEWS.order = {
     h += '<div class="panel"><table class="kv">' + [['Time stamp', fmtDT(o.created_at)], ['Order date', fmtD(o.order_date)], ['Buyer PO no', o.buyer_po], ['PO expiry date', fmtD(o.po_expiry_date)], ['Tooling / Mould no', o.tooling_no], ['Category', o.category], ['Channel', o.channel], ['Priority', o.priority || 'Normal'], ['Remarks', o.remarks], ['Punched by', o.created_by], ['FMS flow', proc ? proc.name + ' v' + proc.version : '—']]
       .concat(Object.entries(o.extra || {}).filter(e => e[1]).map(([k, v]) => { const f = proc && proc.spec.fields.find(x => x.key === k); return [f ? f.label : k, v]; }))
       .map(([k, v]) => '<tr><td class="muted" style="width:140px">' + esc(k) + '</td><td>' + esc(v) + '</td></tr>').join('') + '</table></div>';
-    h += '<h2>Articles</h2><div class="tbl-wrap"><table><tr><th>Article</th><th>Style</th><th>Colour</th><th>Gender</th><th>Size</th><th>Packing</th><th>Asst/Solid Qty</th><th>Job Card No.</th><th class="num">Ordered</th><th class="num">Dispatched</th><th class="num">Pending</th></tr>' +
+    h += '<h2>Articles</h2><div class="tbl-wrap"><table class="bomflat"><tr><th>Article</th><th>Style</th><th>Colour</th><th>Gender</th><th>Size</th><th>Packing</th><th>Asst/Solid Qty</th><th>Job Card No.</th><th class="num">Ordered</th><th class="num">Dispatched</th><th class="num">Pending</th></tr>' +
       o.lines.map((l, i) => '<tr><td><b>' + esc(l.article) + '</b></td><td>' + esc(l.style) + '</td><td>' + esc(l.colour) + '</td><td>' + esc(l.gender) + '</td><td>' + esc(l.size_run || l.size || '') + '</td><td>' + esc(l.pack) + '</td><td class="small">' + esc(sizeSummary(l)) + '</td><td class="nowrap"><b>' + esc(l.jc_no || '') + '</b></td><td class="num">' + qtyFmt(l.qty) + '</td><td class="num">' + qtyFmt(d.per[i]) + '</td><td class="num">' + qtyFmt(Math.max(0, l.qty - d.per[i])) + '</td></tr>').join('') +
       '<tr><td><b>Total</b></td><td colspan="7"></td><td class="num"><b>' + qtyFmt(t.qty) + '</b></td><td class="num">' + qtyFmt(d.total) + '</td><td class="num">' + qtyFmt(d.pending) + '</td></tr></table></div>';
     const dsp = Store.all('dispatches').filter(x => x.order_id === o.id);
-    if (dsp.length) h += '<h2>Dispatches</h2><div class="tbl-wrap"><table><tr><th>No</th><th>Date</th><th class="num">Qty</th><th>Invoice</th><th>Vehicle</th><th>Transporter / LR</th></tr>' +
-      dsp.map(x => '<tr' + (x.cancelled ? ' class="muted" style="text-decoration:line-through"' : '') + '><td>' + esc(x.no) + '</td><td>' + fmtD(x.date) + '</td><td class="num">' + qtyFmt(x.lines.reduce((s, l) => s + num(l.qty), 0)) + '</td><td>' + esc(x.invoice_no) + '</td><td>' + esc(x.vehicle) + '</td><td>' + esc(x.transporter) + ' ' + esc(x.lr_no) + '</td></tr>').join('') + '</table></div>';
+    if (dsp.length) h += '<h2>Dispatches</h2><div class="tbl-wrap"><table class="bomflat"><tr><th>No</th><th>Date</th><th class="num">Qty</th><th>Invoice</th><th>Vehicle</th><th>Transporter</th><th>LR</th><th>Status</th></tr>' +
+      dsp.map(x => '<tr' + (x.cancelled ? ' class="muted"' : '') + '><td>' + esc(x.no) + '</td><td>' + fmtD(x.date) + '</td><td class="num">' + qtyFmt(x.lines.reduce((s, l) => s + num(l.qty), 0)) + '</td><td>' + esc(x.invoice_no) + '</td><td>' + esc(x.vehicle) + '</td><td>' + esc(x.transporter) + '</td><td>' + esc(x.lr_no) + '</td><td>' + (x.cancelled ? 'Cancelled' : 'Dispatched') + '</td></tr>').join('') + '</table></div>';
     h += '</div><div><h2 style="margin-top:0">FMS timeline</h2>';
     if (!r) h += '<div class="panel">Flow not found for this order.</div>';
     else {
-      h += '<div class="tbl-wrap"><table class="tl"><tr><th>Step</th><th>Doer</th><th>Planned</th><th>Actual</th><th>Status</th><th class="num">Delay</th><th></th></tr>' +
+      h += '<div class="tbl-wrap"><table class="tl bomflat"><tr><th>Step</th><th>Doer</th><th>Done By</th><th>Note</th><th>Planned</th><th>Actual</th><th>Status</th><th class="num">Delay</th><th></th></tr>' +
         r.order.map(sid => {
           const s = r.steps[sid]; const def = r.spec.steps.find(x => x.id === sid);
-          if (s.status === 'N/A') return '<tr class="muted"><td>' + esc(s.name) + '</td><td colspan="6" class="small">Not applicable for this order</td></tr>';
+          if (s.status === 'N/A') return '<tr class="muted"><td>' + esc(s.name) + '</td><td></td><td></td><td></td><td></td><td></td><td>N/A</td><td></td><td></td></tr>';
           const act = s.status === 'Pending' || s.status === 'Late' ? stepDoneBtn(o, s, def, r.spec) :
             (s.status === 'Done' && !isDispatchStep(def, r.spec) && (can('tracker', 'edit')) ? '<button class="btn sm ghost" data-act="undo-step" data-o="' + esc(o.id) + '" data-s="' + esc(sid) + '" data-confirm="Undo?">Undo</button>' : '');
           const note = (o.notes || {})[sid]; const by = (o.done_by || {})[sid];
-          return '<tr class="' + (st.cur && st.cur.id === sid ? 'cur' : '') + '"><td>' + esc(s.name) + (note ? '<div class="muted small">“' + esc(note) + '”</div>' : '') + '</td><td>' + esc(s.doer || '') + (by && by !== 'seed' ? '<div class="muted small">' + esc(by) + '</div>' : '') + '</td><td class="nowrap">' + fmtDT(s.planned) + '</td><td class="nowrap">' + fmtDT(s.actual) + '</td><td>' + stHtml(s.status) + '</td><td class="num late-txt">' + fmtDelay(s.delayMinutes) + '</td><td class="right">' + act + '</td></tr>';
+          return '<tr class="' + (st.cur && st.cur.id === sid ? 'cur' : '') + '"><td>' + esc(s.name) + '</td><td>' + esc(s.doer || '') + '</td><td>' + (by && by !== 'seed' ? esc(by) : '') + '</td><td>' + esc(note || '') + '</td><td class="nowrap">' + fmtDT(s.planned) + '</td><td class="nowrap">' + fmtDT(s.actual) + '</td><td>' + stHtml(s.status) + '</td><td class="num late-txt">' + fmtDelay(s.delayMinutes) + '</td><td class="right">' + act + '</td></tr>';
         }).join('') + '</table></div>';
     }
     h += '</div></div>';
@@ -415,29 +406,29 @@ VIEWS.dispatch = {
     let h = '<div class="tabs">' + [['ready', 'Ready (' + readyForDispatch().length + ')'], ['upcoming', 'Upcoming'], ['history', 'History']].map(([k, l]) => '<a data-act="dsp-tab" data-t="' + k + '" class="' + (DSP_UI.tab === k ? 'on' : '') + '">' + l + '</a>').join('') + '</div>';
     if (DSP_UI.tab === 'ready') {
       const list = readyForDispatch().sort((a, b) => resolveOrder(a).steps[resolveOrder(a).spec.process.endStep].planned - resolveOrder(b).steps[resolveOrder(b).spec.process.endStep].planned);
-      h += '<div class="tbl-wrap"><table><tr><th>Order</th><th>Customer</th><th>PO expiry</th><th class="num">Pending qty</th><th>Dispatch due</th><th>Status</th><th></th></tr>' +
+      h += '<div class="tbl-wrap"><table class="bomflat"><tr><th>Order</th><th>JC No</th><th>Brand</th><th>Article</th><th>Colour</th><th>Size</th><th class="num">Order Qty</th><th class="num">Dispatched</th><th class="num">Pending</th><th>PO Expiry</th><th>Dispatch Due</th><th>Status</th><th class="num">Delay</th><th></th></tr>' +
         (list.length ? list.map(o => {
           const r = resolveOrder(o); const s = r.steps[r.spec.process.endStep]; const d = dispatchedQty(o);
-          let row = '<tr><td><a href="#/order/' + esc(o.id) + '">' + esc(o.no) + '</a></td><td>' + esc(o.customer_name) + '</td><td>' + fmtD(o.po_expiry_date) + '</td><td class="num">' + qtyFmt(d.pending) + (d.total ? ' <span class="muted small">(part sent)</span>' : '') + '</td><td>' + fmtDT(s.planned) + '</td><td>' + stHtml(s.status) + ' <span class="late-txt small">' + fmtDelay(s.delayMinutes) + '</span></td><td class="right">' + (edit ? '<button class="btn sm ' + (DSP_UI.open === o.id ? '' : 'primary') + '" data-act="dsp-open" data-o="' + esc(o.id) + '">' + (DSP_UI.open === o.id ? 'Close' : 'Dispatch') + '</button>' : '') + '</td></tr>';
-          if (DSP_UI.open === o.id) row += '<tr class="inline-form"><td colspan="7">' + dispatchForm(o, d) + '</td></tr>';
+          let row = o.lines.map((l, i) => '<tr' + (i === 0 ? ' class="bomfirst"' : '') + '><td><a href="#/order/' + esc(o.id) + '">' + esc(o.no) + '</a></td><td>' + esc(l.jc_no || '') + '</td><td>' + esc(o.customer_name) + '</td><td>' + esc(l.article) + '</td><td>' + esc(l.colour || '') + '</td><td>' + esc(l.size_run || l.size || '') + '</td><td class="num">' + qtyFmt(l.qty) + '</td><td class="num">' + qtyFmt(d.per[i] || 0) + '</td><td class="num">' + qtyFmt(Math.max(0, l.qty - (d.per[i] || 0))) + '</td><td>' + fmtD(o.po_expiry_date) + '</td><td>' + fmtDT(s.planned) + '</td><td>' + stHtml(s.status) + '</td><td class="num late-txt">' + fmtDelay(s.delayMinutes) + '</td><td class="right">' + (i === 0 && edit ? '<button class="btn sm ' + (DSP_UI.open === o.id ? '' : 'primary') + '" data-act="dsp-open" data-o="' + esc(o.id) + '">' + (DSP_UI.open === o.id ? 'Close' : 'Dispatch') + '</button>' : '') + '</td></tr>').join('');
+          if (DSP_UI.open === o.id) row += '<tr class="inline-form"><td colspan="14">' + dispatchForm(o, d) + '</td></tr>';
           return row;
-        }).join('') : '<tr><td colspan="7" class="empty">Nothing ready. Orders appear here once Invoice is done.</td></tr>') + '</table></div>';
+        }).join('') : '<tr><td colspan="14" class="empty">No orders ready</td></tr>') + '</table></div>';
     } else if (DSP_UI.tab === 'upcoming') {
       const list = Store.all('orders').map(o => ({ o, st: orderState(o) })).filter(x => x.st.open && !readyForDispatch().includes(x.o) && x.o.priority !== 'Cancelled');
-      h += '<div class="tbl-wrap"><table><tr><th>Order</th><th>Customer</th><th>PO expiry</th><th class="num">Qty</th><th>Now at</th></tr>' +
-        (list.length ? list.map(x => '<tr class="click" data-act="go" data-v="order" data-p="' + esc(x.o.id) + '"><td>' + esc(x.o.no) + '</td><td>' + esc(x.o.customer_name) + '</td><td>' + fmtD(x.o.po_expiry_date) + '</td><td class="num">' + qtyFmt(orderTotals(x.o).qty) + '</td><td><span class="st ' + x.st.cls + '">' + esc(x.st.label) + '</span></td></tr>').join('') : '<tr><td colspan="5" class="empty">No upcoming orders</td></tr>') + '</table></div>';
+      h += '<div class="tbl-wrap"><table class="bomflat"><tr><th>Order</th><th>JC No</th><th>Brand</th><th>Article</th><th>Colour</th><th>Size</th><th class="num">Qty</th><th>PO Expiry</th><th>Current Step</th></tr>' +
+        (list.length ? list.map(x => x.o.lines.map((l, i) => '<tr class="click' + (i === 0 ? ' bomfirst' : '') + '" data-act="go" data-v="order" data-p="' + esc(x.o.id) + '"><td>' + esc(x.o.no) + '</td><td>' + esc(l.jc_no || '') + '</td><td>' + esc(x.o.customer_name) + '</td><td>' + esc(l.article) + '</td><td>' + esc(l.colour || '') + '</td><td>' + esc(l.size_run || l.size || '') + '</td><td class="num">' + qtyFmt(l.qty) + '</td><td>' + fmtD(x.o.po_expiry_date) + '</td><td><span class="st ' + x.st.cls + '">' + esc(x.st.label) + '</span></td></tr>').join('')).join('') : '<tr><td colspan="9" class="empty">No upcoming orders</td></tr>') + '</table></div>';
     } else {
       const list = Store.all('dispatches').slice().sort((a, b) => (b.at || '') < (a.at || '') ? -1 : 1);
-      h += '<div class="toolbar"><button class="btn" data-act="dsp-csv">Export CSV</button></div><div class="tbl-wrap"><table><tr><th>No</th><th>Date</th><th>Order</th><th>Customer</th><th class="num">Qty</th><th>Invoice</th><th>Vehicle</th><th>Transporter</th><th>LR</th><th>By</th><th></th></tr>' +
-        (list.length ? list.map(x => { const o = Store.get('orders', x.order_id) || {}; return '<tr' + (x.cancelled ? ' class="muted"' : '') + '><td>' + esc(x.no) + (x.cancelled ? ' <span class="late-txt small">CANCELLED</span>' : '') + '</td><td>' + fmtD(x.date) + '</td><td><a href="#/order/' + esc(x.order_id) + '">' + esc(o.no) + '</a></td><td>' + esc(o.customer_name) + '</td><td class="num">' + qtyFmt(x.lines.reduce((s, l) => s + num(l.qty), 0)) + '</td><td>' + esc(x.invoice_no) + '</td><td>' + esc(x.vehicle) + '</td><td>' + esc(x.transporter) + '</td><td>' + esc(x.lr_no) + '</td><td>' + esc(x.by) + '</td><td>' + (edit && !x.cancelled ? '<button class="btn sm ghost danger" data-act="dsp-cancel" data-d="' + esc(x.id) + '" data-confirm="Confirm cancel">Cancel</button>' : '') + '</td></tr>'; }).join('') : '<tr><td colspan="11" class="empty">No dispatches yet</td></tr>') + '</table></div>';
+      h += '<div class="toolbar"><button class="btn" data-act="dsp-csv">Export CSV</button></div><div class="tbl-wrap"><table class="bomflat"><tr><th>Dispatch No</th><th>Date</th><th>Order</th><th>JC No</th><th>Brand</th><th>Article</th><th>Colour</th><th class="num">Qty</th><th>Invoice</th><th>Vehicle</th><th>Transporter</th><th>LR</th><th>By</th><th>Status</th><th></th></tr>' +
+        (list.length ? list.map(x => { const o = Store.get('orders', x.order_id) || { lines: [] }; return x.lines.map((dl, i) => { const l = o.lines[dl.idx] || {}; return '<tr class="' + (i === 0 ? 'bomfirst' : '') + (x.cancelled ? ' muted' : '') + '"><td>' + esc(x.no) + '</td><td>' + fmtD(x.date) + '</td><td><a href="#/order/' + esc(x.order_id) + '">' + esc(o.no || '') + '</a></td><td>' + esc(l.jc_no || '') + '</td><td>' + esc(o.customer_name || '') + '</td><td>' + esc(l.article || '') + '</td><td>' + esc(l.colour || '') + '</td><td class="num">' + qtyFmt(dl.qty) + '</td><td>' + esc(x.invoice_no) + '</td><td>' + esc(x.vehicle) + '</td><td>' + esc(x.transporter) + '</td><td>' + esc(x.lr_no) + '</td><td>' + esc(x.by) + '</td><td>' + (x.cancelled ? '<span class="late-txt">Cancelled</span>' : 'Dispatched') + '</td><td>' + (i === 0 && edit && !x.cancelled ? '<button class="btn sm ghost danger" data-act="dsp-cancel" data-d="' + esc(x.id) + '" data-confirm="Confirm cancel">Cancel</button>' : '') + '</td></tr>'; }).join(''); }).join('') : '<tr><td colspan="15" class="empty">No dispatches yet</td></tr>') + '</table></div>';
       VIEWS.dispatch.hist = list;
     }
     setMain(h);
   }
 };
 function dispatchForm(o, d) {
-  return '<div style="padding:6px 4px"><table style="max-width:640px;margin-bottom:8px"><tr><th>Item</th><th class="num">Pending</th><th class="num">Dispatch now</th></tr>' +
-    o.lines.map((l, i) => { const p = Math.max(0, l.qty - d.per[i]); return '<tr><td>' + esc(l.article) + ' <span class="muted">' + esc([l.style, l.colour, sizeSummary(l) || l.size].filter(Boolean).join(' · ')) + '</span></td><td class="num">' + qtyFmt(p) + '</td><td class="num"><input class="qty" type="number" min="0" max="' + p + '" step="any" data-dq="' + i + '" value="' + p + '"' + (p ? '' : ' disabled') + '></td></tr>'; }).join('') + '</table>' +
+  return '<div style="padding:6px 4px"><table class="bomflat" style="margin-bottom:8px"><tr><th>JC No</th><th>Article</th><th>Style</th><th>Colour</th><th>Size</th><th class="num">Pending</th><th class="num">Dispatch now</th></tr>' +
+    o.lines.map((l, i) => { const p = Math.max(0, l.qty - d.per[i]); return '<tr><td>' + esc(l.jc_no || '') + '</td><td>' + esc(l.article) + '</td><td>' + esc(l.style || '') + '</td><td>' + esc(l.colour || '') + '</td><td>' + esc(l.size_run || l.size || '') + '</td><td class="num">' + qtyFmt(p) + '</td><td class="num"><input class="qty" type="number" min="0" max="' + p + '" step="any" data-dq="' + i + '" value="' + p + '"' + (p ? '' : ' disabled') + '></td></tr>'; }).join('') + '</table>' +
     '<div class="row"><label>Invoice no *<input id="dInv"></label><label>Vehicle no<input id="dVeh"></label><label>Transporter<input id="dTr" list="dlTr"></label><label>LR / Docket no<input id="dLr"></label><label>Date<input id="dDate" type="date" value="' + todayYmd() + '"></label>' +
     '<datalist id="dlTr">' + Array.from(new Set(Store.all('dispatches').map(x => x.transporter).filter(Boolean))).map(t => '<option value="' + esc(t) + '">').join('') + '</datalist>' +
     '<button class="btn primary" data-save data-act="dsp-save" data-o="' + esc(o.id) + '">Save dispatch</button><span id="dMsg" class="small"></span></div></div>';
@@ -481,18 +472,17 @@ VIEWS.tracker = {
     const orders = Store.all('orders').filter(o => o.process_id === proc.id).sort((a, b) => b.created_at < a.created_at ? -1 : 1)
       .filter(o => (TRK_UI.f === 'all' || orderState(o).open) && (!q || norm(o.no + ' ' + o.customer_name).includes(q)));
     let h = '<div class="toolbar">' + (procs.length > 1 ? seg('pid', procs.map(p => ({ v: p.id, l: 'v' + p.version + (p.active ? ' (active)' : '') })), TRK_UI.pid) : '<span class="muted small">' + esc(proc.name) + ' v' + proc.version + '</span>') +
-      seg('f', [{ v: 'open', l: 'Open orders' }, { v: 'all', l: 'All' }], TRK_UI.f) + '<input id="trkQ" placeholder="Filter…" value="' + esc(TRK_UI.q) + '"><span class="muted small">' + orders.length + ' order(s) · ✓ = done · red = late</span></div>';
+      seg('f', [{ v: 'open', l: 'Open orders' }, { v: 'all', l: 'All' }], TRK_UI.f) + '<input id="trkQ" placeholder="Filter…" value="' + esc(TRK_UI.q) + '"><span class="muted small">' + orders.length + ' order(s)</span></div>';
     const steps = FMSEngine.topoOrder(proc.spec).map(id => proc.spec.steps.find(s => s.id === id));
-    h += '<div class="tbl-wrap" style="max-height:75vh"><table class="trk"><tr><th>Order</th>' + steps.map(s => '<th title="' + esc(typeof s.doer === 'object' ? s.doer.name || '' : s.doer) + '">' + esc(s.name) + '</th>').join('') + '</tr>' +
+    h += '<div class="tbl-wrap" style="max-height:75vh"><table class="trk"><tr><th rowspan="2">Order</th><th rowspan="2">Brand</th>' + steps.map(s => '<th colspan="3" class="c">' + esc(s.name) + '</th>').join('') + '</tr><tr>' + steps.map(() => '<th>Planned</th><th>Actual</th><th class="num">Delay</th>').join('') + '</tr>' +
       (orders.length ? orders.map(o => {
         const r = resolveOrder(o);
-        return '<tr class="click" data-act="go" data-v="order" data-p="' + esc(o.id) + '"><td class="nowrap"><b>' + esc(o.no) + '</b><div class="muted">' + esc(o.customer_name) + '</div></td>' + steps.map(sd => {
-          const s = r.steps[sd.id]; const c = 'c-' + stCls(s.status);
-          let txt = s.status === 'Done' ? '✓ ' + fmtDT(s.actual) + (s.delayMinutes ? '<br><span class="late-txt">+' + fmtDelay(s.delayMinutes) + '</span>' : '')
-            : s.status === 'N/A' ? '—' : s.status === 'Waiting' ? '…' : (s.status === 'Pending' || s.status === 'Late') ? fmtDT(s.planned) + (s.delayMinutes ? '<br>+' + fmtDelay(s.delayMinutes) : '') : esc(s.status);
-          return '<td class="cell ' + c + '" title="' + esc(s.doer || '') + ' · ' + esc(s.status) + '">' + txt + '</td>';
+        return '<tr class="click" data-act="go" data-v="order" data-p="' + esc(o.id) + '"><td><b>' + esc(o.no) + '</b></td><td>' + esc(o.customer_name) + '</td>' + steps.map(sd => {
+          const s = r.steps[sd.id]; const c = 'cell c-' + stCls(s.status);
+          if (s.status === 'N/A') return '<td class="' + c + '">N/A</td><td class="' + c + '"></td><td class="' + c + '"></td>';
+          return '<td class="' + c + '">' + (s.planned ? fmtDT(s.planned) : '') + '</td><td class="' + c + '">' + (s.actual ? fmtDT(s.actual) : '') + '</td><td class="num ' + c + (s.delayMinutes ? ' late-txt' : '') + '">' + (s.delayMinutes ? fmtDelay(s.delayMinutes) : '') + '</td>';
         }).join('') + '</tr>';
-      }).join('') : '<tr><td colspan="' + (steps.length + 1) + '" class="empty">No orders</td></tr>') + '</table></div>';
+      }).join('') : '<tr><td colspan="' + (steps.length * 3 + 2) + '" class="empty">No orders</td></tr>') + '</table></div>';
     setMain(h);
     onSeg(e => { TRK_UI[e.target.dataset.seg] = e.detail; VIEWS.tracker.render(); });
     $('#trkQ').addEventListener('input', e => { TRK_UI.q = e.target.value; clearTimeout(TRK_UI.t); TRK_UI.t = setTimeout(() => { VIEWS.tracker.render(); const i = $('#trkQ'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }, 250); });

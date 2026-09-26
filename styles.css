@@ -320,3 +320,4 @@ tr.moqrow td { background: #fff8e6; }
 .inwform .jckv td.k{white-space:nowrap;width:130px}.inwform .icphoto{display:inline-flex;flex-direction:row;align-items:center;gap:8px}.inwform .icphoto img{height:28px}
 #grnDate{width:160px}
 .bomflat td,.bomflat th{white-space:nowrap}.bomflat tr.bomfirst td{border-top:2px solid var(--line,#cfdede)}
+.tbl-wrap table td,.tbl-wrap table th{white-space:nowrap}.tbl-wrap table tr.bomfirst td{border-top:2px solid var(--line,#cfdede)}

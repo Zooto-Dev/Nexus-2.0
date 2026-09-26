@@ -551,10 +551,10 @@ VIEWS.followup = {
     const edit = can('purchase', 'edit');
     const rows = openPOs().map(p => { const f = (p.followups || []).slice(-1)[0]; return { p, f }; })
       .sort((a, b) => ((a.f && a.f.next) || '0') < ((b.f && b.f.next) || '0') ? -1 : 1);
-    let h = subTitle('PO Followup', 'open POs only') + '<div class="tbl-wrap"><table><tr><th>PO</th><th>Vendor</th><th class="num">Pending qty</th><th>Expected</th><th>Last followup</th><th>Next</th>' + (edit ? '<th style="min-width:260px">New followup</th>' : '') + '</tr>' +
-      (rows.length ? rows.map(x => '<tr' + (x.f && x.f.next && x.f.next <= todayYmd() ? '' : '') + '><td><b>' + esc(x.p.no) + '</b></td><td>' + esc(x.p.vendor) + '</td><td class="num">' + qtyFmt(poPending(x.p)) + '</td><td class="nowrap ' + (x.p.expected < todayYmd() ? 'late-txt' : '') + '">' + fmtD(x.p.expected) + '</td>' +
-        '<td class="small">' + (x.f ? esc(x.f.note) + '<div class="muted">' + esc(x.f.by) + ' · ' + fmtD(x.f.at) + '</div>' : '<span class="muted">—</span>') + '</td><td class="nowrap ' + (x.f && x.f.next && x.f.next <= todayYmd() ? 'late-txt' : '') + '">' + (x.f ? fmtD(x.f.next) : '') + '</td>' +
-        (edit ? '<td><div class="row" style="align-items:center"><input data-fu-note placeholder="followup note" style="flex:1;min-width:120px"><input data-fu-next type="date" style="width:130px"><button class="btn sm" data-act="fu-save" data-id="' + esc(x.p.id) + '">Save</button></div></td>' : '') + '</tr>').join('') : '<tr><td colspan="7" class="empty">No open POs</td></tr>') + '</table></div>';
+    let h = '<div class="tbl-wrap"><table class="bomflat"><tr><th>PO No</th><th>Vendor</th><th class="num">Pending Qty</th><th>Expected</th><th>Last Followup</th><th>Followup By</th><th>Followup Date</th><th>Next Followup</th>' + (edit ? '<th>New Followup</th><th>Next Date</th><th></th>' : '') + '</tr>' +
+      (rows.length ? rows.map(x => '<tr><td><b>' + esc(x.p.no) + '</b></td><td>' + esc(x.p.vendor) + '</td><td class="num">' + qtyFmt(poPending(x.p)) + '</td><td class="' + (x.p.expected < todayYmd() ? 'late-txt' : '') + '">' + fmtD(x.p.expected) + '</td>' +
+        '<td>' + (x.f ? esc(x.f.note) : '') + '</td><td>' + (x.f ? esc(x.f.by) : '') + '</td><td>' + (x.f ? fmtD(x.f.at) : '') + '</td><td class="' + (x.f && x.f.next && x.f.next <= todayYmd() ? 'late-txt' : '') + '">' + (x.f ? fmtD(x.f.next) : '') + '</td>' +
+        (edit ? '<td><input data-fu-note style="min-width:160px"></td><td><input data-fu-next type="date" style="width:130px"></td><td><button class="btn sm" data-act="fu-save" data-id="' + esc(x.p.id) + '">Save</button></td>' : '') + '</tr>').join('') : '<tr><td colspan="11" class="empty">No open POs</td></tr>') + '</table></div>';
     setMain(h);
   }
 };
@@ -807,10 +807,10 @@ VIEWS.jccorrection = {
   mod: 'merchant', render() {
     const edit = can('merchant', 'edit');
     const rows = Store.all('job_cards').filter(j => j.status !== 'Closed');
-    let h = subTitle('Job Card Correction') + '<div class="tbl-wrap"><table><tr><th>JC No</th><th>Brand · Article</th><th>Open corrections</th>' + (edit ? '<th style="min-width:280px">Add correction</th>' : '') + '</tr>' +
-      (rows.length ? rows.map(j => '<tr><td><b>' + esc(j.no) + '</b></td><td>' + esc(j.brand + ' · ' + j.article + (j.colour ? ' · ' + j.colour : '')) + '</td>' +
-        '<td>' + ((j.corrections || []).length ? j.corrections.map((c, i) => '<div class="small' + (c.resolved ? ' muted' : '') + '">' + (c.resolved ? '✓ ' : '• ') + esc(c.note) + ' <span class="muted">' + esc(c.by) + '</span>' + (!c.resolved && edit ? ' <a data-act="jcc-resolve" data-id="' + esc(j.id) + '" data-i="' + i + '">resolve</a>' : '') + '</div>').join('') : '<span class="muted">—</span>') + '</td>' +
-        (edit ? '<td><div class="row"><input data-jcc-note placeholder="what to fix" style="flex:1"><button class="btn sm" data-act="jcc-add" data-id="' + esc(j.id) + '">Add</button></div></td>' : '') + '</tr>').join('') : '<tr><td colspan="4" class="empty">No open job cards</td></tr>') + '</table></div>';
+    let h = '<div class="tbl-wrap"><table class="bomflat"><tr><th>JC No</th><th>Brand</th><th>Article</th><th>Colour</th><th class="num">Sr</th><th>Correction</th><th>By</th><th>Date</th><th>Status</th><th></th>' + (edit ? '<th>Add Correction</th><th></th>' : '') + '</tr>' +
+      (rows.length ? rows.map(j => { const cs = (j.corrections || []).length ? j.corrections : [null];
+        return cs.map((c, i) => '<tr' + (i === 0 ? ' class="bomfirst"' : '') + '><td><b>' + esc(j.no) + '</b></td><td>' + esc(j.brand || '') + '</td><td>' + esc(j.article || '') + '</td><td>' + esc(j.colour || '') + '</td><td class="num">' + (c ? i + 1 : '') + '</td><td>' + (c ? esc(c.note) : '') + '</td><td>' + (c ? esc(c.by || '') : '') + '</td><td>' + (c && c.at ? fmtD(c.at) : '') + '</td><td>' + (c ? (c.resolved ? '<span class="st Done">Resolved</span>' : '<span class="st Pending">Open</span>') : '') + '</td><td>' + (c && !c.resolved && edit ? '<button class="btn sm ghost" data-act="jcc-resolve" data-id="' + esc(j.id) + '" data-i="' + i + '">Resolve</button>' : '') + '</td>' +
+          (edit ? (i === 0 ? '<td><input data-jcc-note style="min-width:180px"></td><td><button class="btn sm" data-act="jcc-add" data-id="' + esc(j.id) + '">Add</button></td>' : '<td></td><td></td>') : '') + '</tr>').join(''); }).join('') : '<tr><td colspan="12" class="empty">No open job cards</td></tr>') + '</table></div>';
     setMain(h);
   }
 };
@@ -1275,11 +1275,12 @@ ACTIONS['req-save'] = () => {
 VIEWS.prodtracker = {
   mod: 'production', render() {
     const rows = Store.all('orders').map(o => ({ o, st: orderState(o), r: resolveOrder(o) })).filter(x => x.st.open && x.r);
-    setMain(subTitle('Production Tracker') + '<div class="tbl-wrap"><table><tr><th>Order</th><th>Brand</th><th class="num">Qty</th><th>Material</th><th>Production</th><th>QC</th><th>Current step</th><th class="num">Delay</th></tr>' +
+    const ids = ['material', 'production', 'qc'];
+    setMain('<div class="tbl-wrap"><table><tr><th rowspan="2">Order</th><th rowspan="2">Brand</th><th rowspan="2" class="num">Qty</th>' + ['Material', 'Production', 'QC'].map(n => '<th colspan="4" class="c">' + n + '</th>').join('') + '<th rowspan="2">Current Step</th><th rowspan="2" class="num">Delay</th></tr><tr>' + ids.map(() => '<th>Status</th><th>Planned</th><th>Actual</th><th class="num">Delay</th>').join('') + '</tr>' +
       (rows.length ? rows.map(x => {
-        const cell = id => { const s = x.r.steps[id]; if (!s || s.status === 'N/A') return '<td class="muted">—</td>'; return '<td><span class="st ' + stCls(s.status) + '">' + s.status + '</span>' + (s.planned && s.status !== 'Done' ? '<div class="muted small">' + fmtDT(s.planned) + '</div>' : s.actual ? '<div class="muted small">' + fmtDT(s.actual) + '</div>' : '') + '</td>'; };
-        return '<tr class="click" data-act="go" data-v="order" data-p="' + esc(x.o.id) + '"><td><b>' + esc(x.o.no) + '</b></td><td>' + esc(x.o.customer_name) + '</td><td class="num">' + qtyFmt(orderTotals(x.o).qty) + '</td>' + cell('material') + cell('production') + cell('qc') + '<td>' + (x.st.cur ? esc(x.st.cur.name) : '') + '</td><td class="num late-txt">' + (x.st.cur ? fmtDelay(x.st.cur.delayMinutes) : '') + '</td></tr>';
-      }).join('') : '<tr><td colspan="8" class="empty">No open orders</td></tr>') + '</table></div>');
+        const cell = id => { const s = x.r.steps[id]; if (!s || s.status === 'N/A') return '<td>N/A</td><td></td><td></td><td></td>'; return '<td><span class="st ' + stCls(s.status) + '">' + s.status + '</span></td><td>' + (s.planned ? fmtDT(s.planned) : '') + '</td><td>' + (s.actual ? fmtDT(s.actual) : '') + '</td><td class="num late-txt">' + (s.delayMinutes ? fmtDelay(s.delayMinutes) : '') + '</td>'; };
+        return '<tr class="click" data-act="go" data-v="order" data-p="' + esc(x.o.id) + '"><td><b>' + esc(x.o.no) + '</b></td><td>' + esc(x.o.customer_name) + '</td><td class="num">' + qtyFmt(orderTotals(x.o).qty) + '</td>' + ids.map(cell).join('') + '<td>' + (x.st.cur ? esc(x.st.cur.name) : '') + '</td><td class="num late-txt">' + (x.st.cur ? fmtDelay(x.st.cur.delayMinutes) : '') + '</td></tr>';
+      }).join('') : '<tr><td colspan="17" class="empty">No open orders</td></tr>') + '</table></div>');
   }
 };
 
@@ -1338,14 +1339,14 @@ VIEWS.tickets = {
     let h = subTitle('Tickets') + '<div class="toolbar">' + seg('f', [{ v: 'open', l: 'Open' }, { v: 'esc', l: 'Escalated' }, { v: 'closed', l: 'Closed' }, { v: 'all', l: 'All' }], TKT_UI.f) + '<span class="grow"></span>' + (edit ? newBtn('Raise ticket', 'tkt-new') : '') + '</div>';
     if (TKT_UI.form && edit) h += '<div class="panel" style="margin-bottom:12px"><div class="row"><label style="flex:2">Subject *<input id="ntSub"></label><label>Department *' + seg('ntDept', ['Purchase', 'Merchant', 'Store', 'Development', 'Production', 'Accounts', 'Dispatch', 'IT'], '') + '</label></div>' +
       '<div class="row" style="margin-top:8px"><label>Priority' + seg('ntPri', ['Low', 'Normal', 'High', 'Critical'], 'Normal') + '</label><label style="flex:1">Detail<input id="ntDet"></label><button class="btn primary" data-act="tkt-save">Raise</button><span id="ntMsg" class="small"></span></div></div>';
-    h += '<div class="tbl-wrap"><table><tr><th>Ticket</th><th>Subject</th><th>Dept</th><th>Priority</th><th>Raised by</th><th>Age</th><th>Status</th><th>Last comment</th>' + (edit ? '<th style="min-width:230px"></th>' : '') + '</tr>' +
+    h += '<div class="tbl-wrap"><table class="bomflat"><tr><th>Ticket</th><th>Subject</th><th>Detail</th><th>Dept</th><th>Priority</th><th>Raised By</th><th>Age</th><th>Escalated</th><th>Status</th><th>Last Comment</th><th>Comment By</th>' + (edit ? '<th>Comment</th><th></th>' : '') + '</tr>' +
       (rows.length ? rows.map(t => {
         const esc48 = ticketEscalated(t); const age = Math.floor((Date.now() - new Date(t.at)) / 3600000);
         const last = (t.comments || []).slice(-1)[0];
-        return '<tr><td><b>' + esc(t.no) + '</b>' + (esc48 ? ' <span class="late-txt small">ESCALATED</span>' : '') + '</td><td>' + esc(t.subject) + (t.detail ? '<div class="muted small">' + esc(t.detail) + '</div>' : '') + '</td><td>' + esc(t.dept) + '</td><td class="' + (t.priority === 'Critical' ? 'late-txt' : t.priority === 'High' ? '' : 'muted') + '">' + esc(t.priority) + '</td><td>' + esc(t.by) + '</td><td class="nowrap">' + (age < 48 ? age + 'h' : Math.floor(age / 24) + 'd') + '</td>' +
-          '<td><span class="st ' + (t.status === 'Closed' ? 'Done' : t.status === 'In Progress' ? 'Pending' : 'Late') + '">' + t.status + '</span></td><td class="small">' + (last ? esc(last.note) + ' <span class="muted">· ' + esc(last.by) + '</span>' : '') + '</td>' +
-          (edit ? '<td class="right nowrap">' + (t.status !== 'Closed' ? '<input data-tk-note placeholder="comment" style="width:110px"> <button class="btn sm" data-act="tkt-comment" data-id="' + esc(t.id) + '">Add</button> ' + (t.status === 'Open' ? '<button class="btn sm" data-act="tkt-status" data-id="' + esc(t.id) + '" data-s="In Progress">Start</button> ' : '') + '<button class="btn sm primary" data-act="tkt-status" data-id="' + esc(t.id) + '" data-s="Closed">Close</button>' : '') + '</td>' : '') + '</tr>';
-      }).join('') : '<tr><td colspan="9" class="empty">No tickets</td></tr>') + '</table></div>';
+        return '<tr><td><b>' + esc(t.no) + '</b></td><td>' + esc(t.subject) + '</td><td>' + esc(t.detail || '') + '</td><td>' + esc(t.dept) + '</td><td class="' + (t.priority === 'Critical' ? 'late-txt' : t.priority === 'High' ? '' : 'muted') + '">' + esc(t.priority) + '</td><td>' + esc(t.by) + '</td><td class="nowrap">' + (age < 48 ? age + 'h' : Math.floor(age / 24) + 'd') + '</td>' +
+          '<td>' + (esc48 ? '<span class="late-txt">Yes</span>' : '') + '</td><td><span class="st ' + (t.status === 'Closed' ? 'Done' : t.status === 'In Progress' ? 'Pending' : 'Late') + '">' + t.status + '</span></td><td>' + (last ? esc(last.note) : '') + '</td><td>' + (last ? esc(last.by) : '') + '</td>' +
+          (edit ? '<td>' + (t.status !== 'Closed' ? '<input data-tk-note style="width:140px">' : '') + '</td><td class="right">' + (t.status !== 'Closed' ? '<button class="btn sm" data-act="tkt-comment" data-id="' + esc(t.id) + '">Add</button> ' + (t.status === 'Open' ? '<button class="btn sm" data-act="tkt-status" data-id="' + esc(t.id) + '" data-s="In Progress">Start</button> ' : '') + '<button class="btn sm primary" data-act="tkt-status" data-id="' + esc(t.id) + '" data-s="Closed">Close</button>' : '') + '</td>' : '') + '</tr>';
+      }).join('') : '<tr><td colspan="13" class="empty">No tickets</td></tr>') + '</table></div>';
     setMain(h);
     onSeg(e => { if (e.target.dataset.seg === 'f') { TKT_UI.f = e.detail; VIEWS.tickets.render(); } });
   }
@@ -1382,15 +1383,15 @@ VIEWS.checklist = {
     let h = subTitle('Checklist', 'recurring daily / weekly tasks') + '<div class="toolbar">' + (all ? seg('who', [{ v: 'mine', l: 'Mine' }, { v: 'all', l: 'Everyone' }], CHK_UI.who) : '') + '<span class="grow"></span>' + (edit ? newBtn('Add task', 'chk-new') : '') + '</div>';
     if (CHK_UI.form && edit) h += '<div class="panel" style="margin-bottom:12px"><div class="row"><label style="flex:2">Task *<input id="ncTitle"></label><label>Doer *<input id="ncDoer" list="dlDoers2" value="' + esc(ME.doer || '') + '"><datalist id="dlDoers2">' + Array.from(new Set(Store.all('users').map(u => u.doer).filter(Boolean))).map(d => '<option>' + esc(d) + '</option>').join('') + '</datalist></label>' +
       '<label>Repeat' + seg('ncFreq', ['Once', 'Daily', 'Weekly'], 'Daily') + '</label><label>Due / Weekday<input id="ncDue" placeholder="date or 0-6"></label><button class="btn primary" data-act="chk-save">Add</button><span id="ncMsg" class="small"></span></div></div>';
-    h += '<div class="tbl-wrap"><table><tr><th>Task</th><th>Doer</th><th>Repeat</th><th>Today</th><th>Last done</th><th></th></tr>' +
+    h += '<div class="tbl-wrap"><table class="bomflat"><tr><th>Task</th><th>Doer</th><th>Repeat</th><th>Weekday</th><th>Due Date</th><th>Today</th><th>Last Done</th><th>Done By</th><th></th></tr>' +
       (rows.length ? rows.map(t => {
         const due = checklistDueToday(t); const doneKeys = Object.keys(t.done || {});
         const lastK = doneKeys.sort().slice(-1)[0];
         const canMark = due && (isMyDoer(t.doer) || can('tracker', 'edit'));
-        return '<tr><td>' + esc(t.title) + '</td><td>' + esc(t.doer) + '</td><td>' + esc(t.freq) + (t.freq === 'Weekly' ? ' (' + ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][num(t.wday)] + ')' : t.freq === 'Once' && t.due ? ' · ' + fmtD(t.due) : '') + '</td>' +
-          '<td>' + (due ? '<span class="st Pending">Due</span>' : '<span class="st Done">' + (t.freq === 'Once' && (t.done || {}).once ? 'Done' : 'OK') + '</span>') + '</td><td class="small muted">' + (lastK ? esc(lastK === 'once' ? (t.done.once || '') : lastK + ' · ' + t.done[lastK]) : '—') + '</td>' +
+        return '<tr><td>' + esc(t.title) + '</td><td>' + esc(t.doer) + '</td><td>' + esc(t.freq) + '</td><td>' + (t.freq === 'Weekly' ? ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][num(t.wday)] : '') + '</td><td>' + (t.freq === 'Once' && t.due ? fmtD(t.due) : '') + '</td>' +
+          '<td>' + (due ? '<span class="st Pending">Due</span>' : '<span class="st Done">' + (t.freq === 'Once' && (t.done || {}).once ? 'Done' : 'OK') + '</span>') + '</td><td>' + (lastK ? (lastK === 'once' ? esc(String(t.done.once || '').split(' · ')[1] || '') : fmtD(lastK)) : '') + '</td><td>' + (lastK ? esc(lastK === 'once' ? String(t.done.once || '').split(' · ')[0] : t.done[lastK]) : '') + '</td>' +
           '<td class="right nowrap">' + (canMark ? '<button class="btn sm primary" data-act="chk-done" data-id="' + esc(t.id) + '">Done</button> ' : '') + (edit && (t.by === ME.name || myRole().system) ? '<button class="btn ghost sm danger" data-act="chk-del" data-id="' + esc(t.id) + '" data-confirm="Delete?">×</button>' : '') + '</td></tr>';
-      }).join('') : '<tr><td colspan="6" class="empty">Checklist is empty</td></tr>') + '</table></div>';
+      }).join('') : '<tr><td colspan="9" class="empty">Checklist is empty</td></tr>') + '</table></div>';
     setMain(h);
     onSeg(e => { if (e.target.dataset.seg === 'who') { CHK_UI.who = e.detail; VIEWS.checklist.render(); } });
   }

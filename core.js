@@ -566,9 +566,9 @@ function applyPagination(root) {
     if (!rows.length || rows.some(r => r.querySelector('.empty'))) return;
     // group rows that must stay together: rowspan continuations + attached rows (size grid, inline forms)
     const groups = [];
-    let span = 0;
+    let span = 0; const docRows = !!tbl.querySelector('tr.bomfirst');
     rows.forEach(r => {
-      const attach = span > 0 || r.classList.contains('szrow') || r.classList.contains('inline-form');
+      const attach = span > 0 || r.classList.contains('szrow') || r.classList.contains('inline-form') || (docRows && !r.classList.contains('bomfirst'));
       if (span > 0) span -= 1;
       const rs = Math.max(1, ...Array.from(r.cells).map(c => c.rowSpan || 1)) - 1;
       if (rs > 0) span = Math.max(span, rs);

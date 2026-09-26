@@ -158,8 +158,8 @@ VIEWS.roles = {
   mod: 'roles', render() {
     const edit = can('roles', 'edit'); const roles = Store.all('roles');
     let h = '';
-    h += '<div class="tbl-wrap"><table><tr><th>Module</th>' + roles.map(r => '<th class="nowrap">' + esc(r.name) + '<div class="muted small" style="font-weight:400">' + Store.all('users').filter(u => u.role_id === r.id).length + ' user(s)' + (edit && !r.system && !Store.all('users').some(u => u.role_id === r.id) ? ' · <a data-act="role-del" data-r="' + esc(r.id) + '" data-confirm="Delete?">delete</a>' : '') + '</div></th>').join('') + '</tr>' +
-      MODULES.map(m => '<tr><td>' + esc(m.label) + (m.note ? '<div class="muted small">' + esc(m.note) + '</div>' : '') + '</td>' + roles.map(r => {
+    h += '<div class="tbl-wrap"><table><tr><th>Module</th>' + roles.map(r => '<th class="nowrap">' + esc(r.name) + '</th>').join('') + '</tr>' +
+      MODULES.map(m => '<tr><td>' + esc(m.label) + '</td>' + roles.map(r => {
         const p = r.system ? 'edit' : ((r.perms || {})[m.key] || 'none');
         const txt = p === 'edit' ? '<b style="color:var(--accent)">Edit</b>' : p === 'view' ? 'View' : '<span class="muted">—</span>';
         return '<td' + (edit && !r.system ? ' class="click" data-act="perm" data-r="' + esc(r.id) + '" data-m="' + m.key + '" style="cursor:pointer"' : '') + '>' + txt + '</td>';
