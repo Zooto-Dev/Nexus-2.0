@@ -23,63 +23,94 @@ function qcOpen(q) { return !q.result || (q.result === 'Mismatch' && !q.m_status
 const kvTable = rows => '<table class="jckv">' + rows.map(([k, v]) => '<tr><td class="k">' + k + '</td><td class="v">' + v + '</td></tr>').join('') + '</table>';
 
 /* ================= PO document (screen, approval and print share it) ================= */
+const PO_TERMS_DEFAULT = 'Excess Quantity against PO will not be accepted.\nPlease attach a copy of this PO with your invoice.\nThe PO will be canceled if the delivery date is not met.';
+function amt2(n) { return (Math.round(num(n) * 100) / 100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+function inWords(n) {
+  const a = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
+  const t = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
+  const two = x => x < 20 ? a[x] : t[Math.floor(x / 10)] + (x % 10 ? ' ' + a[x % 10] : '');
+  const three = x => (x >= 100 ? a[Math.floor(x / 100)] + ' Hundred' + (x % 100 ? ' ' : '') : '') + (x % 100 ? two(x % 100) : '');
+  const w = x => { if (!x) return ''; const parts = []; const cr = Math.floor(x / 1e7), lk = Math.floor(x / 1e5) % 100, th = Math.floor(x / 1e3) % 100, rest = x % 1000;
+    if (cr) parts.push(w(cr) + ' Crore'); if (lk) parts.push(two(lk) + ' Lakh'); if (th) parts.push(two(th) + ' Thousand'); if (rest) parts.push(three(rest)); return parts.join(' '); };
+  const r = Math.floor(num(n)), p = Math.round((num(n) - r) * 100);
+  return (w(r) || 'Zero') + ' Rupees' + (p ? ' and ' + two(p) + ' Paise' : '') + ' Only';
+}
 function poDocHtml(p) {
-  const v = vendorBy(p.vendor) || {}; const s = settings();
-  let amt = 0, tot = 0, q = 0;
+  const v = vendorBy(p.vendor) || {}; const s = settings(); const e = x => esc(x == null ? '' : String(x));
+  let amt = 0, gst = 0, tot = 0;
   const rows = (p.lines || []).map((l, i) => {
-    const m = matBy(l.material) || {}; const a = num(l.qty) * num(l.rate); const t = a * (1 + num(l.gst) / 100); amt += a; tot += t; q += num(l.qty);
-    return '<tr><td class="c">' + (i + 1) + '</td><td class="c">' + (m.photo ? '<img class="po-ph" src="' + m.photo + '">' : '') + '</td><td>' + esc(m.name || l.material) + '</td><td>' + esc(m.group || '') + '</td><td class="c">' + esc(l.material) + '</td><td class="c">' + esc(m.hsn || '') + '</td><td class="c">' + esc(l.uom || m.uom || '') + '</td><td>' + esc(l.brand || '') + '</td>' +
-      '<td class="r">' + money(l.rate || 0) + '</td><td class="c">' + (l.gst || 0) + '</td><td>' + esc(l.remark || '') + '</td><td class="r">' + qtyFmt(l.qty) + '</td><td class="r">' + money(a) + '</td><td class="r">' + money(t) + '</td></tr>';
+    const m = matBy(l.material) || {}; const a = num(l.qty) * num(l.rate); const g = a * num(l.gst) / 100; amt += a; gst += g; tot += a + g;
+    const ph = m.photo || '';
+    return '<tr><td class="c">' + (i + 1) + '</td><td class="c">' + (ph ? '<img src="' + e(ph) + '" onerror="this.remove()">' : '') + '</td><td>' + e(l.material) + '</td><td class="c">' + e(m.hsn || '') + '</td><td>' + e(m.name || l.material) + '</td><td class="c">' + e(l.remark || 'NA') + '</td>' +
+      '<td class="r">' + amt2(l.qty) + '</td><td class="c">' + e(l.uom || m.uom || '') + '</td><td class="r">' + amt2(l.rate) + '</td><td class="r">' + amt2(a) + '</td><td class="r">' + num(l.gst) + '% | ' + amt2(g) + '</td><td class="r">' + amt2(a + g) + '</td></tr>';
   }).join('');
-  const e = x => esc(x == null ? '' : String(x));
-  return '<div class="jcdoc podoc"><div class="jcban">PURCHASE ORDER</div><div class="jcmid">' +
-    '<div class="podoc-col">' + kvTable([['Company', e(s.company)], ['Address', e(s.address)], ['GSTIN', e(s.gstin)]]) + '</div>' +
-    '<div class="podoc-col">' + kvTable([['PO No', '<b>' + e(p.no) + '</b>'], ['PO Date', e(fmtD(p.date))], ['Expected Delivery', e(fmtD(p.expected))], ['Raised By', e(p.created_by)], ['Status', e(poStatus(p))]]) + '</div>' +
-    '<div class="podoc-col">' + kvTable([['Vendor', '<b>' + e(p.vendor) + '</b>'], ['Address', e(v.address)], ['GSTIN', e(v.gstin)], ['Mobile', e(v.mobile)], ['Email', e(v.email)]]) + '</div></div>' +
-    '<table class="jcbom"><tr class="hd"><th>Sr</th><th>Photo</th><th>Item Name</th><th>Category</th><th>Code</th><th>HSN</th><th>UOM</th><th>Brand</th><th>Rate</th><th>GST %</th><th>Remark</th><th>Qty</th><th>Amount</th><th>Total</th></tr>' + rows +
-    '<tr class="tt"><td colspan="11" class="r">Total</td><td class="r">' + qtyFmt(q) + '</td><td class="r">' + money(amt) + '</td><td class="r">' + money(tot) + '</td></tr></table>' +
-    (p.remarks ? '<div class="podoc-note"><b>Remarks:</b> ' + esc(p.remarks) + '</div>' : '') +
-    ((p.moq_log || []).length ? '<div class="podoc-note"><b>MOQ:</b> ' + p.moq_log.map(x => esc(x.material) + ' net ' + qtyFmt(x.net) + ' → ' + qtyFmt(x.moq) + ' · ' + esc(x.reason)).join('; ') + '</div>' : '') +
-    ((p.amend_log || []).length ? '<div class="podoc-note"><b>Amendments:</b> ' + p.amend_log.map(x => esc(x.remark) + ' (' + esc(x.by) + ', ' + fmtDT(x.at) + ')').join('; ') + '</div>' : '') +
-    (p.reject_remark ? '<div class="podoc-note late-txt"><b>Rejected:</b> ' + esc(p.reject_remark) + '</div>' : '') +
+  const terms = String(s.po_terms || PO_TERMS_DEFAULT).split('\n').map(x => x.trim()).filter(Boolean);
+  const vAddr = [v.address, v.state].filter(Boolean).join(', ');
+  return '<div class="po2">' +
+    '<div class="po2-co"><div class="po2-name">' + e(s.company || '') + '</div><div class="po2-sub">' + e(s.address || '') + '</div><div class="po2-sub">' + [s.gstin ? 'GSTIN: ' + e(s.gstin) : '', s.email ? 'Email: ' + e(s.email) : ''].filter(Boolean).join(' | ') + '</div></div>' +
+    '<div class="po2-title">PURCHASE ORDER</div>' +
+    '<div class="po2-parties"><table class="po2-kv"><tr><th>Supplier:</th><td>' + e(p.vendor) + '</td></tr><tr><th>Address:</th><td>' + e(vAddr) + '</td></tr><tr><th>GSTIN:</th><td>' + e(v.gstin || '') + '</td></tr>' + (v.mobile ? '<tr><th>Mobile:</th><td>' + e(v.mobile) + '</td></tr>' : '') + (v.email ? '<tr><th>Email:</th><td>' + e(v.email) + '</td></tr>' : '') + '</table>' +
+    '<table class="po2-kv po2-right"><tr><th>PO Number:</th><td>' + e(p.no) + '</td></tr><tr><th>PO Date:</th><td>' + e(fmtD(p.date)) + '</td></tr><tr><th>Order Date:</th><td>' + e(fmtD((p.at || p.date || '').slice(0, 10))) + '</td></tr><tr><th>Delivery Date:</th><td>' + e(fmtD(p.expected)) + '</td></tr></table></div>' +
+    '<table class="po2-items"><thead><tr><th class="c">S No</th><th class="c">Photo</th><th>Part Code</th><th class="c">HSN</th><th>Description</th><th class="c">Remark</th><th class="r">Qty</th><th class="c">Unit</th><th class="r">Rate (₹)</th><th class="r">Amount (₹)</th><th class="r">GST (₹)</th><th class="r">Total (₹)</th></tr></thead><tbody>' + rows + '</tbody>' +
+    '<tfoot><tr><td colspan="9" class="r">Total:</td><td class="r">' + amt2(amt) + '</td><td class="r">' + amt2(gst) + '</td><td class="r">' + amt2(tot) + '</td></tr></tfoot></table>' +
+    '<div class="po2-words">Total Amount in Words: ' + inWords(tot) + '</div>' +
+    (p.remarks ? '<div class="po2-rem"><b>Remarks:</b> ' + e(p.remarks) + '</div>' : '') +
+    '<div class="po2-terms"><div class="po2-th">Terms and Conditions:</div><ol>' + terms.map(x => '<li>' + e(x) + '</li>').join('') + '</ol></div>' +
+    '<div class="po2-sign"><div><div class="po2-sl">Prepared By:</div><div class="po2-sn">' + e(p.created_by || '') + '</div></div><div class="r"><div class="po2-sl">Approved By:</div><div class="po2-sn">' + e(p.approval === 'Approved' ? p.approved_by || '' : '') + '</div></div></div>' +
     '</div>';
 }
+const PO_DOC_CSS = '.po2 table{width:auto;border:0;background:none;border-collapse:collapse;margin:0}.po2 th,.po2 td{background:none;border:0;color:inherit;text-transform:none;letter-spacing:0;font-size:inherit;height:auto;box-shadow:none}.po2 tr{background:none!important}' + '.po2{font-family:Helvetica,Arial,sans-serif;color:#111;background:#fff;padding:18px 22px;font-size:11px}' +
+  '.po2-co{text-align:center;border-bottom:1px solid #555;padding-bottom:8px}.po2-name{color:#0e6a73;font-size:18px;font-weight:700;letter-spacing:.02em}.po2-sub{font-size:9.5px;font-weight:600;color:#333;margin-top:2px}' +
+  '.po2-title{text-align:center;color:#0e6a73;font-size:15px;font-weight:700;margin:14px 0 10px}' +
+  '.po2-parties{display:flex;justify-content:space-between;align-items:flex-start;gap:24px;margin-bottom:12px}.po2-kv{border-collapse:collapse;font-size:10.5px}.po2 .po2-kv th,.po2 .po2-kv td{padding:2px 0;vertical-align:top;line-height:1.35;font-size:10.5px}.po2 .po2-kv th{text-align:left;font-weight:700;padding-right:8px;white-space:nowrap}.po2-kv td{max-width:330px}' +
+  '.po2 .po2-right th{text-align:right}.po2 .po2-right td{text-align:right;white-space:nowrap}' +
+  '.po2 .po2-items{width:100%;border-collapse:collapse;font-size:10.5px;font-variant-numeric:tabular-nums}.po2 .po2-items thead th{background:#f1f4f6;font-weight:700;padding:6px 6px;border-bottom:1px solid #cfd6da;text-align:left;white-space:nowrap}' +
+  '.po2 .po2-items td{padding:6px 6px;height:34px;border-bottom:1px solid #e6eaec;vertical-align:middle}.po2-items img{height:30px;max-width:44px;object-fit:cover;border-radius:2px}' +
+  '.po2 .po2-items .c{text-align:center}.po2 .po2-items .r{text-align:right;white-space:nowrap}.po2 .po2-items tfoot td{font-weight:700;border-bottom:0;border-top:1px solid #999;padding-top:8px}' +
+  '.po2-words{font-weight:700;font-size:11.5px;margin:12px 0 10px}.po2-rem{font-size:10.5px;margin-bottom:8px}' +
+  '.po2-terms{border-left:10px solid #0e6a73;padding:4px 12px;font-size:10px}.po2-th{font-weight:700;font-size:11px;margin-bottom:4px}.po2-terms ol{margin:0;padding-left:16px}' +
+  '.po2-sign{display:flex;justify-content:space-between;margin-top:34px}.po2-sign .r{text-align:right}.po2-sl{font-weight:700;font-size:11px}.po2-sn{font-weight:700;font-size:10.5px;margin-top:18px;text-transform:uppercase}';
+(function () { const st = document.createElement('style'); st.textContent = PO_DOC_CSS; document.head.appendChild(st); })();
 ACTIONS['po-print'] = el => {
   const p = Store.get('purchase_orders', el.dataset.id); if (!p) return;
   const w = window.open('');
-  w.document.write('<html><head><title>' + esc(p.no) + '</title><style>@page{size:A4 landscape;margin:8mm}html,body{margin:0;font-family:Helvetica,Arial,sans-serif;color:#000}' +
-    JC_DOC_CSS + '.podoc-col{flex:1}.jcbom .r{text-align:right}.jcbom tr.tt td{font-weight:bold;background:#e3f2f2}.po-ph{height:34px}.podoc-note{font-size:11px;margin-top:6px}*{-webkit-print-color-adjust:exact;print-color-adjust:exact}' +
-    '</style></head><body>' + poDocHtml(p) + '<script>window.print()</' + 'script></body></html>');
+  w.document.write('<html><head><title>' + esc(p.no) + '</title><style>@page{size:A4;margin:8mm}html,body{margin:0}*{-webkit-print-color-adjust:exact;print-color-adjust:exact}' + PO_DOC_CSS + '</style></head><body>' + poDocHtml(p) + '<script>window.onload=function(){window.print()}</' + 'script></body></html>');
   w.document.close();
 };
 
 /* ================= PO Approval ================= */
-const PA_UI = { id: null, act: null };
+const PA_UI = { id: null, act: null, view: null };
 VIEWS.poapproval = {
   mod: 'purchase', render() {
     const list = Store.all('purchase_orders').filter(p => !p.cancelled && p.approval === 'Pending').sort((a, b) => (a.at || '') < (b.at || '') ? -1 : 1);
-    let h = list.length ? '' : '<div class="panel empty">No purchase orders waiting for approval</div>';
-    list.forEach(p => {
-      const ok = canApprovePo(p);
-      h += '<div class="card"><div class="card-b">' + poDocHtml(p) + '</div><div class="card-f">' +
-        (ok && PA_UI.id === p.id
-          ? '<label style="flex:1">' + (PA_UI.act === 'amend' ? 'What to amend and why *' : 'Reason for rejection *') + '<input id="paRem" autocomplete="off"></label>' +
-            '<button class="btn ' + (PA_UI.act === 'amend' ? 'primary' : 'confirm') + '" data-act="pa-confirm" data-id="' + esc(p.id) + '">' + (PA_UI.act === 'amend' ? 'Send for amendment' : 'Reject PO') + '</button><button class="btn" data-act="pa-cancel">Cancel</button>'
-          : (ok ? '<button class="btn primary" data-act="pa-approve" data-id="' + esc(p.id) + '">Approve</button><button class="btn" data-act="pa-open" data-a="amend" data-id="' + esc(p.id) + '">Amend</button><button class="btn danger" data-act="pa-open" data-a="reject" data-id="' + esc(p.id) + '">Reject</button>' : '') +
-            '<span class="grow"></span><button class="btn ghost" data-act="po-print" data-id="' + esc(p.id) + '">Print</button>') +
-        '</div></div>';
-    });
-    setMain(h);
+    const p = PA_UI.view ? list.find(x => x.id === PA_UI.view) : null;
+    if (!p) {
+      PA_UI.view = null;
+      setMain('<div class="tbl-wrap"><table><tr><th>PO No</th><th>PO Date</th><th>Vendor</th><th>Expected</th><th>Raised By</th><th></th></tr>' +
+        (list.length ? list.map(x => '<tr><td><b>' + esc(x.no) + '</b></td><td>' + fmtD(x.date) + '</td><td>' + esc(x.vendor) + '</td><td>' + fmtD(x.expected) + '</td><td>' + esc(x.created_by || '') + '</td><td class="right"><button class="btn sm primary" data-act="pa-view" data-id="' + esc(x.id) + '">View</button></td></tr>').join('')
+          : '<tr><td colspan="6" class="empty">No purchase orders waiting for approval</td></tr>') + '</table></div>');
+      return;
+    }
+    const ok = canApprovePo(p);
+    let bar = '<div class="toolbar"><button class="btn" data-act="pa-back">‹ Back</button><span class="grow"></span>';
+    if (ok && PA_UI.id === p.id) bar += '<input id="paRem" autocomplete="off" style="min-width:320px" placeholder="' + (PA_UI.act === 'amend' ? 'What to amend' : 'Reason for rejection') + '"><button class="btn ' + (PA_UI.act === 'amend' ? 'primary' : 'danger') + '" data-act="pa-confirm" data-id="' + esc(p.id) + '">' + (PA_UI.act === 'amend' ? 'Send for amendment' : 'Reject PO') + '</button><button class="btn" data-act="pa-cancel">Cancel</button>';
+    else bar += (ok ? '<button class="btn primary" data-act="pa-approve" data-id="' + esc(p.id) + '">Approve</button><button class="btn" data-act="pa-open" data-a="amend" data-id="' + esc(p.id) + '">Amend</button><button class="btn danger" data-act="pa-open" data-a="reject" data-id="' + esc(p.id) + '">Reject</button>' : '') + '<button class="btn ghost" data-act="po-print" data-id="' + esc(p.id) + '">Print</button>';
+    bar += '</div>';
+    const hist = (p.amend_log || []).length ? '<div class="tbl-wrap" style="margin-top:12px"><table><tr><th>Amendment</th><th>By</th><th>Date</th></tr>' + p.amend_log.map(x => '<tr><td>' + esc(x.remark) + '</td><td>' + esc(x.by) + '</td><td>' + fmtDT(x.at) + '</td></tr>').join('') + '</table></div>' : '';
+    const moq = (p.moq_log || []).length ? '<div class="tbl-wrap" style="margin-top:12px"><table><tr><th>Item Code</th><th class="num">Net Requirement</th><th class="num">Ordered (MOQ)</th><th class="num">Extra</th><th>Reason</th><th>By</th></tr>' + p.moq_log.map(x => '<tr><td>' + esc(x.material) + '</td><td class="num">' + qtyFmt(x.net) + '</td><td class="num">' + qtyFmt(x.moq) + '</td><td class="num">' + qtyFmt(x.extra) + '</td><td>' + esc(x.reason) + '</td><td>' + esc(x.by) + '</td></tr>').join('') + '</table></div>' : '';
+    setMain(bar + '<div class="card po2-card">' + poDocHtml(p) + '</div>' + moq + hist);
     const r = $('#paRem'); if (r) r.focus();
   }
 };
+ACTIONS['pa-view'] = el => { PA_UI.view = el.dataset.id; PA_UI.id = null; VIEWS.poapproval.render(); };
+ACTIONS['pa-back'] = () => { PA_UI.view = null; PA_UI.id = null; VIEWS.poapproval.render(); };
 ACTIONS['pa-approve'] = el => {
   const p = Store.get('purchase_orders', el.dataset.id);
   if (!p || p.approval !== 'Pending') return;
   if (!canApprovePo(p)) { flash(poOwn(p) ? 'You raised this PO — someone else must approve it.' : 'Only Admin/Manager can approve POs.', 'err'); return; }
   p.approval = 'Approved'; p.approved_by = ME.name; p.approved_at = nowIso(); Store.put('purchase_orders', p);
   p.lines.forEach(l => { if (!l.jc_no) return; const j = jcBy(l.jc_no); if (!j) return; const jl = (j.lines || []).find(x => norm(x.material) === norm(l.material)); if (jl) { jl.po_raised = num(jl.po_raised) + num(l.qty); Store.put('job_cards', j); } });
-  audit('po.approve', p.no, p.vendor); flash(esc(p.no) + ' approved.'); VIEWS.poapproval.render();
+  audit('po.approve', p.no, p.vendor); flash(esc(p.no) + ' approved.'); PA_UI.view = null; VIEWS.poapproval.render();
 };
 ACTIONS['pa-open'] = el => { PA_UI.id = el.dataset.id; PA_UI.act = el.dataset.a; VIEWS.poapproval.render(); };
 ACTIONS['pa-cancel'] = () => { PA_UI.id = null; PA_UI.act = null; VIEWS.poapproval.render(); };
@@ -95,8 +126,36 @@ ACTIONS['pa-confirm'] = el => {
     p.approval = 'Rejected'; p.approved_by = ME.name; p.reject_remark = rem;
     audit('po.reject', p.no, rem); flash(esc(p.no) + ' rejected.');
   }
-  Store.put('purchase_orders', p); PA_UI.id = null; PA_UI.act = null; VIEWS.poapproval.render();
+  Store.put('purchase_orders', p); PA_UI.id = null; PA_UI.act = null; PA_UI.view = null; VIEWS.poapproval.render();
 };
+
+/* ================= Vendor details dialog (PO form) ================= */
+const VEN_REQ = [['address', 'Address'], ['state', 'State'], ['gstin', 'GST No'], ['mobile', 'Mobile No.'], ['email', 'Email ID']];
+function vendorMissing(v) { return v ? VEN_REQ.filter(([k]) => !String(v[k] || '').trim()) : []; }
+function vendorDialog(v, done) {
+  const old = $('#venDlg'); if (old) old.remove();
+  const d = document.createElement('div'); d.id = 'venDlg'; d.className = 'dlg-back';
+  d.innerHTML = '<div class="dlg"><div class="dlg-h">' + esc(v.name) + '</div><table class="jckv">' +
+    VEN_REQ.map(([k, l]) => '<tr><td class="k">' + l + ' *</td><td class="v"><input data-vd="' + k + '" value="' + esc(v[k] || '') + '"' + (k === 'gstin' ? ' style="text-transform:uppercase" maxlength="15"' : k === 'mobile' ? ' inputmode="numeric" maxlength="10"' : '') + '></td></tr>').join('') +
+    '</table><div class="dlg-f"><span id="vdMsg" class="small late-txt"></span><span class="grow"></span><button class="btn" data-vd-cancel>Cancel</button><button class="btn primary" data-vd-save>Save</button></div></div>';
+  document.body.appendChild(d);
+  const first = VEN_REQ.map(([k]) => $('[data-vd="' + k + '"]', d)).find(i => !i.value.trim()); (first || $('[data-vd]', d)).focus();
+  d.addEventListener('click', ev => {
+    if (ev.target.closest('[data-vd-cancel]')) { d.remove(); return; }
+    if (!ev.target.closest('[data-vd-save]')) return;
+    const val = {}; VEN_REQ.forEach(([k]) => { val[k] = $('[data-vd="' + k + '"]', d).value.trim(); }); val.gstin = val.gstin.toUpperCase();
+    const err = VEN_REQ.filter(([k]) => !val[k]).map(x => x[1]).join(', ');
+    const bad = err ? 'Required: ' + err : !/^[0-9]{2}[A-Z0-9]{13}$/.test(val.gstin) ? 'GST No must be 15 characters.' : !/^[6-9][0-9]{9}$/.test(val.mobile) ? 'Mobile No. must be 10 digits.' : !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(val.email) ? 'Email ID is not valid.' : '';
+    if (bad) { $('#vdMsg', d).textContent = bad; return; }
+    const cur = vendorBy(v.name); Object.assign(cur, val); Store.put('vendors', cur); audit('vendor.edit', cur.name, 'details completed from PO');
+    d.remove(); flash(esc(cur.name) + ' updated.'); if (done) done(cur);
+  });
+  d.addEventListener('keydown', ev => { if (ev.key === 'Escape') d.remove(); if (ev.key === 'Enter') { ev.preventDefault(); $('[data-vd-save]', d).click(); } });
+}
+document.addEventListener('change', e => {
+  if (e.target.id !== 'npVen') return;
+  const v = vendorBy(e.target.value); if (v && vendorMissing(v).length) vendorDialog(v);
+});
 
 /* ================= Gate entry (Invoice / Sample) ================= */
 const INW_UI = { form: false, bt: 'Invoice', ven: '', po: '', f: {}, photo: '', qcDoc: '' };

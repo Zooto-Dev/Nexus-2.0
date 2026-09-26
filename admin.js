@@ -188,8 +188,9 @@ VIEWS.settings = {
     const s = settings(); const c = s.calendar; const edit = can('settings', 'edit'); const dis = edit ? '' : ' disabled';
     const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
     let h = '<div class="grid2"><div>';
-    h += '<div class="panel"><h2 style="margin-top:0">Company</h2><div class="row"><label style="flex:1">Company name<input data-s="company" value="' + esc(s.company) + '"' + dis + '></label><label>GSTIN<input data-s="gstin" value="' + esc(s.gstin) + '"' + dis + '></label></div><label style="margin-top:8px">Address<input data-s="address" value="' + esc(s.address) + '"' + dis + '></label></div>' +
+    h += '<div class="panel"><h2 style="margin-top:0">Company</h2><div class="row"><label style="flex:1">Company name<input data-s="company" value="' + esc(s.company) + '"' + dis + '></label><label>GSTIN<input data-s="gstin" value="' + esc(s.gstin) + '"' + dis + '></label></div><label style="margin-top:8px">Address<input data-s="address" value="' + esc(s.address) + '"' + dis + '></label><label style="margin-top:8px">Email<input data-s="email" value="' + esc(s.email || '') + '"' + dis + '></label></div>' +
       '<div class="panel" style="margin-top:12px"><h2 style="margin-top:0">Alert emails</h2><label>MOQ over-order alert \u2014 concerned person email(s), comma separated<input data-s="alert_moq_email" value="' + esc(s.alert_moq_email || '') + '"' + dis + ' placeholder="purchase.head@company.com"></label></div>' +
+      '<div class="panel" style="margin-top:12px"><h2 style="margin-top:0">PO Terms and Conditions</h2><textarea data-s="po_terms" rows="4" style="width:100%"' + dis + '>' + esc(s.po_terms || PO_TERMS_DEFAULT) + '</textarea></div>' +
       '<div class="panel" style="margin-top:12px"><h2 style="margin-top:0">QC categories</h2><div class="row">' + itemCats().map(c => '<label style="flex-direction:row;align-items:center;gap:4px;min-width:0"><input type="checkbox" data-qccat="' + esc(c) + '"' + (qcCats().some(x => norm(x) === norm(c)) ? ' checked' : '') + dis + '>' + esc(c) + '</label>').join('') + '</div></div>';
     h += '<div class="panel" style="margin-top:12px"><h2 style="margin-top:0">Working calendar (used for every TAT &amp; delay)</h2><div class="row">' +
       [['open', 'Office opens'], ['close', 'Office closes'], ['lunchStart', 'Lunch from'], ['lunchEnd', 'Lunch to']].map(([k, l]) => '<label>' + l + '<input type="time" data-cal="' + k + '" value="' + esc(c[k]) + '"' + dis + '></label>').join('') + '</div>' +
@@ -209,7 +210,7 @@ VIEWS.settings = {
     if (!edit) return;
     m.addEventListener('change', e => {
       const t = e.target; const st = settings();
-      if (t.dataset.s) { st[t.dataset.s] = t.value.trim(); }
+      if (t.dataset.s) { st[t.dataset.s] = t.dataset.s === 'po_terms' ? t.value.split('\n').map(x => x.trim()).filter(Boolean).join('\n') : t.value.trim(); }
       else if (t.dataset.qccat != null) { st.qc_categories = $$('[data-qccat]').filter(x => x.checked).map(x => x.dataset.qccat); }
       else if (t.dataset.cal) { if (!/^\d\d:\d\d$/.test(t.value)) return; st.calendar[t.dataset.cal] = t.value; }
       else if (t.dataset.off != null) { st.calendar.weeklyOff = $$('[data-off]').filter(x => x.checked).map(x => +x.dataset.off); if (st.calendar.weeklyOff.length > 5) { flash('At least 2 working days needed.', 'err'); return VIEWS.settings.render(); } }
