@@ -13,6 +13,7 @@ function bldFields(types) { return (B.draft.fields || []).filter(f => !types || 
 function fieldOpts(key) { const f = (B.draft.fields || []).find(x => x.key === key); if (!f) return []; if (f.options) return f.options.filter(o => o !== ''); if (f.optionsFrom && f.optionsFrom.startsWith('doerTables.')) return Object.keys((B.draft.doerTables || {})[f.optionsFrom.split('.')[1]] || {}); return []; }
 function doerNames() { return Array.from(new Set(Store.all('users').map(u => u.doer).filter(Boolean))).sort(); }
 function tatStr(t) { return t ? t.value + (t.unit === 'hours' ? 'h' : 'd') + (t.urgent != null && t.urgent !== '' ? ' / urgent ' + t.urgent + (t.unit === 'hours' ? 'h' : 'd') : '') : ''; }
+function doerText(d) { if (!d) return ''; if (typeof d === 'string') return d; if (d.type === 'fixed') return d.name || ''; if (d.type === 'field') return fieldLabel(d.field); if (d.type === 'lookup') return d.table + ' (by ' + fieldLabel(d.by) + ')'; return (d.rules || []).map(r => r.name).concat(d.default ? [d.default] : []).join(' / '); }
 function fieldLabel(k) { const f = (B.draft.fields || []).find(x => x.key === k); return f ? f.label : k; }
 function describeTrigger(t) {
   if (!t) return '';
@@ -80,14 +81,16 @@ VIEWS.builder = {
     h += '<div class="toolbar"><span class="small">' + (proc.active ? '<b>v' + proc.version + ' is live</b> — new orders use it.' : 'v' + proc.version + ' is not live.') + ' ' + (B.dirty ? '<span class="late-txt">Unsaved changes.</span>' : '') + '</span><span class="grow"></span>' +
       (edit ? (B.dirty ? '<button class="btn" data-act="bld-discard" data-confirm="Discard?">Discard</button><button class="btn primary" data-save data-act="bld-save"' + (v.errors.length ? ' disabled title="Fix errors first"' : '') + '>Save as v' + (versions[versions.length - 1].version + 1) + '</button>' : '') +
         (!B.dirty && !proc.active ? '<button class="btn primary" data-act="bld-activate" data-confirm="Make live?"' + (v.errors.length ? ' disabled' : '') + '>Activate v' + proc.version + '</button>' : '') : '<span class="muted small">Read only</span>') + '</div>';
-    h += '<div class="tabs">' + [['flow', 'Flow'], ['sim', 'Simulate'], ['fields', 'Fields & JSON']].map(([k, l]) => '<a data-act="bld-tab" data-t="' + k + '" class="' + (B.tab === k ? 'on' : '') + '">' + l + '</a>').join('') + '</div>';
+    h += '<div class="tabs">' + [['flow', 'Flow'], ['tables', 'Doer Tables'], ['sim', 'Simulate'], ['fields', 'Fields & JSON']].map(([k, l]) => '<a data-act="bld-tab" data-t="' + k + '" class="' + (B.tab === k ? 'on' : '') + '">' + l + '</a>').join('') + '</div>';
     if (B.tab === 'flow') h += '<div class="bld"><div class="panel" style="padding:0"><div id="bSteps" class="steplist"></div>' + (edit ? '<div style="padding:8px"><button class="btn sm" data-act="bld-add">+ Add step</button></div>' : '') + '</div><div class="panel ed" id="bEd"></div><div><div id="bPv" class="toolbar"></div><div class="chart-wrap" id="bChart"></div><div id="bVal" class="panel small" style="margin-top:10px"></div></div></div>';
     else if (B.tab === 'sim') h += '<div id="bSim"></div>';
+    else if (B.tab === 'tables') h += '<div id="bTables"></div>';
     else h += '<div id="bFields"></div>';
     setMain(h);
     onSeg(bldSeg);
     if (B.tab === 'flow') { bldSide(); bldEditor(); const m = $('#main'); m.addEventListener('input', bldInput); m.addEventListener('change', bldInput); }
     if (B.tab === 'sim') bldSim();
+    if (B.tab === 'tables') bldTables();
     if (B.tab === 'fields') bldFieldsTab();
   }
 };
@@ -109,7 +112,7 @@ function bldInput(e) {
 function bldSide() {
   const d = B.draft;
   const order = (() => { try { return FMSEngine.topoOrder(d); } catch (e) { return d.steps.map(s => s.id); } })();
-  $('#bSteps').innerHTML = d.steps.map(s => '<a data-act="bld-sel" data-s="' + esc(s.id) + '" class="' + (s.id === B.sel ? 'on' : '') + '">' + esc(s.name || '(unnamed)') + '<div class="muted">' + esc(typeof s.doer === 'object' ? (s.doer.name || s.doer.table || 'rule') : s.doer || '') + ' · ' + esc(tatStr(s.tat)) + '</div></a>').join('');
+  $('#bSteps').innerHTML = d.steps.map(s => '<a data-act="bld-sel" data-s="' + esc(s.id) + '" class="' + (s.id === B.sel ? 'on' : '') + '">' + esc(s.name || '(unnamed)') + '<div class="muted">' + esc(doerText(s.doer)) + ' · ' + esc(tatStr(s.tat)) + '</div></a>').join('');
   // preview instance controls
   const selFields = bldFields(['select']).filter(f => f.key !== 'priority' || true);
   $('#bPv').innerHTML = '<span class="muted small">Preview for:</span>' + selFields.map(f => { const o = fieldOpts(f.key); if (!o.length || o.length > 6) return ''; if (B.pv[f.key] == null) B.pv[f.key] = f.key === 'priority' ? '' : o[0]; return seg('pv_' + f.key, (f.key === 'priority' ? [{ v: '', l: 'Normal' }] : []).concat(o.map(x => ({ v: x, l: x }))), B.pv[f.key]); }).join('');
@@ -146,7 +149,7 @@ function bldChart(spec, order) {
     const st = spec.steps.find(x => x.id === n.id); const p = pos[n.id]; const r = res && res.steps[n.id];
     const on = n.id === B.sel; const applies = !r || r.applies;
     const t0 = Array.isArray(st.trigger) ? st.trigger[0] : st.trigger;
-    const sub = (r && r.doer ? r.doer : '—') + ' · ' + (t0 && t0.type === 'beforeDate' ? 'T−' + ((t0.tat || st.tat || {}).value || 0) + 'd' : tatStr(t0 && t0.tat || st.tat).replace(' / urgent ', '/'));
+    const sub = (r && r.doer ? r.doer : doerText(st.doer) || '—') + ' · ' + (t0 && t0.type === 'beforeDate' ? 'T−' + ((t0.tat || st.tat || {}).value || 0) + 'd' : tatStr(t0 && t0.tat || st.tat).replace(' / urgent ', '/'));
     s += '<g data-act="bld-sel" data-s="' + esc(n.id) + '" style="cursor:pointer" opacity="' + (applies ? 1 : .35) + '">' +
       '<rect x="' + p.x + '" y="' + p.y + '" width="' + W + '" height="' + H + '" rx="4" fill="' + (on ? '#eaf1fa' : '#fff') + '" stroke="' + (on ? '#1f5fae' : '#c9ced6') + '" stroke-width="' + (on ? 1.6 : 1) + '"/>' +
       '<text x="' + (p.x + 8) + '" y="' + (p.y + 19) + '" fill="#1c2430" font-weight="600">' + esc((st.name || '').length > 26 ? st.name.slice(0, 25) + '…' : st.name) + '</text>' +
@@ -170,8 +173,9 @@ function bldEditor() {
   let h = '<datalist id="dlDoers">' + doerNames().map(n => '<option value="' + esc(n) + '">').join('') + '</datalist>';
   h += '<label>Step name<input data-k="name" value="' + esc(s.name) + '"></label><div class="muted small" style="margin:-4px 0 8px">id: <span class="mono">' + esc(s.id) + '</span></div>';
   h += '<label>What to do (shown to doer)<textarea data-k="what" rows="2">' + esc(s.what || '') + '</textarea></label>';
-  h += '<div class="sub"><b>Doer</b> ' + seg('doerType', [{ v: 'fixed', l: 'Person / team' }, { v: 'lookup', l: 'From table' }, { v: 'byCondition', l: 'By rule' }], doer.type) + '<div style="margin-top:6px">';
+  h += '<div class="sub"><b>Doer</b> ' + seg('doerType', [{ v: 'fixed', l: 'Person / team' }, { v: 'field', l: 'From order field' }, { v: 'lookup', l: 'From table' }, { v: 'byCondition', l: 'By rule' }], doer.type) + '<div style="margin-top:6px">';
   if (doer.type === 'fixed') h += '<input data-k="doerName" list="dlDoers" value="' + esc(doer.name || '') + '" placeholder="Doer name (linked to users)" style="width:100%">';
+  else if (doer.type === 'field') h += '<div class="row"><label>Field<select data-k="doerField">' + bldFields().map(f => '<option value="' + esc(f.key) + '"' + (f.key === doer.field ? ' selected' : '') + '>' + esc(f.label) + '</option>').join('') + '</select></label><label>Default<input data-k="doerDefault" list="dlDoers" value="' + esc(doer.default || '') + '"></label></div>';
   else if (doer.type === 'lookup') h += '<div class="row"><label>Table<input data-k="doerTable" list="dlTables" value="' + esc(doer.table || '') + '"></label><label>By field<select data-k="doerBy">' + bldFields().map(f => '<option value="' + esc(f.key) + '"' + (f.key === doer.by ? ' selected' : '') + '>' + esc(f.label) + '</option>').join('') + '</select></label><label>Default<input data-k="doerDefault" list="dlDoers" value="' + esc(doer.default || '') + '"></label></div><datalist id="dlTables">' + Object.keys(B.draft.doerTables || {}).map(t => '<option value="' + esc(t) + '">').join('') + '</datalist>';
   else h += '<textarea data-k="doerRules" rows="3" class="mono">' + esc(JSON.stringify(doer.rules || [], null, 0)) + '</textarea><label>Default<input data-k="doerDefault" list="dlDoers" value="' + esc(doer.default || '') + '"></label><div class="muted small">Rules: [{"when":{"field":"category","in":["X"]},"name":"DOER"}]</div>';
   h += '</div></div>';
@@ -188,9 +192,12 @@ function bldEditor() {
   });
   h += '<a class="small" data-act="cand-add">+ another start rule</a></div>';
   h += '<div class="sub"><b>TAT</b><div class="row" style="margin-top:6px"><label>Normal<input data-k="tatv" type="number" step="any" min="0" value="' + esc(tat.value) + '" style="width:80px"></label><label>Urgent<input data-k="tatu" type="number" step="any" min="0" value="' + esc(tat.urgent == null ? '' : tat.urgent) + '" style="width:80px" placeholder="same"></label><label>Unit' + seg('tatUnit', [{ v: 'days', l: 'Working days' }, { v: 'hours', l: 'Hours' }], tat.unit || 'days') + '</label></div></div>';
-  const stt = s.status || { type: 'manual' };
-  h += '<div class="sub"><b>Closed by</b> ' + seg('statusType', [{ v: 'manual', l: 'Doer clicks Done' }, { v: 'auto', l: 'Another system' }], stt.type) +
-    (stt.type === 'auto' ? '<div class="row" style="margin-top:6px"><label>Source<input data-k="stSource" value="' + esc(stt.source || '') + '"></label><label style="flex:1">Rule<input data-k="stRule" value="' + esc(stt.rule || '') + '"></label></div>' : '') + '</div>';
+  const stt = s.status || { type: 'manual' }; const rule = FMS_RULES.find(r => r.id === stt.rule) || FMS_RULES[0];
+  const capFields = bldFields(['date', 'datetime', 'text', 'number', 'select']).filter(f => f.source !== 'system');
+  h += '<div class="sub"><b>Closed by</b> ' + seg('statusType', [{ v: 'manual', l: 'Doer clicks Done' }, { v: 'auto', l: 'Automatically' }], stt.type) +
+    (stt.type === 'auto' ? '<div class="row" style="margin-top:6px"><label style="flex:1">When<select data-k="stRule">' + FMS_RULES.map(r => '<option value="' + r.id + '"' + (r.id === rule.id ? ' selected' : '') + '>' + esc(r.label) + '</option>').join('') + '</select></label>' +
+      (rule.param ? '<label>Field<select data-k="stField"><option value="">—</option>' + bldFields().map(f => '<option value="' + esc(f.key) + '"' + (f.key === stt.field ? ' selected' : '') + '>' + esc(f.label) + '</option>').join('') + '</select></label>' : '') + '</div>'
+      : '<div class="row" style="margin-top:6px"><label>On Done, ask for<select data-k="capField"><option value="">Nothing</option>' + capFields.map(f => '<option value="' + esc(f.key) + '"' + (s.capture && s.capture.field === f.key ? ' selected' : '') + '>' + esc(f.label) + '</option>').join('') + '</select></label></div>') + '</div>';
   if (edit) h += '<div class="sub toolbar"><button class="btn sm" data-act="bld-move" data-d="-1">↑ Up</button><button class="btn sm" data-act="bld-move" data-d="1">↓ Down</button><span class="grow"></span><button class="btn sm danger" data-act="bld-del" data-confirm="Confirm delete">Delete step</button></div>';
   el.innerHTML = h;
   if (!edit) $$('input,select,textarea,.seg', el).forEach(x => { if (x.classList.contains('seg')) x.setAttribute('data-locked', ''); else x.disabled = true; });
@@ -201,6 +208,7 @@ function bldCollect() {
   s.name = val('name').trim(); const w = val('what').trim(); if (w) s.what = w; else delete s.what;
   const dt = segVal($('[data-seg="doerType"]', el));
   if (dt === 'fixed') s.doer = { type: 'fixed', name: (val('doerName') || '').trim().toUpperCase() };
+  else if (dt === 'field') s.doer = { type: 'field', field: val('doerField') || (s.doer && s.doer.field) || (bldFields()[0] || {}).key, default: (val('doerDefault') || '').trim().toUpperCase() || undefined };
   else if (dt === 'lookup') s.doer = { type: 'lookup', table: (val('doerTable') || '').trim(), by: val('doerBy') || (bldFields()[0] || {}).key, default: (val('doerDefault') || '').trim() || undefined };
   else { let rules = []; try { rules = JSON.parse(val('doerRules') || '[]'); } catch (e) { rules = (s.doer && s.doer.rules) || []; } s.doer = { type: 'byCondition', rules, default: (val('doerDefault') || '').trim() || undefined }; }
   if (segVal($('[data-seg="appliesMode"]', el)) === 'when') { const c = readCond($('[data-cond="applies"]', el)); s.applies = c && !c.__bad ? c : (c && c.__bad ? s.applies : { field: (bldFields(['select'])[0] || {}).key, in: [] }); }
@@ -216,8 +224,8 @@ function bldCollect() {
   });
   s.trigger = cands.length === 1 ? cands[0] : cands;
   const tu = val('tatu'); s.tat = { value: num(val('tatv')), unit: segVal($('[data-seg="tatUnit"]', el)) || 'days' }; if (tu !== '' && tu != null) s.tat.urgent = num(tu);
-  if (segVal($('[data-seg="statusType"]', el)) === 'auto') s.status = { type: 'auto', source: val('stSource') != null ? val('stSource').trim() : (s.status && s.status.source) || '', rule: val('stRule') != null ? val('stRule').trim() : (s.status && s.status.rule) || '' };
-  else delete s.status;
+  if (segVal($('[data-seg="statusType"]', el)) === 'auto') { s.status = { type: 'auto', rule: val('stRule') || (s.status && s.status.rule) || FMS_RULES[0].id }; const sf = val('stField'); if (sf) s.status.field = sf; else if (s.status.rule === ((s.status && s.status.rule) || '') && s.status.field) s.status.field = s.status.field; delete s.capture; }
+  else { delete s.status; const cf = val('capField'); if (cf) s.capture = { field: cf }; else if (cf === '') delete s.capture; }
 }
 function bldEditAllowed() { return requirePerm('builder', 'edit'); }
 ACTIONS['bld-tab'] = el => { B.tab = el.dataset.t; VIEWS.builder.render(); };
@@ -322,3 +330,26 @@ ACTIONS['json-apply'] = () => {
   const v = validateSpec(spec); VIEWS.builder.render(); flash('JSON applied — ' + v.errors.length + ' error(s), ' + v.warns.length + ' warning(s). Save as new version to keep it.', v.errors.length ? 'err' : '');
 };
 ACTIONS['json-dl'] = () => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(B.draft, null, 2)], { type: 'application/json' })); a.download = B.draft.process.id + '-flow.json'; a.click(); };
+
+/* ---------- doer tables (e.g. brand → doer) ---------- */
+function bldTables() {
+  const el = $('#bTables'); if (!el) return; const edit = can('builder', 'edit');
+  const T = B.draft.doerTables = B.draft.doerTables || {};
+  const used = t => B.draft.steps.filter(s => s.doer && s.doer.type === 'lookup' && s.doer.table === t).map(s => s.name);
+  let h = '<div class="toolbar">' + (edit ? '<input id="btNew" placeholder="table name, e.g. brand_doer"><button class="btn" data-act="bt-add">Add table</button>' : '') + '</div>';
+  h += '<div class="grid2">' + Object.keys(T).map(t => '<div class="panel"><div class="row" style="justify-content:space-between;align-items:center"><b>' + esc(t) + '</b>' + (edit ? '<button class="btn ghost sm danger" data-act="bt-del" data-t="' + esc(t) + '" data-confirm="Delete table?">Delete</button>' : '') + '</div>' +
+    '<div class="small muted" style="margin:4px 0">' + (used(t).length ? 'Used by: ' + esc(used(t).join(', ')) : 'Not used by any step') + '</div>' +
+    '<div class="tbl-wrap"><table><tr><th>Key (e.g. brand)</th><th>Doer</th><th></th></tr>' + Object.entries(T[t]).map(([k, v]) => '<tr data-bt="' + esc(t) + '" data-bk="' + esc(k) + '"><td>' + (edit ? '<input data-btk value="' + esc(k) + '">' : esc(k)) + '</td><td>' + (edit ? '<input data-btv list="dlDoers" value="' + esc(v) + '">' : esc(v)) + '</td><td>' + (edit ? '<button class="btn ghost sm danger" data-act="bt-rdel">×</button>' : '') + '</td></tr>').join('') + '</table></div>' +
+    (edit ? '<a class="small" data-act="bt-radd" data-t="' + esc(t) + '">+ row</a>' : '') + '</div>').join('') + '</div>' +
+    '<datalist id="dlDoers">' + doerNames().map(n => '<option value="' + esc(n) + '">').join('') + '</datalist>';
+  el.innerHTML = h;
+  el.addEventListener('change', e => {
+    const tr = e.target.closest('tr[data-bt]'); if (!tr) return; const t = tr.dataset.bt, k0 = tr.dataset.bk; const tb = T[t];
+    const k = $('[data-btk]', tr).value.trim(), v = $('[data-btv]', tr).value.trim().toUpperCase();
+    const out = {}; Object.entries(tb).forEach(([kk, vv]) => { if (kk === k0) { if (k) out[k] = v; } else out[kk] = vv; }); B.draft.doerTables[t] = out; if (!bldMarkDirty()) bldTables();
+  });
+}
+ACTIONS['bt-add'] = () => { const n = ($('#btNew').value || '').trim().toLowerCase().replace(/[^a-z0-9_]+/g, '_'); if (!n) return; B.draft.doerTables = B.draft.doerTables || {}; if (!B.draft.doerTables[n]) B.draft.doerTables[n] = {}; if (!bldMarkDirty()) bldTables(); };
+ACTIONS['bt-del'] = el => { delete B.draft.doerTables[el.dataset.t]; if (!bldMarkDirty()) bldTables(); };
+ACTIONS['bt-radd'] = el => { const tb = B.draft.doerTables[el.dataset.t]; let k = 'NEW'; let i = 1; while (tb[k]) k = 'NEW ' + (++i); tb[k] = ''; if (!bldMarkDirty()) bldTables(); };
+ACTIONS['bt-rdel'] = el => { const tr = el.closest('tr'); delete B.draft.doerTables[tr.dataset.bt][tr.dataset.bk]; if (!bldMarkDirty()) bldTables(); };

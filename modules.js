@@ -244,19 +244,6 @@ ACTIONS['print-bom'] = el => {
     '</style></head><body>' + bomDocHtml(b) + '<script>window.print()</' + 'script></body></html>');
   w.document.close();
 };
-ACTIONS['print-grn'] = el => {
-  const g = Store.get('grns', el.dataset.id); if (!g) return;
-  if ((g.lines || []).some(l => l.excess_status === 'Pending')) { flash('GRN report is available after the excess approval decision.', 'err'); return; }
-  const t = k => g.lines.reduce((a, l) => a + num(l[k] || 0), 0);
-  printDoc({
-    title: 'Goods Receipt Note', ref: g.no, date: g.date, by: g.by,
-    meta: [['Vendor', g.vendor], ['PO Number', g.po_no], ['Invoice No', g.invoice], ['Invoice Date', fmtD(g.invoice_date)], ['Gate Entry', g.inward_no || ''], ['GRN Date', fmtD(g.date)]],
-    body: pTable([['#'], ['Item Code'], ['Item Name'], ['UOM'], ['Invoice Qty', 'n'], ['Received', 'n'], ['Short', 'n'], ['Reject', 'n'], ['GRN Qty', 'n'], ['Excess', 'n'], ['Excess Status'], ['Rack']],
-      g.lines.map((l, i) => [i + 1, esc(l.material), esc((matBy(l.material) || {}).name || ''), esc(l.uom || (matBy(l.material) || {}).uom || ''), qtyFmt(l.inv_qty || 0), qtyFmt(l.recv_qty != null ? l.recv_qty : num(l.accepted) + num(l.rejected)), qtyFmt(l.short || 0), qtyFmt(l.rejected || 0), qtyFmt(l.accepted || 0), qtyFmt(l.excess || 0), esc(num(l.excess) > 0 ? l.excess_status || '' : ''), esc(l.rack || '')]),
-      ['', 'Total', '', '', qtyFmt(t('inv_qty')), qtyFmt(t('recv_qty')), qtyFmt(t('short')), qtyFmt(t('rejected')), qtyFmt(t('accepted')), qtyFmt(t('excess')), '', '']),
-    note: g.reject_reason ? 'Reject reason: ' + g.reject_reason : ''
-  });
-};
 ACTIONS['print-req'] = el => {
   const r = Store.all('requisitions').find(x => x.id === el.dataset.id || norm(x.no) === norm(el.dataset.id)); if (!r) return;
   printDoc({

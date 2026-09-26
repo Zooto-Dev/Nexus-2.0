@@ -592,3 +592,31 @@ VIEWS.activity = {
   }
 };
 ACTIONS['act-csv'] = () => downloadCsv('activity-' + todayYmd() + '.csv', [['Date & Time', 'Activity', 'Reference', 'Vendor', 'Detail', 'Result', 'Done By']].concat((VIEWS.activity.rows || []).map(r => [fmtDT(r.at), r.act, r.ref, r.party, r.detail, r.result, r.by])));
+
+/* ================= GRN document (format 1: same family as the PO) ================= */
+function grnDocHtml(g) {
+  const v = vendorBy(g.vendor) || {}; const s = settings(); const e = x => esc(x == null ? '' : String(x));
+  const t = k => g.lines.reduce((a, l) => a + num(l[k] || 0), 0);
+  const rec = l => l.recv_qty != null ? num(l.recv_qty) : num(l.accepted) + num(l.rejected);
+  const rows = g.lines.map((l, i) => { const m = matBy(l.material) || {};
+    return '<tr><td class="c">' + (i + 1) + '</td><td>' + e(l.material) + '</td><td>' + e(m.name || '') + '</td><td class="c">' + e(l.uom || m.uom || '') + '</td><td class="r">' + qtyFmt(l.po_pending || 0) + '</td><td class="r">' + qtyFmt(l.inv_qty || 0) + '</td><td class="r">' + qtyFmt(rec(l)) + '</td><td class="r">' + qtyFmt(l.short || 0) + '</td><td class="r">' + qtyFmt(l.rejected || 0) + '</td><td class="r"><b>' + qtyFmt(l.accepted || 0) + '</b></td><td class="r">' + qtyFmt(l.excess || 0) + '</td><td>' + e(num(l.excess) > 0 ? (l.excess_status === 'Rejected' ? 'Rejected (RTV)' : l.excess_status || '') : '') + '</td><td>' + e(l.rack || '') + '</td></tr>'; }).join('');
+  const iw = Store.get('inwards', g.inward_id) || {};
+  return '<div class="po2">' +
+    '<div class="po2-co"><div class="po2-name">' + e(s.company || '') + '</div><div class="po2-sub">' + e(s.address || '') + '</div><div class="po2-sub">' + [s.gstin ? 'GSTIN: ' + e(s.gstin) : '', s.email ? 'Email: ' + e(s.email) : ''].filter(Boolean).join(' | ') + '</div></div>' +
+    '<div class="po2-title">GOODS RECEIPT NOTE</div>' +
+    '<div class="po2-parties"><table class="po2-kv"><tr><th>Supplier:</th><td>' + e(g.vendor) + '</td></tr><tr><th>Address:</th><td>' + e([v.address, v.state].filter(Boolean).join(', ')) + '</td></tr><tr><th>GSTIN:</th><td>' + e(v.gstin || '') + '</td></tr></table>' +
+    '<table class="po2-kv po2-right"><tr><th>GRN No:</th><td>' + e(g.no) + '</td></tr><tr><th>GRN Date:</th><td>' + e(fmtD(g.date)) + '</td></tr><tr><th>PO No:</th><td>' + e(g.po_no) + '</td></tr><tr><th>Invoice No:</th><td>' + e(g.invoice || '') + '</td></tr><tr><th>Invoice Date:</th><td>' + e(fmtD(g.invoice_date || iw.bill_date)) + '</td></tr><tr><th>Gate Entry:</th><td>' + e(g.inward_no || '') + '</td></tr></table></div>' +
+    '<table class="po2-items"><thead><tr><th class="c">S No</th><th>Item Code</th><th>Description</th><th class="c">UOM</th><th class="r">PO Pending</th><th class="r">Invoice Qty</th><th class="r">Received</th><th class="r">Short</th><th class="r">Reject</th><th class="r">GRN Qty</th><th class="r">Excess</th><th>Excess Status</th><th>Rack</th></tr></thead><tbody>' + rows + '</tbody>' +
+    '<tfoot><tr><td colspan="4" class="r">Total:</td><td class="r">' + qtyFmt(t('po_pending')) + '</td><td class="r">' + qtyFmt(t('inv_qty')) + '</td><td class="r">' + qtyFmt(g.lines.reduce((a, l) => a + rec(l), 0)) + '</td><td class="r">' + qtyFmt(t('short')) + '</td><td class="r">' + qtyFmt(t('rejected')) + '</td><td class="r">' + qtyFmt(t('accepted')) + '</td><td class="r">' + qtyFmt(t('excess')) + '</td><td></td><td></td></tr></tfoot></table>' +
+    (g.reject_reason ? '<div class="po2-rem"><b>Reject reason:</b> ' + e(g.reject_reason) + '</div>' : '') +
+    '<div class="po2-terms"><div class="po2-th">Stock posted:</div>GRN Qty to stock · Reject to rejection stock · Rejected excess to RTV stock</div>' +
+    '<div class="po2-sign"><div><div class="po2-sl">Received By:</div><div class="po2-sn">' + e(g.by || '') + '</div></div><div style="text-align:center"><div class="po2-sl">Store Incharge:</div><div class="po2-sn">&nbsp;</div></div><div class="r"><div class="po2-sl">Approved By:</div><div class="po2-sn">&nbsp;</div></div></div>' +
+    '</div>';
+}
+ACTIONS['print-grn'] = el => {
+  const g = Store.get('grns', el.dataset.id); if (!g) return;
+  if ((g.lines || []).some(l => l.excess_status === 'Pending')) { flash('GRN report is available after the excess approval decision.', 'err'); return; }
+  const w = window.open(''); if (!w) { flash('Allow pop-ups for this site to print the GRN.', 'err'); return; }
+  w.document.write('<html><head><title>' + esc(g.no) + '</title><style>@page{size:A4 landscape;margin:8mm}html,body{margin:0}*{-webkit-print-color-adjust:exact;print-color-adjust:exact}' + PO_DOC_CSS + '</style></head><body>' + grnDocHtml(g) + '<script>window.onload=function(){window.print()}</' + 'script></body></html>');
+  w.document.close();
+};

@@ -228,7 +228,8 @@ function orderFields(o) {
   return Object.assign({}, o.extra || {}, {
     created_at: o.created_at, order_no: o.no, brand: o.customer_name, category: o.category,
     channel: o.channel, priority: o.priority || '', po_expiry_date: o.po_expiry_date,
-    order_date: o.order_date, qty: t.qty
+    order_date: o.order_date, qty: t.qty,
+    brand_merchant: ((Store.all('customers').find(c => norm(c.name) === norm(o.customer_name)) || {}).merchandiser || '')
   });
 }
 function resolveOrder(o) {
@@ -275,11 +276,13 @@ function canMarkStep(def, s, spec) {
   if (can('tracker', 'edit')) return true;
   return can('tasks', 'edit') && isMyDoer(s.doer);
 }
-function markStepDone(orderId, stepId, note) {
+function markStepDone(orderId, stepId, note, capVal) {
   const o = Store.get('orders', orderId); if (!o) return;
   const r = resolveOrder(o); const s = r && r.steps[stepId]; const def = r && r.spec.steps.find(x => x.id === stepId);
   if (!s || !(s.status === 'Pending' || s.status === 'Late')) { flash('This step is not open.', 'err'); return; }
   if (!canMarkStep(def, s, r.spec)) { flash('Only ' + esc(s.doer) + ' (or a tracker editor) can close this step.', 'err'); return; }
+  if (def && def.capture && !capVal) { flash('Enter ' + esc(fieldLabelOf(r.spec, def.capture.field)) + ' to close this step.', 'err'); return; }
+  if (def && def.capture) { o.extra = o.extra || {}; o.extra[def.capture.field] = capVal; }
   o.actuals = o.actuals || {}; o.actuals[stepId] = nowIso();
   if (note) { o.notes = o.notes || {}; o.notes[stepId] = note; }
   o.done_by = o.done_by || {}; o.done_by[stepId] = ME.name;
@@ -287,6 +290,43 @@ function markStepDone(orderId, stepId, note) {
   audit('step.done', o.no, s.name + (s.delayMinutes ? ' (late ' + fmtDelay(s.delayMinutes) + ')' : '') + (note ? ' — ' + note : ''));
   flash(esc(s.name) + ' marked done for ' + esc(o.no) + '. <a data-act="undo-step" data-o="' + esc(o.id) + '" data-s="' + esc(stepId) + '">Undo</a>');
 }
+function fieldLabelOf(spec, key) { const f = ((spec && spec.fields) || []).find(x => x.key === key); return f ? f.label : key; }
+/* ---- FMS auto-close rules: a step set to "Closed by: another system" closes itself when its rule is met ---- */
+// Each rule returns the time the event happened, or null while it has not.
+const FMS_RULES = [
+  { id: 'field_filled', label: 'An order field is filled', param: true,
+    check: (o, f) => { const v = (o.extra || {})[f] || orderFields(o)[f]; return v ? nowIso() : null; } },
+  { id: 'job_card_created', label: 'Job cards made for every order line',
+    check: o => { const js = (o.lines || []).map(l => l.jc_no && jcBy(l.jc_no)); return js.length && js.every(Boolean) ? js.map(j => j.at || '').sort().pop() || nowIso() : null; } },
+  { id: 'material_received', label: 'All job card material received (PO qty fully received)',
+    check: o => {
+      const js = (o.lines || []).map(l => l.jc_no && jcBy(l.jc_no)).filter(Boolean); if (!js.length) return null;
+      const codes = Array.from(new Set(js.flatMap(j => (j.lines || []).map(l => norm(l.material)))));
+      const pos = Store.all('purchase_orders').filter(p => !p.cancelled && p.approval === 'Approved');
+      const ok = codes.length && codes.every(c => { const ls = pos.flatMap(p => p.lines.filter(l => norm(l.material) === c)); return ls.length && ls.every(l => num(l.received) >= num(l.qty)); });
+      if (!ok) return null;
+      return Store.all('grns').filter(g => g.lines.some(l => codes.includes(norm(l.material)))).map(g => g.at || g.date).sort().pop() || nowIso();
+    } },
+  { id: 'order_dispatched', label: 'Order fully dispatched',
+    check: o => { const d = dispatchedQty(o); return d.total > 0 && d.pending <= 0 ? Store.all('dispatches').filter(x => x.order_id === o.id && !x.cancelled).map(x => x.at || x.date).sort().pop() : null; } }
+];
+let FMS_AUTO_T = 0;
+function fmsAutoRun(force) {
+  if (!force && Date.now() - FMS_AUTO_T < 4000) return; FMS_AUTO_T = Date.now();
+  Store.all('orders').forEach(o => {
+    if (o.priority === 'Cancelled') return;
+    const r = resolveOrder(o); if (!r) return; let changed = false;
+    r.spec.steps.forEach(def => {
+      if (!def.status || def.status.type !== 'auto') return;
+      const s = r.steps[def.id]; if (!s || !(s.status === 'Pending' || s.status === 'Late')) return;
+      const rule = FMS_RULES.find(x => x.id === def.status.rule); if (!rule) return;
+      const at = rule.check(o, def.status.field);
+      if (at) { o.actuals = o.actuals || {}; o.actuals[def.id] = at; o.done_by = o.done_by || {}; o.done_by[def.id] = 'System'; changed = true; }
+    });
+    if (changed) { Store.put('orders', o); RES_CACHE.clear(); }
+  });
+}
+setInterval(() => { if (typeof ME !== 'undefined' && ME) fmsAutoRun(true); }, 60000);
 function undoStep(orderId, stepId) {
   const o = Store.get('orders', orderId); if (!o || !o.actuals || !o.actuals[stepId]) return;
   const r = resolveOrder(o);
@@ -314,6 +354,9 @@ function validateSpec(spec) {
       if (!tables[s.doer.table]) errors.push(at + ': doer table "' + s.doer.table + '" not found');
       if (!fieldKeys.has(s.doer.by)) errors.push(at + ': doer lookup field "' + s.doer.by + '" is not a field');
     }
+    if (s.doer && s.doer.type === 'field' && !fieldKeys.has(s.doer.field)) errors.push(at + ': doer field "' + s.doer.field + '" is not a field');
+    if (s.capture && !fieldKeys.has(s.capture.field)) errors.push(at + ': asks for field "' + s.capture.field + '" which is not a field');
+    if (s.status && s.status.type === 'auto') { const r = FMS_RULES.find(x => x.id === s.status.rule); if (!r) errors.push(at + ': auto-close rule missing'); else if (r.param && !fieldKeys.has(s.status.field)) errors.push(at + ': auto-close field missing'); }
     const trig = Array.isArray(s.trigger) ? s.trigger : [s.trigger];
     if (!trig[0]) errors.push(at + ': trigger missing');
     trig.forEach((t, j) => {
@@ -558,7 +601,7 @@ function setMain(html) {
   const old = $('#main'); const m = old.cloneNode(false); m.innerHTML = html;
   try { old.replaceWith(m); }
   catch (e) { const cur = document.getElementById('main'); if (cur && cur !== m) cur.replaceWith(m); }
-  SEG_HANDLER = null; applyPagination(m); return m;
+  SEG_HANDLER = null; applyPagination(m); try { fmsAutoRun(); } catch (e) { console.error(e); } return m;
 }
 
 /* ---- table pagination: applied to every .tbl-wrap table after render ---- */

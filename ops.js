@@ -7,9 +7,21 @@ function stepDoneBtn(o, s, def, spec) {
   return '<button class="btn sm primary" data-act="step-done" data-o="' + esc(o.id) + '" data-s="' + esc(s.id) + '">Done</button>';
 }
 ACTIONS['step-done'] = el => {
-  const tr = el.closest('tr'); const note = tr && tr.querySelector('input[data-note]');
-  markStepDone(el.dataset.o, el.dataset.s, note ? note.value.trim() : '');
-  route();
+  const tr = el.closest('tr'); const note = tr && tr.querySelector('input[data-note]'); const nv = note ? note.value.trim() : '';
+  const o = Store.get('orders', el.dataset.o); const r = o && resolveOrder(o); const def = r && r.spec.steps.find(x => x.id === el.dataset.s);
+  if (!def || !def.capture) { markStepDone(el.dataset.o, el.dataset.s, nv); route(); return; }
+  const f = (r.spec.fields || []).find(x => x.key === def.capture.field) || { label: def.capture.field, type: 'date' };
+  const old = $('#capDlg'); if (old) old.remove();
+  const d = document.createElement('div'); d.id = 'capDlg'; d.className = 'dlg-back';
+  d.innerHTML = '<div class="dlg"><div class="dlg-h">' + esc(o.no) + ' · ' + esc(def.name) + '</div><table class="jckv"><tr><td class="k">' + esc(f.label) + ' *</td><td class="v"><input id="capVal" type="' + (f.type === 'datetime' ? 'datetime-local' : f.type === 'date' ? 'date' : 'text') + '" value="' + esc((o.extra || {})[def.capture.field] || '') + '"></td></tr></table>' +
+    '<div class="dlg-f"><span id="capMsg" class="small late-txt"></span><span class="grow"></span><button class="btn" data-cap-x>Cancel</button><button class="btn primary" data-cap-ok>Done</button></div></div>';
+  document.body.appendChild(d); $('#capVal').focus();
+  d.addEventListener('click', ev => {
+    if (ev.target.closest('[data-cap-x]')) { d.remove(); return; }
+    if (!ev.target.closest('[data-cap-ok]')) return;
+    const v = $('#capVal').value.trim(); if (!v) { $('#capMsg').textContent = 'Enter ' + f.label + '.'; return; }
+    d.remove(); markStepDone(el.dataset.o, el.dataset.s, nv, v); route();
+  });
 };
 function dueToday(s) { const d = s.planned; return d && ymdOf(d) === todayYmd(); }
 

@@ -138,6 +138,7 @@
       const hit = Object.keys(table).find(k => k.trim().toLowerCase() === key);
       return hit ? table[hit] : (rule.default || null);
     }
+    if (rule.type === 'field') { const v = fields[rule.field]; return v != null && String(v).trim() ? String(v).trim().toUpperCase() : (rule.default || null); }
     if (rule.type === 'byCondition') {
       const r = (rule.rules || []).find(r => evalCondition(r.when, fields));
       return r ? r.name : (rule.default || null);
