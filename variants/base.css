@@ -243,3 +243,6 @@ td input.right, input.right { text-align: right; }
 .jcl, .jcr { display: flex; flex-direction: column; }
 .jcr > table { flex: 1; }
 .jckv { flex: 1; }
+.jckv input#jfJc { border: 0; background: transparent; font-weight: bold; width: 100%; height: 22px; padding: 0 2px; font-size: 12px; border-radius: 0; }
+.jckv input#jfJc:focus { background: #eef7f7; box-shadow: none; }
+.jcszt input#jfRem { width: 100%; text-align: left; font-weight: bold; background: transparent; }
