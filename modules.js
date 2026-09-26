@@ -141,11 +141,24 @@ const JC_EXTRA_CSS =
 function excelGrid(tbl, opts) {
   if (!tbl) return;
   tbl.addEventListener('keydown', e => {
-    if (e.key !== 'Enter' && e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
     const inp = e.target.closest('input'); if (!inp) return;
+    const key = e.key.toLowerCase();
     const tr = inp.closest('tr'); const rows = $$(opts.rowSel, tbl);
     const ri = rows.indexOf(tr); if (ri < 0) return;
     const ci = $$('input,select', tr).indexOf(inp);
+    if ((e.ctrlKey || e.metaKey) && key === 'd') {   // Excel fill-down: copy the cell above
+      e.preventDefault();
+      if (ri > 0) {
+        const src = $$('input,select', rows[ri - 1])[ci];
+        if (src) { inp.value = src.value; inp.dispatchEvent(new Event('input', { bubbles: true })); inp.dispatchEvent(new Event('change', { bubbles: true })); }
+      }
+      return;
+    }
+    if ((e.ctrlKey || e.metaKey) && key === 'c') {   // Ctrl+C with nothing selected copies the whole cell
+      if (inp.selectionStart === inp.selectionEnd) { e.preventDefault(); try { navigator.clipboard.writeText(inp.value); } catch (err) {} }
+      return;
+    }
+    if (e.key !== 'Enter' && e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
     e.preventDefault();
     if (e.key === 'ArrowUp') { if (ri > 0) { const t2 = $$('input,select', rows[ri - 1])[ci]; if (t2) t2.focus(); } return; }
     if (ri === rows.length - 1 && e.key === 'Enter') opts.addRow();
@@ -596,6 +609,7 @@ function jcFormWire() {
   });
   JCF = { photo: '', rem: '' };
   excelGrid($('#jfBom'), { rowSel: 'tr[data-bomrow]', addRow: () => $('#jfBom').insertAdjacentHTML('beforeend', jcfBomRow()), importText: jcfImportText });
+  m.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's' && $('#jfBom')) { e.preventDefault(); ACTIONS['jc-save'](); } });
   jcfRecalc();
 }
 function jcfFillFromOrder() {
@@ -1068,14 +1082,23 @@ VIEWS.bom = {
     if (!edit) { go('boms'); return; }
     const brands = Store.all('customers').map(c => c.name);
     const kvIn = (id, list, ph) => '<input id="' + id + '"' + (list ? ' list="' + list + '"' : '') + (ph ? ' placeholder="' + esc(ph) + '"' : '') + ' autocomplete="off">';
-    let h = subTitle('Development BOM') + '<div class="card"><div class="card-h"><b>New BOM</b></div><div class="card-b">' + dlMat('dlMatB') + dlVendor() +
-      '<datalist id="dlArtB">' + Store.all('items').map(i => '<option value="' + esc(i.code) + '">' + esc(i.name) + '</option>').join('') + '</datalist>' +
-      '<datalist id="dlBrandB">' + brands.map(x => '<option value="' + esc(x) + '">').join('') + '</datalist>' +
+    // punched-order lines that still need a BOM (a BOM for the same brand+article+style
+    // with the same colour — or blank colour = all colours — counts as made)
+    const pend = [];
+    Store.all('orders').forEach(o => (o.lines || []).forEach(l => {
+      const key = norm(o.customer_name + '|' + l.article + '|' + (l.style || '') + '|' + (l.colour || ''));
+      if (pend.some(p => p.key === key)) return;
+      const has = Store.all('boms').some(b2 => norm(b2.brand || '') === norm(o.customer_name) && norm(b2.article) === norm(l.article) &&
+        norm(b2.style || '') === norm(l.style || '') && (!String(b2.colour || '').trim() || norm(b2.colour) === norm(l.colour || '')));
+      if (!has) pend.push({ key, brand: o.customer_name, article: l.article, style: l.style || '', colour: l.colour || '', gender: l.gender || '', category: o.category || '', run: l.size_run || l.size || '', mould: o.tooling_no || '' });
+    }));
+    const pendBrands = Array.from(new Set(pend.map(p => p.brand)));
+    let h = subTitle('Development BOM') + '<div class="card"><div class="card-h"><b>New BOM</b><span class="muted small">' + pend.length + ' article(s) pending BOM</span></div><div class="card-b">' + dlMat('dlMatB') + dlVendor() +
       '<datalist id="dlCatJc2">' + ITEM_CATS.map(x => '<option>' + x + '</option>').join('') + '</datalist><datalist id="dlCatB">' + fieldOptions('category').map(x => '<option value="' + esc(x) + '">').join('') + '</datalist>' +
       '<div class="jcdoc"><div class="jcban">BILL OF MATERIALS</div><div class="jcmid">' +
       '<div class="jcl"><table class="jckv">' +
-      '<tr><td class="k">Brand *</td><td>' + kvIn('nbBrand', 'dlBrandB', 'Select brand…') + '</td></tr>' +
-      '<tr><td class="k">Article Name *</td><td>' + kvIn('nbArt', 'dlArtB', 'Select article…') + '</td></tr>' +
+      '<tr><td class="k">Brand *</td><td><select id="nbBrand"><option value="">Select brand…</option>' + pendBrands.map(x => '<option>' + esc(x) + '</option>').join('') + '</select></td></tr>' +
+      '<tr><td class="k">Article Name *</td><td><select id="nbArt" disabled><option value="">—</option></select></td></tr>' +
       '<tr><td class="k">Style Name</td><td>' + kvIn('nbStyle') + '</td></tr>' +
       '<tr><td class="k">Colour Wise</td><td>' + kvIn('nbCol', '', 'blank = all colours') + '</td></tr>' +
       '<tr><td class="k">Gender</td><td><select id="nbGen"><option value=""></option>' + GENDERS_().map(g => '<option>' + g + '</option>').join('') + '</select></td></tr>' +
@@ -1099,7 +1122,19 @@ VIEWS.bom = {
       if (e.target.dataset.nb === 'mat') { const mt = Store.all('materials').find(x => norm(x.name) === norm(e.target.value) || norm(x.code) === norm(e.target.value)); const tr = e.target.closest('tr'); if (mt) { e.target.value = mt.name; $('[data-nb-code]', tr).textContent = mt.code; $('[data-nb-uom]', tr).textContent = mt.uom; const pr = $('[data-nb="price"]', tr); if (!pr.value) pr.value = mt.price || ''; const c = $('[data-nb="cat"]', tr); if (!c.value) c.value = mt.group || ''; } bomRecalc(); }
       if (e.target.id === 'nbPhoto') readImg(e.target.files[0], src => { NBF.photo = src; $('#nbPhotoTag').innerHTML = '<img src="' + src + '">'; });
       if (e.target.id === 'nbCopy' && e.target.value) { const src = Store.get('boms', e.target.value); $$('#nbTable tr[data-bline]').forEach(tr => tr.remove()); src.lines.forEach(l => $('#nbTable').insertAdjacentHTML('beforeend', bomRow(l))); bomRecalc(); }
+      if (e.target.id === 'nbBrand') {
+        const sel = $('#nbArt'); const mine = pend.filter(p => p.brand === e.target.value);
+        sel.disabled = !mine.length;
+        sel.innerHTML = '<option value="">' + (mine.length ? 'Select article…' : 'All BOMs made for this brand') + '</option>' +
+          mine.map(p => '<option value="' + esc(p.article) + '" data-k="' + esc(p.key) + '">' + esc([p.article, p.style, p.colour, p.gender, p.category].filter(Boolean).join(' · ')) + '</option>').join('');
+        ['nbStyle', 'nbCol', 'nbCat', 'nbRun', 'nbMould'].forEach(id => { $('#' + id).value = ''; }); $('#nbGen').value = '';
+      }
+      if (e.target.id === 'nbArt') {
+        const opt = e.target.selectedOptions[0]; const p = pend.find(x => x.key === (opt ? opt.dataset.k : ''));
+        if (p) { $('#nbStyle').value = p.style; $('#nbCol').value = p.colour; $('#nbGen').value = p.gender; $('#nbCat').value = p.category; $('#nbRun').value = p.run; $('#nbMould').value = p.mould; }
+      }
     });
+    m.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); ACTIONS['bom-save'](); } });
     excelGrid($('#nbTable'), { rowSel: 'tr[data-bline]', addRow: () => $('#nbTable').insertAdjacentHTML('beforeend', bomRow()), importText: bomImportText });
     bomRecalc();
     $('#nbBrand').focus();
