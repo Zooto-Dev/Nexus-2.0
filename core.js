@@ -340,6 +340,7 @@ const NAV = [
   { v: 'home', l: 'Home', mod: 'dashboard' },
   { menu: 'Purchase', items: [
     { v: 'purchasedash', l: 'Purchase Dashboard', mod: 'purchase' },
+    { v: 'netreq', l: 'Net Requirement', mod: 'purchase' },
     { v: 'po', l: 'Purchase Order', mod: 'purchase' },
     { v: 'sourcing', l: 'Sourcing', mod: 'purchase' },
     { v: 'followup', l: 'Followup', mod: 'purchase' },
