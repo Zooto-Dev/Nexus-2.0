@@ -517,13 +517,13 @@ ACTIONS['po-save'] = () => {
     if (!ep || ep.approval !== 'Amend') { $('#npMsg').innerHTML = '<span class="late-txt">This PO is no longer open for amendment.</span>'; return; }
     Object.assign(ep, { date: $('#npDate').value || ep.date, expected: exp, remarks: $('#npRem').value.trim(), lines, approval: 'Pending' });
     ep.edit_log = (ep.edit_log || []).concat([{ by: ME.name, at: nowIso() }]);
-    Store.put('purchase_orders', ep); audit('po.amended', ep.no, 'resubmitted for approval');
+    Store.put('purchase_orders', ep); audit('po.amended', ep.no, 'resubmitted for approval'); waSend('po_submitted', ep.id);
     PO_UI.form = false; PO_UI.editId = null; flash(esc(ep.no) + ' updated and sent for approval.'); VIEWS.po.render(); return;
   }
   const dup = Store.all('purchase_orders').find(p => p._sig === sig && (Date.now() - new Date(p.at)) < 60000);
   if (dup) { $('#npMsg').innerHTML = '<span class="late-txt">An identical PO ' + esc(dup.no) + ' was just created (double-submit guard).</span>'; return; }
   const po = Store.put('purchase_orders', { id: uid(), no: fyNo('purchase_orders', 'PO', 3), date: $('#npDate').value || todayYmd(), vendor: vm.name, expected: exp, remarks: $('#npRem').value.trim(), lines, moq_log: moqLog, followups: [], approval: 'Pending', created_by: ME.name, created_by_id: ME.id, at: nowIso(), _sig: sig });
-  audit('po.create', po.no, ven + ' · ' + qtyFmt(lines.reduce((s, l) => s + l.qty, 0)) + ' qty');
+  audit('po.create', po.no, ven + ' · ' + qtyFmt(lines.reduce((s, l) => s + l.qty, 0)) + ' qty'); waSend('po_submitted', po.id);
   let mailNote = '';
   if (moqLog.length) {
     moqLog.forEach(x => audit('po.moq_override', po.no, x.material + ' net ' + qtyFmt(x.net) + ' → ' + qtyFmt(x.moq) + ' (+' + qtyFmt(x.extra) + ') · ' + x.reason));

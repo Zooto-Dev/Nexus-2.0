@@ -68,7 +68,7 @@ const PO_DOC_CSS = '.po2 table{width:auto;border:0;background:none;border-collap
   '.po2 .po2-items td{padding:6px 6px;height:34px;border-bottom:1px solid #e6eaec;vertical-align:middle}.po2-items img{height:30px;max-width:44px;object-fit:cover;border-radius:2px}' +
   '.po2 .po2-items .c{text-align:center}.po2 .po2-items .r{text-align:right;white-space:nowrap}.po2 .po2-items tfoot td{font-weight:700;border-bottom:0;border-top:1px solid #999;padding-top:8px}' +
   '.po2-words{font-weight:700;font-size:11.5px;margin:12px 0 10px}.po2-rem{font-size:10.5px;margin-bottom:8px}' +
-  '.po2-terms{border-left:10px solid #0e6a73;padding:4px 12px;font-size:10px}.po2-th{font-weight:700;font-size:11px;margin-bottom:4px}.po2-terms ol{margin:0;padding-left:16px}' +
+  '.po2 .po2-items td.po2-note{font-size:9.5px;max-width:220px;white-space:normal}.po2-terms{border-left:10px solid #0e6a73;padding:4px 12px;font-size:10px}.po2-th{font-weight:700;font-size:11px;margin-bottom:4px}.po2-terms ol{margin:0;padding-left:16px}' +
   '.po2-sign{display:flex;justify-content:space-between;margin-top:34px}.po2-sign .r{text-align:right}.po2-sl{font-weight:700;font-size:11px}.po2-sn{font-weight:700;font-size:10.5px;margin-top:18px;text-transform:uppercase}';
 (function () { const st = document.createElement('style'); st.textContent = PO_DOC_CSS; document.head.appendChild(st); })();
 ACTIONS['po-print'] = el => {
@@ -110,7 +110,7 @@ ACTIONS['pa-approve'] = el => {
   if (!canApprovePo(p)) { flash(poOwn(p) ? 'You raised this PO — someone else must approve it.' : 'Only Admin/Manager can approve POs.', 'err'); return; }
   p.approval = 'Approved'; p.approved_by = ME.name; p.approved_at = nowIso(); Store.put('purchase_orders', p);
   p.lines.forEach(l => { if (!l.jc_no) return; const j = jcBy(l.jc_no); if (!j) return; const jl = (j.lines || []).find(x => norm(x.material) === norm(l.material)); if (jl) { jl.po_raised = num(jl.po_raised) + num(l.qty); Store.put('job_cards', j); } });
-  audit('po.approve', p.no, p.vendor); flash(esc(p.no) + ' approved.'); PA_UI.view = null; VIEWS.poapproval.render();
+  audit('po.approve', p.no, p.vendor); flash(esc(p.no) + ' approved.'); waSend('po_approved', p.id); PA_UI.view = null; VIEWS.poapproval.render();
 };
 ACTIONS['pa-open'] = el => { PA_UI.id = el.dataset.id; PA_UI.act = el.dataset.a; VIEWS.poapproval.render(); };
 ACTIONS['pa-cancel'] = () => { PA_UI.id = null; PA_UI.act = null; VIEWS.poapproval.render(); };
@@ -268,7 +268,7 @@ ACTIONS['inw-save'] = () => {
   const grnNo = reserveGrnNo();
   const i = Store.put('inwards', { id: uid(), no: nextNo('inwards', 'INW'), grn_no: grnNo, at: nowIso(), date: todayYmd(), bill_type: U.bt, vendor: U.ven, po_no: U.po, bill_no: billNo, bill_date: F.bill_date, qty: num(F.qty),
     qc_no: String(F.qc_no || '').trim(), qc_report: U.qcDoc || '', photo: U.photo, remark: String(F.remark || '').trim(), status: 'Pending GRN', inv_status: '', qc: qcl, by: ME.name });
-  audit('inward.create', i.no, U.bt + ' · ' + U.ven + ' · ' + U.po + ' · ' + billNo + ' · ' + grnNo);
+  audit('inward.create', i.no, U.bt + ' · ' + U.ven + ' · ' + U.po + ' · ' + billNo + ' · ' + grnNo); waSend('gate_entry', i.id);
   Object.assign(U, { form: false, ven: '', po: '', f: {}, photo: '', qcDoc: '' });
   flash(esc(i.no) + ' saved — GRN No ' + esc(grnNo) + '. Invoice approval pending.'); VIEWS.inward.render();
 };
@@ -329,7 +329,7 @@ ACTIONS['ia-approve'] = el => {
   if (!notes.length) { flash('Add the GRN note: invoice item name and its item code.', 'err'); return; }
   if (bad) { flash('Every note row needs the invoice item name and the item code.', 'err'); return; }
   i.inv_status = 'Approved'; i.grn_notes = notes; i.inv_by = ME.name; i.inv_at = nowIso(); i.inv_hold_reason = '';
-  Store.put('inwards', i); audit('inward.invoice_approve', i.no, i.bill_no + ' · ' + notes.length + ' note(s)');
+  Store.put('inwards', i); audit('inward.invoice_approve', i.no, i.bill_no + ' · ' + notes.length + ' note(s)'); if ((i.qc || []).length) waSend('invoice_approved', i.id);
   IA_UI.view = null; IA_UI.notes = []; flash(esc(i.bill_no) + ' approved.' + ((i.qc || []).length ? ' QC check pending.' : ' Ready for GRN.')); VIEWS.invapproval.render();
 };
 ACTIONS['ia-confirm'] = el => {
@@ -371,7 +371,7 @@ ACTIONS['qc-set'] = el => {
   if (el.dataset.r === 'Match' && !QC_UI.ph[el.dataset.k]) { flash('Attach the material photo to pass QC.', 'err'); return; }
   q.result = el.dataset.r; q.photo = QC_UI.ph[el.dataset.k] || ''; q.by = ME.name; q.at = nowIso();
   Store.put('inwards', i); delete QC_UI.ph[el.dataset.k];
-  audit('inward.qc', i.no, q.material + ' · ' + q.result);
+  audit('inward.qc', i.no, q.material + ' · ' + q.result); if (q.result === 'Mismatch') waSend('qc_mismatch', i.id + '|' + q.material);
   flash(esc(q.material) + ': ' + (q.result === 'Match' ? 'QC passed.' : 'sent to ' + esc((q.merchants || []).join(', ') || 'merchant') + ' for approval.')); VIEWS.swatchmatch.render();
 };
 
@@ -540,6 +540,7 @@ ACTIONS['grn-save'] = () => {
   audit('grn.create', g.no, iw.no + ' · ' + p.no + ' · inv ' + iw.bill_no + ' · GRN ' + qtyFmt(calc.reduce((x, c) => x + c.grn, 0)) + (totRej ? ' / rej ' + qtyFmt(totRej) : '') + (totShort ? ' / short ' + qtyFmt(totShort) : '') + (totEx ? ' / excess ' + qtyFmt(totEx) : ''));
   Object.assign(U, { ven: '', po: '', inw: '', rows: [], why: '' });
   VIEWS.grn.render();
+  waSend(totEx > 0 ? 'excess_pending' : 'grn_final', g.id);
   if (totEx > 0) {
     const to = String(settings().alert_excess_email || '').trim();
     const body = 'GRN ' + g.no + ' · ' + p.vendor + ' · PO ' + p.no + ' · Invoice ' + iw.bill_no + '\n' + calc.filter(c => c.excess > 0).map(c => c.l.material + ' — ' + ((matBy(c.l.material) || {}).name || '') + ': PO pending ' + qtyFmt(c.pen) + ', invoice ' + qtyFmt(c.inv) + ', excess ' + qtyFmt(c.excess)).join('\n') + '\nGRN by ' + ME.name;
@@ -567,6 +568,7 @@ ACTIONS['ex-set'] = el => {
   l.excess_status = el.dataset.s; l.excess_by = ME.name; l.excess_at = nowIso(); Store.put('grns', g);
   audit('grn.excess_' + el.dataset.s.toLowerCase(), g.no, l.material + ' × ' + qtyFmt(l.excess));
   const done = !g.lines.some(x => x.excess_status === 'Pending');
+  if (!g.lines.some(x => x.excess_status === 'Pending' || x.excess_status === 'Amend')) waSend('grn_final', g.id);
   flash(esc(l.material) + ': excess ' + (el.dataset.s === 'Approved' ? 'accepted — added to stock.' : 'rejected — moved to RTV stock.') + (done ? ' GRN ' + esc(g.no) + ' report is ready.' : ''));
   VIEWS.excessapproval.render();
 };
@@ -587,7 +589,8 @@ ACTIONS['ex-fix'] = el => {
     const ex = Math.max(0, num(v.excess)); if (ex > num(l.excess) + 1e-9) return 'Excess can only be reduced here (it was ' + qtyFmt(l.excess) + ').';
     l.recv_qty = num(l.recv_qty != null ? l.recv_qty : num(l.accepted) + num(l.rejected) + num(l.excess)) - (num(l.excess) - ex); l.excess = ex;
     l.excess_status = ex > 0 ? 'Pending' : ''; l.amend_log = l.amend_log.concat([{ at: nowIso(), by: ME.name, remark: v.note, stage: 'Corrected' }]);
-    Store.put('grns', g); audit('grn.excess_corrected', g.no, l.material + ' · excess ' + qtyFmt(ex) + ' · ' + v.note); flash('Corrected' + (ex > 0 ? ' and sent back for excess approval.' : '.')); VIEWS.grnlist.render();
+    Store.put('grns', g); audit('grn.excess_corrected', g.no, l.material + ' · excess ' + qtyFmt(ex) + ' · ' + v.note);
+    if (g.lines.some(x => x.excess_status === 'Pending')) waSend('excess_pending', g.id); else if (!g.lines.some(x => x.excess_status === 'Amend')) waSend('grn_final', g.id); flash('Corrected' + (ex > 0 ? ' and sent back for excess approval.' : '.')); VIEWS.grnlist.render();
   });
 };
 
@@ -645,23 +648,31 @@ VIEWS.activity = {
 ACTIONS['act-csv'] = () => downloadCsv('activity-' + todayYmd() + '.csv', [['Date & Time', 'Activity', 'Reference', 'Vendor', 'Detail', 'Result', 'Done By']].concat((VIEWS.activity.rows || []).map(r => [fmtDT(r.at), r.act, r.ref, r.party, r.detail, r.result, r.by])));
 
 /* ================= GRN document (format 1: same family as the PO) ================= */
+function grnRemark(l, g) {
+  const u = l.uom || (matBy(l.material) || {}).uom || '';
+  const r = [num(l.rejected) > 0 ? qtyFmt(l.rejected) + ' ' + u + ' rejected' + (g.reject_reason ? ' (' + g.reject_reason + ')' : '') + '.' : '', num(l.short) > 0 ? qtyFmt(l.short) + ' short delivered by vendor.' : '', num(l.excess) > 0 ? qtyFmt(l.excess) + ' excess received' + (l.excess_status ? ' — ' + (l.excess_status === 'Rejected' ? 'rejected (RTV)' : l.excess_status.toLowerCase()) : '') + '.' : ''].filter(Boolean).join(' ');
+  return r || 'All received in good condition. Zero rejection.';
+}
 function grnDocHtml(g) {
   const v = vendorBy(g.vendor) || {}; const s = settings(); const e = x => esc(x == null ? '' : String(x));
   const t = k => g.lines.reduce((a, l) => a + num(l[k] || 0), 0);
   const rec = l => l.recv_qty != null ? num(l.recv_qty) : num(l.accepted) + num(l.rejected);
   const rows = g.lines.map((l, i) => { const m = matBy(l.material) || {};
-    return '<tr><td class="c">' + (i + 1) + '</td><td>' + e(l.material) + '</td><td>' + e(m.name || '') + '</td><td class="c">' + e(l.uom || m.uom || '') + '</td><td class="r">' + qtyFmt(l.po_pending || 0) + '</td><td class="r">' + qtyFmt(l.inv_qty || 0) + '</td><td class="r">' + qtyFmt(rec(l)) + '</td><td class="r">' + qtyFmt(l.short || 0) + '</td><td class="r">' + qtyFmt(l.rejected || 0) + '</td><td class="r"><b>' + qtyFmt(l.accepted || 0) + '</b></td><td class="r">' + qtyFmt(l.excess || 0) + '</td><td>' + e(num(l.excess) > 0 ? (l.excess_status === 'Rejected' ? 'Rejected (RTV)' : l.excess_status || '') : '') + '</td><td>' + e(l.rack || '') + '</td></tr>'; }).join('');
+    return '<tr><td class="c">' + (i + 1) + '</td><td>' + e(l.material) + '</td><td>' + e(m.name || '') + '</td><td class="c">' + e(l.uom || m.uom || '') + '</td><td class="r">' + qtyFmt(l.po_pending || 0) + '</td><td class="r">' + qtyFmt(l.inv_qty || 0) + '</td><td class="r">' + qtyFmt(rec(l)) + '</td><td class="r">' + qtyFmt(l.short || 0) + '</td><td class="r">' + qtyFmt(l.rejected || 0) + '</td><td class="r"><b>' + qtyFmt(l.accepted || 0) + '</b></td><td class="r">' + qtyFmt(l.excess || 0) + '</td><td>' + e(num(l.excess) > 0 ? (l.excess_status === 'Rejected' ? 'Rejected (RTV)' : l.excess_status || '') : '') + '</td><td>' + e(l.rack || '') + '</td><td class="po2-note">' + e(grnRemark(l, g)) + '</td></tr>'; }).join('');
   const iw = Store.get('inwards', g.inward_id) || {};
+  const sh = t('short'), rj = t('rejected'), ex = t('excess');
+  const acts = [sh > 0 ? 'Debit Note to be raised for ' + qtyFmt(sh) + ' short supply.' : '', rj > 0 ? 'Debit Note to be raised for ' + qtyFmt(rj) + ' rejected qty. Vendor informed to collect rejected material within 7 days.' : '', ...g.lines.filter(l => num(l.excess) > 0).map(l => l.excess_status === 'Approved' ? 'Excess ' + qtyFmt(l.excess) + ' of ' + l.material + ' accepted by CEO.' : l.excess_status === 'Rejected' ? 'Excess ' + qtyFmt(l.excess) + ' of ' + l.material + ' rejected by CEO — return to vendor (RTV).' : 'Excess ' + qtyFmt(l.excess) + ' of ' + l.material + ' requires CEO approval before acceptance.')].filter(Boolean);
+  const exBy = (g.lines.find(l => num(l.excess) > 0 && l.excess_by) || {}).excess_by || '';
   return '<div class="po2">' +
     '<div class="po2-co"><div class="po2-name">' + e(s.company || '') + '</div><div class="po2-sub">' + e(s.address || '') + '</div><div class="po2-sub">' + [s.gstin ? 'GSTIN: ' + e(s.gstin) : '', s.email ? 'Email: ' + e(s.email) : ''].filter(Boolean).join(' | ') + '</div></div>' +
     '<div class="po2-title">GOODS RECEIPT NOTE</div>' +
     '<div class="po2-parties"><table class="po2-kv"><tr><th>Supplier:</th><td>' + e(g.vendor) + '</td></tr><tr><th>Address:</th><td>' + e([v.address, v.state].filter(Boolean).join(', ')) + '</td></tr><tr><th>GSTIN:</th><td>' + e(v.gstin || '') + '</td></tr></table>' +
-    '<table class="po2-kv po2-right"><tr><th>GRN No:</th><td>' + e(g.no) + '</td></tr><tr><th>GRN Date:</th><td>' + e(fmtD(g.date)) + '</td></tr><tr><th>PO No:</th><td>' + e(g.po_no) + '</td></tr><tr><th>Invoice No:</th><td>' + e(g.invoice || '') + '</td></tr><tr><th>Invoice Date:</th><td>' + e(fmtD(g.invoice_date || iw.bill_date)) + '</td></tr><tr><th>Gate Entry:</th><td>' + e(g.inward_no || '') + '</td></tr></table></div>' +
-    '<table class="po2-items"><thead><tr><th class="c">S No</th><th>Item Code</th><th>Description</th><th class="c">UOM</th><th class="r">PO Pending</th><th class="r">Invoice Qty</th><th class="r">Received</th><th class="r">Short</th><th class="r">Reject</th><th class="r">GRN Qty</th><th class="r">Excess</th><th>Excess Status</th><th>Rack</th></tr></thead><tbody>' + rows + '</tbody>' +
-    '<tfoot><tr><td colspan="4" class="r">Total:</td><td class="r">' + qtyFmt(t('po_pending')) + '</td><td class="r">' + qtyFmt(t('inv_qty')) + '</td><td class="r">' + qtyFmt(g.lines.reduce((a, l) => a + rec(l), 0)) + '</td><td class="r">' + qtyFmt(t('short')) + '</td><td class="r">' + qtyFmt(t('rejected')) + '</td><td class="r">' + qtyFmt(t('accepted')) + '</td><td class="r">' + qtyFmt(t('excess')) + '</td><td></td><td></td></tr></tfoot></table>' +
+    '<table class="po2-kv po2-right"><tr><th>GRN No:</th><td>' + e(g.no) + '</td></tr><tr><th>GRN Date &amp; Time:</th><td>' + e(fmtDT(g.at || g.date)) + '</td></tr><tr><th>PO No:</th><td>' + e(g.po_no) + '</td></tr><tr><th>Invoice No:</th><td>' + e(g.invoice || '') + '</td></tr><tr><th>Invoice Date:</th><td>' + e(fmtD(g.invoice_date || iw.bill_date)) + '</td></tr><tr><th>Gate Entry:</th><td>' + e(g.inward_no || '') + '</td></tr></table></div>' +
+    '<table class="po2-items"><thead><tr><th class="c">S No</th><th>Item Code</th><th>Description</th><th class="c">UOM</th><th class="r">PO Pending</th><th class="r">Invoice Qty</th><th class="r">Received</th><th class="r">Short</th><th class="r">Reject</th><th class="r">GRN Qty</th><th class="r">Excess</th><th>Excess Status</th><th>Rack</th><th>Remarks</th></tr></thead><tbody>' + rows + '</tbody>' +
+    '<tfoot><tr><td colspan="4" class="r">Total:</td><td class="r">' + qtyFmt(t('po_pending')) + '</td><td class="r">' + qtyFmt(t('inv_qty')) + '</td><td class="r">' + qtyFmt(g.lines.reduce((a, l) => a + rec(l), 0)) + '</td><td class="r">' + qtyFmt(t('short')) + '</td><td class="r">' + qtyFmt(t('rejected')) + '</td><td class="r">' + qtyFmt(t('accepted')) + '</td><td class="r">' + qtyFmt(t('excess')) + '</td><td></td><td></td><td></td></tr></tfoot></table>' +
     (g.reject_reason ? '<div class="po2-rem"><b>Reject reason:</b> ' + e(g.reject_reason) + '</div>' : '') +
-    '<div class="po2-terms"><div class="po2-th">Stock posted:</div>GRN Qty to stock · Reject to rejection stock · Rejected excess to RTV stock</div>' +
-    '<div class="po2-sign"><div><div class="po2-sl">Received By:</div><div class="po2-sn">' + e(g.by || '') + '</div></div><div style="text-align:center"><div class="po2-sl">Store Incharge:</div><div class="po2-sn">&nbsp;</div></div><div class="r"><div class="po2-sl">Approved By:</div><div class="po2-sn">&nbsp;</div></div></div>' +
+    '<div class="po2-terms"><div class="po2-th">Non-Conformance / Action Remark (For Shortage &amp; Rejection):</div>' + (acts.length ? '<ol>' + acts.map(x => '<li>' + e(x) + '</li>').join('') + '</ol>' : 'No non-conformance. All items received as per PO.') + '</div>' +
+    '<div class="po2-sign"><div><div class="po2-sl">Inwarding:</div><div class="po2-sn">' + e(iw.by || '') + '</div></div><div style="text-align:center"><div class="po2-sl">Store Keeper (GRN):</div><div class="po2-sn">' + e(g.by || '') + '</div></div><div class="r"><div class="po2-sl">CEO Approval (Excess Qty):</div><div class="po2-sn">' + (ex > 0 ? e(exBy) : '&nbsp;') + '</div></div></div>' +
     '</div>';
 }
 ACTIONS['print-grn'] = el => {
