@@ -137,13 +137,13 @@ const desigList = dept => ((orgList().find(o => o.dept === dept) || {}).desigs |
 VIEWS.users = {
   mod: 'users', render() {
     const edit = can('users', 'edit'); const q = norm(US_UI.q);
-    const rows = Store.all('users').filter(u => !q || norm([u.name, u.email, u.department, u.designation, u.mobile, roleName(u.role_id)].join(' ')).includes(q)).sort((a, b) => String(a.name).localeCompare(String(b.name)));
+    const rows = Store.all('users').filter(u => !q || norm([u.name, u.doer, u.email, u.department, u.designation, u.mobile, roleName(u.role_id)].join(' ')).includes(q)).sort((a, b) => String(a.name).localeCompare(String(b.name)));
     const pw = u => { const p = usPwd(u); if (!p) return '<span class="muted">—</span>'; return '<span class="mono" data-pw="' + esc(u.id) + '">••••••</span> <button class="btn ghost sm" data-act="us-eye" data-id="' + esc(u.id) + '" title="Show / hide">👁</button>'; };
     let h = '<div class="toolbar"><input id="usQ" placeholder="Search…" value="' + esc(US_UI.q) + '"><span class="muted small">' + rows.length + ' user(s)</span><span class="grow"></span>' +
       (edit && CLOUD ? '<button class="btn" data-act="us-sync">Create logins</button>' : '') + (edit ? '<button class="btn primary" data-act="us-new">+ New user</button>' : '') + '</div>';
-    h += '<div class="tbl-wrap"><table class="bomflat"><tr><th>Name</th><th>Email (login)</th><th>Department</th><th>Designation</th><th>Role</th><th>Password</th><th>Mobile</th><th>Status</th><th></th></tr>' +
-      (rows.length ? rows.map(u => '<tr><td>' + esc(u.name) + '</td><td>' + esc(u.email || '') + '</td><td>' + esc(u.department || '') + '</td><td>' + esc(u.designation || '') + '</td><td>' + esc(roleName(u.role_id)) + '</td><td class="nowrap">' + pw(u) + '</td><td>' + esc(u.mobile || '') + '</td><td>' + (u.active === false ? '<span class="muted">Inactive</span>' : 'Active') + '</td><td class="right">' +
-        (edit && usCanTouch(u) ? '<button class="btn sm ghost" data-act="us-edit" data-id="' + esc(u.id) + '">Edit</button>' : '') + '</td></tr>').join('') : '<tr><td colspan="9" class="empty">No users</td></tr>') + '</table></div>';
+    h += '<div class="tbl-wrap"><table class="bomflat"><tr><th>Name</th><th>Doer name (FMS)</th><th>Email (login)</th><th>Department</th><th>Designation</th><th>Role</th><th>Password</th><th>Mobile</th><th>Status</th><th></th></tr>' +
+      (rows.length ? rows.map(u => '<tr><td>' + esc(u.name) + '</td><td>' + esc(u.doer || '') + '</td><td>' + esc(u.email || '') + '</td><td>' + esc(u.department || '') + '</td><td>' + esc(u.designation || '') + '</td><td>' + esc(roleName(u.role_id)) + '</td><td class="nowrap">' + pw(u) + '</td><td>' + esc(u.mobile || '') + '</td><td>' + (u.active === false ? '<span class="muted">Inactive</span>' : 'Active') + '</td><td class="right">' +
+        (edit && usCanTouch(u) ? '<button class="btn sm ghost" data-act="us-edit" data-id="' + esc(u.id) + '">Edit</button>' : '') + '</td></tr>').join('') : '<tr><td colspan="10" class="empty">No users</td></tr>') + '</table></div>';
     setMain(h);
     $('#usQ').addEventListener('input', e => { US_UI.q = e.target.value; clearTimeout(US_UI.t); US_UI.t = setTimeout(() => { VIEWS.users.render(); const i = $('#usQ'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }, 250); });
     if (CLOUD && !US_UI.loaded) usLoadSecrets();
