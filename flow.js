@@ -217,6 +217,9 @@ VIEWS.inward = {
       h += '<div class="card"><div class="card-b"><div class="inwform">' + kvTable(left) + kvTable(right) + '</div></div>' +
         '<div class="card-f"><button class="btn primary" data-act="inw-save">Save</button><span id="niMsg" class="small"></span></div></div>';
     }
+    const am = Store.all('inwards').filter(i => i.inv_status === 'Amend');
+    if (am.length) h += '<h2>Sent back for amendment</h2><div class="tbl-wrap"><table class="bomflat"><tr><th>Gate Entry</th><th>Vendor</th><th>PO Number</th><th>Invoice No</th><th>Invoice Date</th><th class="num">Invoice Qty</th><th>Reason</th><th>Sent By</th><th>Sent At</th><th></th></tr>' +
+      am.map(i => { const a = (i.amend_log || []).slice(-1)[0] || {}; return '<tr><td><b>' + esc(i.no) + '</b></td><td>' + esc(i.vendor) + '</td><td>' + esc(i.po_no) + '</td><td>' + esc(i.bill_no) + '</td><td>' + fmtD(i.bill_date) + '</td><td class="num">' + qtyFmt(i.qty) + '</td><td>' + esc(a.remark || '') + '</td><td>' + esc(a.by || '') + '</td><td class="nowrap">' + fmtDT(a.at) + '</td><td class="right">' + (edit ? '<button class="btn sm primary" data-act="inw-fix" data-id="' + esc(i.id) + '">Correct &amp; resend</button>' : '') + '</td></tr>'; }).join('') + '</table></div>';
     const rows = Store.all('inwards').slice().sort((a, b) => (b.at || b.date || '') < (a.at || a.date || '') ? -1 : 1);
     h += '<h2>Previous gate entry logs</h2><div class="tbl-wrap"><table><tr><th>Timestamp</th><th>Bill Type</th><th>Vendor</th><th>PO Number</th><th>Invoice No</th><th>Invoice Date</th><th class="num">Aging (Days)</th><th class="num">Invoice Qty</th><th>Photo</th><th>Remark</th><th>GRN No</th><th>Stage</th></tr>' +
       (rows.length ? rows.map(i => { const ts = i.at || i.date; return '<tr><td>' + fmtDT(ts) + '</td><td>' + esc(i.bill_type || 'Invoice') + '</td><td>' + esc(i.vendor) + '</td><td>' + esc(i.po_no || '') + '</td><td>' + esc(i.bill_no || '') + '</td><td>' + fmtD(i.bill_date) + '</td><td class="num">' + Math.max(0, Math.floor((Date.now() - new Date(ts)) / 86400000)) + '</td><td class="num">' + qtyFmt(i.qty) + '</td><td>' + photoThumb(i.photo) + '</td><td>' + esc(i.remark || '') + '</td><td>' + esc(i.grn_no || '') + '</td><td>' + esc(inwardStage(i)) + '</td></tr>'; }).join('')
@@ -232,6 +235,15 @@ VIEWS.inward = {
     });
     m.addEventListener('input', e => { if (e.target.dataset.f) F[e.target.dataset.f] = e.target.value; });
   }
+};
+ACTIONS['inw-fix'] = el => {
+  if (!requirePerm('store', 'edit')) return;
+  const i = Store.get('inwards', el.dataset.id); if (!i || i.inv_status !== 'Amend') return;
+  formDialog('Correct ' + i.no, [{ k: 'bill_no', l: (i.bill_type || 'Invoice') + ' No', value: i.bill_no, req: true }, { k: 'bill_date', l: (i.bill_type || 'Invoice') + ' Date', type: 'date', value: i.bill_date, req: true }, { k: 'qty', l: 'Invoice Qty', type: 'number', value: i.qty, req: true }, { k: 'remark', l: 'Remark', value: i.remark }, { k: 'note', l: 'What was corrected', type: 'textarea', req: true }], 'Resend for approval', v => {
+    Object.assign(i, { bill_no: v.bill_no, bill_date: v.bill_date, qty: v.qty, remark: v.remark, inv_status: '' });
+    i.amend_log = (i.amend_log || []).concat([{ at: nowIso(), by: ME.name, remark: v.note, stage: 'Corrected' }]);
+    Store.put('inwards', i); audit('inward.corrected', i.no, v.note); flash(esc(i.no) + ' corrected and sent back for invoice approval.'); VIEWS.inward.render();
+  });
 };
 ACTIONS['inw-new'] = () => { Object.assign(INW_UI, { form: !INW_UI.form, ven: '', po: '', f: {}, photo: '', qcDoc: '' }); VIEWS.inward.render(); };
 ACTIONS['inw-save'] = () => {
@@ -266,7 +278,7 @@ const IA_UI = { view: null, act: null, notes: [] };
 VIEWS.invapproval = {
   mod: 'purchase', render() {
     const edit = can('purchase', 'edit');
-    const list = Store.all('inwards').filter(i => i.status === 'Pending GRN' && i.inv_status !== 'Approved' && i.inv_status !== 'Rejected').sort((a, b) => (a.at || '') < (b.at || '') ? -1 : 1);
+    const list = Store.all('inwards').filter(i => i.status === 'Pending GRN' && !['Approved', 'Rejected', 'Amend'].includes(i.inv_status)).sort((a, b) => (a.at || '') < (b.at || '') ? -1 : 1);
     const i = IA_UI.view ? list.find(x => x.id === IA_UI.view) : null;
     if (!i) {
       IA_UI.view = null;
@@ -280,7 +292,7 @@ VIEWS.invapproval = {
     if (!IA_UI.notes.length) IA_UI.notes = (i.grn_notes || []).length ? i.grn_notes.map(x => Object.assign({}, x)) : [{ inv_item: '', code: '', note: '' }];
     let h = '<div class="toolbar"><button class="btn" data-act="ia-back">‹ Back</button><span class="grow"></span>';
     if (edit && IA_UI.act) h += '<input id="iaRem" style="min-width:320px" placeholder="' + (IA_UI.act === 'hold' ? 'Reason for hold' : 'Reason for rejection') + '"><button class="btn ' + (IA_UI.act === 'hold' ? 'primary' : 'danger') + '" data-act="ia-confirm" data-id="' + esc(i.id) + '">' + (IA_UI.act === 'hold' ? 'Put on Hold' : 'Reject Invoice') + '</button><button class="btn" data-act="ia-cancel">Cancel</button>';
-    else if (edit) h += '<button class="btn primary" data-act="ia-approve" data-id="' + esc(i.id) + '">Approve</button><button class="btn" data-act="ia-open" data-a="hold">Hold</button><button class="btn danger" data-act="ia-open" data-a="reject">Reject</button>';
+    else if (edit) h += '<button class="btn primary" data-act="ia-approve" data-id="' + esc(i.id) + '">Approve</button><button class="btn" data-act="ia-amend" data-id="' + esc(i.id) + '">Amend</button><button class="btn" data-act="ia-open" data-a="hold">Hold</button><button class="btn danger" data-act="ia-open" data-a="reject">Reject</button>';
     h += '</div>';
     h += '<div class="grid2"><div>' + kvTable([['Gate Entry', esc(i.no)], ['GRN No', esc(i.grn_no || '')], ['Bill Type', esc(i.bill_type || 'Invoice')], ['Vendor', '<b>' + esc(i.vendor) + '</b>'], ['PO Number', esc(i.po_no)], ['Invoice No', esc(i.bill_no)], ['Invoice Date', fmtD(i.bill_date)], ['Invoice Qty', qtyFmt(i.qty)], ['Inwarding', fmtDT(i.at)], ['Remark', esc(i.remark || '')]].concat(i.inv_status === 'Hold' ? [['Hold Reason', esc(i.inv_hold_reason || '')]] : [])) + '</div>' +
       '<div class="ia-photo">' + (i.photo ? '<img src="' + i.photo + '" data-act="img-view" data-src="' + esc(i.photo) + '">' : '') + '</div></div>';
@@ -294,6 +306,14 @@ VIEWS.invapproval = {
     m.addEventListener('change', e => { const tr = e.target.closest('tr[data-ian]'); if (tr && e.target.dataset.ia === 'code') { IA_UI.notes[+tr.dataset.ian].code = e.target.value; VIEWS.invapproval.render(); } });
     const r = $('#iaRem'); if (r) r.focus();
   }
+};
+ACTIONS['ia-amend'] = el => {
+  if (!requirePerm('purchase', 'edit')) return;
+  const i = Store.get('inwards', el.dataset.id); if (!i) return;
+  reasonDialog('Send ' + (i.bill_no || i.no) + ' back to Store for correction', 'Send for amendment', why => {
+    i.inv_status = 'Amend'; i.amend_log = (i.amend_log || []).concat([{ at: nowIso(), by: ME.name, remark: why, stage: 'Invoice Approval' }]);
+    Store.put('inwards', i); audit('inward.invoice_amend', i.no, why); IA_UI.view = null; flash(esc(i.bill_no) + ' sent back to Store for amendment.'); VIEWS.invapproval.render();
+  });
 };
 ACTIONS['ia-view'] = el => { IA_UI.view = el.dataset.id; IA_UI.act = null; IA_UI.notes = []; VIEWS.invapproval.render(); };
 ACTIONS['ia-back'] = () => { IA_UI.view = null; IA_UI.act = null; IA_UI.notes = []; VIEWS.invapproval.render(); };
@@ -330,9 +350,9 @@ VIEWS.swatchmatch = {
     const pend = []; const done = [];
     Store.all('inwards').filter(invApproved).forEach(i => (i.qc || []).forEach(q => (q.result ? done : pend).push({ i, q })));
     Store.all('inwards').filter(i => i.status === 'GRN Done').forEach(i => (i.qc || []).forEach(q => { if (q.result) done.push({ i, q }); }));
-    let h = '<div class="tbl-wrap"><table><tr><th>Inward</th><th>Timestamp</th><th>Vendor</th><th>PO</th><th>Item Code</th><th>Item Name</th><th>Category</th><th>Brand</th><th>Material Photo</th>' + (edit ? '<th></th>' : '') + '</tr>' +
+    let h = '<div class="tbl-wrap"><table><tr><th>Inward</th><th>Timestamp</th><th>Vendor</th><th>PO</th><th>Item Code</th><th>Item Name</th><th>Category</th><th>Brand</th><th>Amendment Note</th><th>Material Photo</th>' + (edit ? '<th></th>' : '') + '</tr>' +
       (pend.length ? pend.map(({ i, q }) => { const k = i.id + '|' + q.material; const m = matBy(q.material) || {};
-        return '<tr><td><b>' + esc(i.no) + '</b></td><td>' + fmtDT(i.at || i.date) + '</td><td>' + esc(i.vendor) + '</td><td>' + esc(i.po_no) + '</td><td>' + esc(q.material) + '</td><td>' + esc(m.name || '') + '</td><td>' + esc(q.category) + '</td><td>' + esc(q.brands.join(', ')) + '</td>' +
+        return '<tr><td><b>' + esc(i.no) + '</b></td><td>' + fmtDT(i.at || i.date) + '</td><td>' + esc(i.vendor) + '</td><td>' + esc(i.po_no) + '</td><td>' + esc(q.material) + '</td><td>' + esc(m.name || '') + '</td><td>' + esc(q.category) + '</td><td>' + esc(q.brands.join(', ')) + '</td><td>' + esc(q.qc_note || '') + '</td>' +
           '<td>' + (edit ? attachBox('accept="image/*" data-qcf="' + esc(k) + '"', QC_UI.ph[k], 'Attach photo') : '') + '</td>' +
           (edit ? '<td class="right"><button class="btn sm primary" data-act="qc-set" data-k="' + esc(k) + '" data-r="Match">Match</button> <button class="btn sm danger" data-act="qc-set" data-k="' + esc(k) + '" data-r="Mismatch">Mismatch</button></td>' : '') + '</tr>'; }).join('')
         : '<tr><td colspan="10" class="empty">No items waiting for QC</td></tr>') + '</table></div>';
@@ -371,13 +391,13 @@ VIEWS.swatch = {
         return '<tr><td><b>' + esc(i.no) + '</b></td><td>' + esc(i.vendor) + '</td><td>' + esc(i.po_no) + '</td><td>' + esc(q.material) + '</td><td>' + esc((matBy(q.material) || {}).name || '') + '</td><td>' + esc(q.brands.join(', ')) + '</td><td>' + esc((q.merchants || []).join(', ')) + '</td><td>' + esc(q.by || '') + '</td>' +
           '<td>' + (edit ? attachBox('accept="image/*" data-swf="' + esc(k) + '"', SW_UI.ph[k], 'Attach approval card') : '') + '</td>' +
           '<td>' + (edit ? '<input data-swn="' + esc(k) + '">' : '') + '</td>' +
-          (edit ? '<td class="right"><button class="btn sm primary" data-act="qcm-set" data-k="' + esc(k) + '" data-s="Approved">Approve</button> <button class="btn sm danger" data-act="qcm-set" data-k="' + esc(k) + '" data-s="Rejected">Reject</button></td>' : '') + '</tr>'; }).join('')
+          (edit ? '<td class="right"><button class="btn sm primary" data-act="qcm-set" data-k="' + esc(k) + '" data-s="Approved">Approve</button> <button class="btn sm" data-act="qcm-amend" data-k="' + esc(k) + '">Amend</button> <button class="btn sm danger" data-act="qcm-set" data-k="' + esc(k) + '" data-s="Rejected">Reject</button></td>' : '') + '</tr>'; }).join('')
         : '<tr><td colspan="11" class="empty">Nothing waiting for you</td></tr>') + '</table></div>';
-    const rows = Store.all('job_cards').filter(j => j.swatch_status === 'Pending' || j.swatch_status === 'Rejected');
+    const rows = Store.all('job_cards').filter(j => ['Pending', 'Rejected', 'Amend'].includes(j.swatch_status));
     h += '<h2>Job card swatch</h2><div class="tbl-wrap"><table><tr><th>JC No</th><th>Brand</th><th>Article</th><th>Colour</th><th class="num">Qty</th><th>Status</th><th>Note</th>' + (edit ? '<th></th>' : '') + '</tr>' +
       (rows.length ? rows.map(j => '<tr><td><b>' + esc(j.no) + '</b></td><td>' + esc(j.brand) + '</td><td>' + esc(j.article) + '</td><td>' + esc(j.colour) + '</td><td class="num">' + qtyFmt(j.qty) + '</td><td><span class="st ' + (j.swatch_status === 'Rejected' ? 'Late' : 'Pending') + '">' + esc(j.swatch_status) + '</span></td>' +
         '<td>' + (edit ? '<input data-sw-note value="' + esc(j.swatch_note || '') + '">' : esc(j.swatch_note || '')) + '</td>' +
-        (edit ? '<td class="right"><button class="btn sm primary" data-act="sw-set" data-id="' + esc(j.id) + '" data-s="Approved">Approve</button> <button class="btn sm danger" data-act="sw-set" data-id="' + esc(j.id) + '" data-s="Rejected">Reject</button></td>' : '') + '</tr>').join('') : '<tr><td colspan="8" class="empty">No swatches pending</td></tr>') + '</table></div>';
+        (edit ? '<td class="right"><button class="btn sm primary" data-act="sw-set" data-id="' + esc(j.id) + '" data-s="Approved">Approve</button> <button class="btn sm" data-act="sw-set" data-id="' + esc(j.id) + '" data-s="Amend">Amend</button> <button class="btn sm danger" data-act="sw-set" data-id="' + esc(j.id) + '" data-s="Rejected">Reject</button></td>' : '') + '</tr>').join('') : '<tr><td colspan="8" class="empty">No swatches pending</td></tr>') + '</table></div>';
     const m = setMain(h);
     m.addEventListener('change', e => { const k = e.target.dataset.swf; if (k) readImg(e.target.files[0], src => { SW_UI.ph[k] = src; VIEWS.swatch.render(); }); });
   }
@@ -391,9 +411,20 @@ ACTIONS['qcm-set'] = el => {
   audit('inward.qc_merchant', i.no, q.material + ' · ' + q.m_status + (q.m_note ? ' · ' + q.m_note : ''));
   flash(esc(q.material) + ' ' + q.m_status.toLowerCase() + (q.m_status === 'Rejected' ? ' — it will not be taken in GRN.' : '.')); VIEWS.swatch.render();
 };
+ACTIONS['qcm-amend'] = el => {
+  if (!requirePerm('merchant', 'edit')) return;
+  const k = el.dataset.k; const { i, q } = qcFind(k); if (!q || q.m_status) return;
+  reasonDialog('Send ' + q.material + ' back to QC', 'Send for amendment', why => {
+    q.amend_log = (q.amend_log || []).concat([{ at: nowIso(), by: ME.name, remark: why, stage: 'Swatch Approval', result: q.result }]);
+    q.result = ''; q.photo = ''; q.qc_note = why; Store.put('inwards', i); audit('inward.swatch_amend', i.no, q.material + ' · ' + why);
+    flash(esc(q.material) + ' sent back to QC for a re-check.'); VIEWS.swatch.render();
+  });
+};
 ACTIONS['sw-set'] = el => {
   const j = Store.get('job_cards', el.dataset.id); const tr = el.closest('tr');
-  j.swatch_status = el.dataset.s; j.swatch_note = $('[data-sw-note]', tr).value.trim(); j.swatch_by = ME.name;
+  const note = $('[data-sw-note]', tr).value.trim();
+  if (el.dataset.s !== 'Approved' && !note) { flash('Write the reason in Note.', 'err'); return; }
+  j.swatch_status = el.dataset.s; j.swatch_note = note; j.swatch_by = ME.name; j.swatch_at = nowIso();
   Store.put('job_cards', j); audit('jc.swatch', j.no, el.dataset.s + (j.swatch_note ? ' — ' + j.swatch_note : '')); flash(esc(j.no) + ' swatch ' + el.dataset.s.toLowerCase() + '.'); VIEWS.swatch.render();
 };
 
@@ -526,7 +557,7 @@ VIEWS.excessapproval = {
     Store.all('grns').forEach(g => (g.lines || []).forEach((l, k) => { if (l.excess_status === 'Pending') rows.push({ g, l, k }); }));
     setMain('<div class="tbl-wrap"><table><tr><th>GRN No</th><th>GRN Date</th><th>Vendor</th><th>PO No</th><th>Invoice No</th><th>Item Code</th><th>Item Name</th><th>UOM</th><th class="num">PO Pending</th><th class="num">Invoice Qty</th><th class="num">Received</th><th class="num">Excess</th><th>GRN By</th>' + (ok ? '<th></th>' : '') + '</tr>' +
       (rows.length ? rows.map(({ g, l, k }) => '<tr><td><b>' + esc(g.no) + '</b></td><td>' + fmtD(g.date) + '</td><td>' + esc(g.vendor) + '</td><td>' + esc(g.po_no) + '</td><td>' + esc(g.invoice || '') + '</td><td>' + esc(l.material) + '</td><td>' + esc((matBy(l.material) || {}).name || '') + '</td><td>' + esc(l.uom || '') + '</td><td class="num">' + qtyFmt(l.po_pending || 0) + '</td><td class="num">' + qtyFmt(l.inv_qty || 0) + '</td><td class="num">' + qtyFmt(l.recv_qty || 0) + '</td><td class="num late-txt"><b>' + qtyFmt(l.excess) + '</b></td><td>' + esc(g.by) + '</td>' +
-        (ok ? '<td class="right"><button class="btn sm primary" data-act="ex-set" data-id="' + esc(g.id) + '" data-k="' + k + '" data-s="Approved">Accept</button> <button class="btn sm danger" data-act="ex-set" data-id="' + esc(g.id) + '" data-k="' + k + '" data-s="Rejected">Reject</button></td>' : '') + '</tr>').join('')
+        (ok ? '<td class="right"><button class="btn sm primary" data-act="ex-set" data-id="' + esc(g.id) + '" data-k="' + k + '" data-s="Approved">Accept</button> <button class="btn sm" data-act="ex-amend" data-id="' + esc(g.id) + '" data-k="' + k + '">Amend</button> <button class="btn sm danger" data-act="ex-set" data-id="' + esc(g.id) + '" data-k="' + k + '" data-s="Rejected">Reject</button></td>' : '') + '</tr>').join('')
         : '<tr><td colspan="14" class="empty">No excess waiting for approval</td></tr>') + '</table></div>');
   }
 };
@@ -540,12 +571,32 @@ ACTIONS['ex-set'] = el => {
   VIEWS.excessapproval.render();
 };
 
+ACTIONS['ex-amend'] = el => {
+  if (!canApproveExcess()) { flash('Only the CEO can decide excess material.', 'err'); return; }
+  const g = Store.get('grns', el.dataset.id); const l = g && g.lines[+el.dataset.k]; if (!l || l.excess_status !== 'Pending') return;
+  reasonDialog('Send excess of ' + l.material + ' back to Store', 'Send for amendment', why => {
+    l.excess_status = 'Amend'; l.amend_log = (l.amend_log || []).concat([{ at: nowIso(), by: ME.name, remark: why, stage: 'Excess Approval' }]);
+    Store.put('grns', g); audit('grn.excess_amend', g.no, l.material + ' · ' + why); flash('Sent back to Store to correct the excess.'); VIEWS.excessapproval.render();
+  });
+};
+ACTIONS['ex-fix'] = el => {
+  if (!requirePerm('store', 'edit')) return;
+  const g = Store.get('grns', el.dataset.id); const l = g && g.lines[+el.dataset.k]; if (!l || l.excess_status !== 'Amend') return;
+  const a = (l.amend_log || []).slice(-1)[0] || {};
+  formDialog('Correct excess · ' + g.no + ' · ' + l.material, [{ k: 'r', l: 'Reason', type: 'static', value: a.remark }, { k: 'excess', l: 'Excess Qty', type: 'number', value: l.excess }, { k: 'note', l: 'What was corrected', type: 'textarea', req: true }], 'Resend for approval', v => {
+    const ex = Math.max(0, num(v.excess)); if (ex > num(l.excess) + 1e-9) return 'Excess can only be reduced here (it was ' + qtyFmt(l.excess) + ').';
+    l.recv_qty = num(l.recv_qty != null ? l.recv_qty : num(l.accepted) + num(l.rejected) + num(l.excess)) - (num(l.excess) - ex); l.excess = ex;
+    l.excess_status = ex > 0 ? 'Pending' : ''; l.amend_log = l.amend_log.concat([{ at: nowIso(), by: ME.name, remark: v.note, stage: 'Corrected' }]);
+    Store.put('grns', g); audit('grn.excess_corrected', g.no, l.material + ' · excess ' + qtyFmt(ex) + ' · ' + v.note); flash('Corrected' + (ex > 0 ? ' and sent back for excess approval.' : '.')); VIEWS.grnlist.render();
+  });
+};
+
 /* ================= GRN register ================= */
 VIEWS.grnlist = {
   mod: 'store', render() {
     const gs = Store.all('grns').slice().sort((a, b) => b.no < a.no ? -1 : 1);
     setMain('<div class="tbl-wrap"><table><tr><th>GRN No</th><th>GRN Date</th><th>Inward</th><th>PO No</th><th>Vendor</th><th>Invoice No</th><th class="num">Sr</th><th>Item Code</th><th>Item Name</th><th class="num">Invoice Qty</th><th class="num">Received</th><th class="num">Short</th><th class="num">Reject</th><th class="num">GRN Qty</th><th class="num">Excess</th><th>Excess Status</th><th>Rack</th><th>By</th><th>Report</th></tr>' +
-      (gs.length ? gs.map(g => { const pend = (g.lines || []).some(l => l.excess_status === 'Pending'); return g.lines.map((l, i) => '<tr' + (i === 0 ? ' class="bomfirst"' : '') + '><td><b>' + esc(g.no) + '</b></td><td>' + fmtD(g.date) + '</td><td>' + esc(g.inward_no || '') + '</td><td>' + esc(g.po_no) + '</td><td>' + esc(g.vendor) + '</td><td>' + esc(g.invoice || '') + '</td><td class="num">' + (i + 1) + '</td><td>' + esc(l.material) + '</td><td>' + esc((matBy(l.material) || {}).name || '') + '</td><td class="num">' + qtyFmt(l.inv_qty || 0) + '</td><td class="num">' + qtyFmt(l.recv_qty != null ? l.recv_qty : num(l.accepted) + num(l.rejected)) + '</td><td class="num">' + qtyFmt(l.short || 0) + '</td><td class="num">' + qtyFmt(l.rejected || 0) + '</td><td class="num">' + qtyFmt(l.accepted || 0) + '</td><td class="num">' + qtyFmt(l.excess || 0) + '</td><td>' + (num(l.excess) > 0 ? '<span class="st ' + (l.excess_status === 'Approved' ? 'Done' : l.excess_status === 'Rejected' ? 'Late' : 'Pending') + '">' + esc(l.excess_status || 'Pending') + '</span>' : '') + '</td><td>' + esc(l.rack || '') + '</td><td>' + esc(g.by) + '</td><td>' + (i === 0 ? (pend ? '<span class="st Pending">Excess approval pending</span>' : '<button class="btn sm ghost" data-act="print-grn" data-id="' + esc(g.id) + '">Print</button>') : '') + '</td></tr>').join(''); }).join('') : '<tr><td colspan="19" class="empty">No GRNs yet</td></tr>') + '</table></div>');
+      (gs.length ? gs.map(g => { const pend = (g.lines || []).some(l => l.excess_status === 'Pending' || l.excess_status === 'Amend'); return g.lines.map((l, i) => '<tr' + (i === 0 ? ' class="bomfirst"' : '') + '><td><b>' + esc(g.no) + '</b></td><td>' + fmtD(g.date) + '</td><td>' + esc(g.inward_no || '') + '</td><td>' + esc(g.po_no) + '</td><td>' + esc(g.vendor) + '</td><td>' + esc(g.invoice || '') + '</td><td class="num">' + (i + 1) + '</td><td>' + esc(l.material) + '</td><td>' + esc((matBy(l.material) || {}).name || '') + '</td><td class="num">' + qtyFmt(l.inv_qty || 0) + '</td><td class="num">' + qtyFmt(l.recv_qty != null ? l.recv_qty : num(l.accepted) + num(l.rejected)) + '</td><td class="num">' + qtyFmt(l.short || 0) + '</td><td class="num">' + qtyFmt(l.rejected || 0) + '</td><td class="num">' + qtyFmt(l.accepted || 0) + '</td><td class="num">' + qtyFmt(l.excess || 0) + '</td><td>' + (num(l.excess) > 0 ? '<span class="st ' + (l.excess_status === 'Approved' ? 'Done' : l.excess_status === 'Rejected' ? 'Late' : 'Pending') + '">' + esc(l.excess_status || 'Pending') + '</span>' : '') + (l.excess_status === 'Amend' && can('store', 'edit') ? ' <button class="btn sm primary" data-act="ex-fix" data-id="' + esc(g.id) + '" data-k="' + i + '">Correct</button>' : '') + '</td><td>' + esc(l.rack || '') + '</td><td>' + esc(g.by) + '</td><td>' + (i === 0 ? (pend ? '<span class="st Pending">Excess approval pending</span>' : '<button class="btn sm ghost" data-act="print-grn" data-id="' + esc(g.id) + '">Print</button>') : '') + '</td></tr>').join(''); }).join('') : '<tr><td colspan="19" class="empty">No GRNs yet</td></tr>') + '</table></div>');
   }
 };
 
@@ -615,7 +666,7 @@ function grnDocHtml(g) {
 }
 ACTIONS['print-grn'] = el => {
   const g = Store.get('grns', el.dataset.id); if (!g) return;
-  if ((g.lines || []).some(l => l.excess_status === 'Pending')) { flash('GRN report is available after the excess approval decision.', 'err'); return; }
+  if ((g.lines || []).some(l => l.excess_status === 'Pending' || l.excess_status === 'Amend')) { flash('GRN report is available after the excess approval decision.', 'err'); return; }
   const w = window.open(''); if (!w) { flash('Allow pop-ups for this site to print the GRN.', 'err'); return; }
   w.document.write('<html><head><title>' + esc(g.no) + '</title><style>@page{size:A4 landscape;margin:8mm}html,body{margin:0}*{-webkit-print-color-adjust:exact;print-color-adjust:exact}' + PO_DOC_CSS + '</style></head><body>' + grnDocHtml(g) + '<script>window.onload=function(){window.print()}</' + 'script></body></html>');
   w.document.close();

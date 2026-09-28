@@ -274,7 +274,7 @@ ACTIONS['print-req'] = el => {
   const rows = r.lines.map((l, i) => { const m = matBy(l.material) || {}; return '<tr><td>' + (i + 1) + '</td><td>' + esc(m.name || '') + '</td><td>' + esc(l.material) + '</td><td>' + esc(m.uom || '') + '</td><td class="n">' + (l.req != null ? qtyFmt(l.req) : '') + '</td><td class="n">' + (l.stock != null ? qtyFmt(l.stock) : '') + '</td><td class="n">' + qtyFmt(l.qty) + '</td></tr>'; }).join('');
   slipWin(r.no, '<div class="band"><b>REQUISITION SLIP</b><span>' + esc(r.no) + ' · ' + esc(r.at ? fmtDT(r.at) : fmtD(r.date)) + '</span></div>' +
     '<div class="hd"><div><h1>' + esc(settings().company || 'Nexus 2.0') + '</h1><small>' + esc(settings().address || '') + '</small></div><div class="bc">' + barcodeSvg(r.no, 44) + '<br>' + esc(r.no) + '</div></div>' +
-    '<div class="box">' + kvHtml([['Method', r.method === 'cons' ? 'Consumable Items' : 'Job Card'], ['Job Card', r.jc_no || ''], ['Department', r.dept || ''], ['Brand', j ? j.brand || '' : ''], ['Article', j ? j.article || '' : ''], ['Line', r.line || ''], ['Picker Name', r.picker || ''], ['Requested By', r.by], ['Created At', r.at ? fmtDT(r.at) : fmtD(r.date)]]) + '</div>' +
+    '<div class="box">' + kvHtml([['Method', r.method === 'cons' ? 'Consumable Items' : 'Job Card'], ['Job Card', r.jc_no || ''], ['Department', r.dept || ''], ['Brand', j ? j.brand || '' : ''], ['Article', j ? j.article || '' : ''], ['Process', r.process || ''], ['Line', r.line || ''], ['Picker Name', r.picker || ''], ['Requested By', r.by], ['Created At', r.at ? fmtDT(r.at) : fmtD(r.date)]]) + '</div>' +
     '<table><thead><tr><th>#</th><th>Item Name</th><th>Item Code</th><th>UOM</th><th class="n">Req Qty</th><th class="n">Stock</th><th class="n">Requisition Qty</th></tr></thead><tbody>' + rows + '</tbody>' +
     '<tfoot><tr><td></td><td>Total</td><td></td><td></td><td class="n">' + (r.lines.some(l => l.req != null) ? qtyFmt(r.lines.reduce((a, l) => a + num(l.req || 0), 0)) : '') + '</td><td></td><td class="n">' + qtyFmt(r.lines.reduce((a, l) => a + num(l.qty), 0)) + '</td></tr></tfoot></table>');
 };
@@ -286,7 +286,7 @@ ACTIONS['print-iss'] = el => {
   const rows = list.map((i, k) => { const m = matBy(i.material) || {}; return '<tr><td>' + (k + 1) + '</td><td>' + esc(m.name || '') + '</td><td>' + esc(i.material) + '</td><td>' + esc(m.uom || '') + '</td><td class="n">' + (i.req_qty != null ? qtyFmt(i.req_qty) : '') + '</td><td class="n">' + qtyFmt(i.qty) + '</td><td>' + esc(i.status) + '</td></tr>'; }).join('');
   const appr = list.find(i => i.approved_by);
   slipWin(ref, '<div class="hd"><div><h1>' + esc(settings().company || 'Nexus 2.0') + '</h1><small>' + (i0.type === 'return' ? 'Material Return Slip' : 'Material Issue Slip') + '</small></div><div class="bc">' + barcodeSvg(ref, 44) + '<br>' + esc(ref) + '</div></div>' +
-    kvHtml([['Issued At', fmtDT(i0.at)], ['Req No', i0.req_no || ''], ['Job Card', i0.to_jc || (req ? req.dept : '')], ['Line', i0.line || ''], ['Picker Name', i0.picker || ''], ['Issued To', i0.to_dept || ''], ['Issue Type', i0.issue_type || 'Regular'], ['Issued By', i0.by], ['Approved By', appr ? appr.approved_by + ' · ' + fmtDT(appr.approved_at) : '']]) +
+    kvHtml([['Issued At', fmtDT(i0.at)], ['Req No', i0.req_no || ''], ['Job Card', i0.to_jc || (req ? req.dept : '')], ['Process', i0.process || ''], ['Line', i0.line || ''], ['Picker Name', i0.picker || ''], ['Issued To', i0.to_dept || ''], ['Issue Type', i0.issue_type || 'Regular'], ['Issued By', i0.by], ['Approved By', appr ? appr.approved_by + ' · ' + fmtDT(appr.approved_at) : '']]) +
     '<table><thead><tr><th>#</th><th>Item Name</th><th>Item Code</th><th>UOM</th><th class="n">Req Qty</th><th class="n">Issue Qty</th><th>Status</th></tr></thead><tbody>' + rows + '</tbody>' +
     '<tfoot><tr><td></td><td>Total</td><td></td><td></td><td class="n">' + qtyFmt(list.reduce((a, i) => a + num(i.req_qty || 0), 0)) + '</td><td class="n">' + qtyFmt(list.reduce((a, i) => a + num(i.qty), 0)) + '</td><td></td></tr></tfoot></table>' +
     '<div class="sig"><div>Issued By</div><div>Received By</div></div>');
@@ -849,9 +849,9 @@ VIEWS.issuance = {
     let h = '<div class="tabs">' + [['iss', 'Issuance (' + open.length + ')'], ['approve', 'Issue Approvals (' + pend.length + ')'], ['ret', 'Material Return'], ['lr', 'Line Rejection'], ['reg', 'Issue Register']].map(([k, l]) => '<a data-act="iss-tab" data-t="' + k + '" class="' + (U.tab === k ? 'on' : '') + '">' + l + '</a>').join('') + '</div>';
 
     if (U.tab === 'approve') {
-      h += '<div class="tbl-wrap"><table class="bomflat"><tr><th>No</th><th>Date</th><th>Req No</th><th>JC / Dept</th><th>Line</th><th>Picker Name</th><th>Item Name</th><th>Item Code</th><th class="num">Req Qty</th><th class="num">Issue Qty</th><th>Issue Source</th><th>Issued To</th><th>Issue Type</th><th>Sent By</th><th>Sent At</th>' + (appr ? '<th></th>' : '') + '</tr>' +
-        (pend.length ? pend.map(i => '<tr><td><b>' + esc(i.no) + '</b></td><td>' + fmtD(i.date) + '</td><td>' + esc(i.req_no || '') + '</td><td>' + esc(i.to_jc || '') + '</td><td>' + esc(i.line || '') + '</td><td>' + esc(i.picker || '') + '</td><td>' + esc((matBy(i.material) || {}).name || '') + '</td><td>' + esc(i.material) + '</td><td class="num">' + (i.req_qty != null ? qtyFmt(i.req_qty) : '') + '</td><td class="num">' + qtyFmt(i.qty) + '</td><td>' + esc(i.source || 'AUTO') + '</td><td>' + esc(i.to_dept || '') + '</td><td>' + esc(i.issue_type || 'Regular') + '</td><td>' + esc(i.by) + '</td><td class="nowrap">' + fmtDT(i.at) + '</td>' +
-          (appr ? '<td class="right nowrap"><button class="btn sm primary" data-act="iss-approve" data-id="' + esc(i.id) + '">Approve</button> <button class="btn sm" data-act="iss-amend" data-id="' + esc(i.id) + '">Amend</button> <button class="btn sm ghost danger" data-act="iss-deny" data-id="' + esc(i.id) + '">Reject</button></td>' : '') + '</tr>').join('') : '<tr><td colspan="16" class="empty">No issue approvals pending</td></tr>') + '</table></div>';
+      h += '<div class="tbl-wrap"><table class="bomflat"><tr><th>No</th><th>Date</th><th>Req No</th><th>JC / Dept</th><th>Process</th><th>Line</th><th>Picker Name</th><th>Item Name</th><th>Item Code</th><th class="num">Req Qty</th><th class="num">Issue Qty</th><th>Issue Source</th><th>Issued To</th><th>Issue Type</th><th>Sent By</th><th>Sent At</th>' + (appr ? '<th></th>' : '') + '</tr>' +
+        (pend.length ? pend.map(i => '<tr><td><b>' + esc(i.no) + '</b></td><td>' + fmtD(i.date) + '</td><td>' + esc(i.req_no || '') + '</td><td>' + esc(i.to_jc || '') + '</td><td>' + esc(i.process || '') + '</td><td>' + esc(i.line || '') + '</td><td>' + esc(i.picker || '') + '</td><td>' + esc((matBy(i.material) || {}).name || '') + '</td><td>' + esc(i.material) + '</td><td class="num">' + (i.req_qty != null ? qtyFmt(i.req_qty) : '') + '</td><td class="num">' + qtyFmt(i.qty) + '</td><td>' + esc(i.source || 'AUTO') + '</td><td>' + esc(i.to_dept || '') + '</td><td>' + esc(i.issue_type || 'Regular') + '</td><td>' + esc(i.by) + '</td><td class="nowrap">' + fmtDT(i.at) + '</td>' +
+          (appr ? '<td class="right nowrap"><button class="btn sm primary" data-act="iss-approve" data-id="' + esc(i.id) + '">Approve</button> <button class="btn sm" data-act="iss-amend" data-id="' + esc(i.id) + '">Amend</button> <button class="btn sm ghost danger" data-act="iss-deny" data-id="' + esc(i.id) + '">Reject</button></td>' : '') + '</tr>').join('') : '<tr><td colspan="17" class="empty">No issue approvals pending</td></tr>') + '</table></div>';
     }
 
     if (U.tab === 'iss') {
@@ -859,7 +859,7 @@ VIEWS.issuance = {
       const r0 = U.req ? Store.get('requisitions', U.req) : null;
       const people = Store.all('users').filter(u => u.active !== false).map(u => u.name).sort();
       h += '<div class="card"><div class="card-b"><div class="row"><label>Requisition Slip *<select id="irReq"' + (edit ? '' : ' disabled') + '><option value="">— select —</option>' + open.map(r => '<option value="' + esc(r.id) + '"' + (r.id === U.req ? ' selected' : '') + '>' + esc(r.no + ' · ' + (r.jc_no || r.dept) + ' · ' + (r.line || '') + ' · ' + (r.picker || r.by)) + '</option>').join('') + '</select></label>' +
-        '<label>Line<input value="' + esc(r0 ? r0.line || '' : '') + '" readonly></label><label>Picker Name<input value="' + esc(r0 ? r0.picker || '' : '') + '" readonly></label>' +
+        '<label>Process<input value="' + esc(r0 ? r0.process || '' : '') + '" readonly></label><label>Line<input value="' + esc(r0 ? r0.line || '' : '') + '" readonly></label><label>Picker Name<input value="' + esc(r0 ? r0.picker || '' : '') + '" readonly></label>' +
         '<label>Issued To *<select id="irTo">' + selOpts(people, U.to || '') + '</select></label>' +
         '<label>Issue Type *<select id="irType">' + ['Regular', 'Sample'].map(x => '<option' + (x === (U.type || 'Regular') ? ' selected' : '') + '>' + x + '</option>').join('') + '</select></label></div>' +
         '<div class="tbl-wrap" style="margin-top:8px"><table class="bomflat nopage" id="irTable"><tr><th class="num">#</th><th>Item Name</th><th>UOM</th><th class="num">Req Qty</th><th>Rack</th><th class="num">RESERVED STOCK</th><th class="num">OPEN STOCK</th><th>Issue Source</th><th class="num">Issue Qty</th></tr>' +
@@ -902,8 +902,8 @@ function amendRows(r) {
     a.map(i => '<tr><td>' + esc(i.no) + '</td><td>' + esc((matBy(i.material) || {}).name || i.material) + '</td><td class="num">' + qtyFmt(i.qty) + '</td><td><span class="st ' + (i.status === 'Amend' ? 'Pending' : 'Late') + '">' + (i.status === 'Amend' ? 'Amend' : 'Rejected') + '</span></td><td>' + esc(i.decision_note || '') + '</td><td>' + esc(i.decided_by || i.approved_by || '') + '</td><td class="nowrap">' + fmtDT(i.decided_at || '') + '</td></tr>').join('') + '</table></div>';
 }
 function issueTable(list) {
-  return '<div class="tbl-wrap"><table><tr><th>No</th><th>Date</th><th>Type</th><th>Req No</th><th>Job Card</th><th>Line</th><th>Picker Name</th><th>Item Name</th><th>Item Code</th><th class="num">Req Qty</th><th class="num">Qty</th><th>Issue Source</th><th>Issued To</th><th>Issue Type</th><th>Status</th><th>Issued By</th><th>Issued At</th><th>Approved / Decided By</th><th>Approved / Decided At</th><th></th></tr>' +
-    (list.length ? list.map(i => '<tr><td><b>' + esc(i.no) + '</b></td><td class="nowrap">' + fmtD(i.date) + '</td><td>' + (i.type === 'return' ? 'Return' : i.type === 'line_reject' ? '<span class="late-txt">Line Reject</span>' : i.type === 'scrap' ? 'Write-off' : 'Issue') + '</td><td>' + esc(i.req_no || '') + '</td><td>' + esc(i.to_jc || '') + '</td><td>' + esc(i.line || '') + '</td><td>' + esc(i.picker || '') + '</td><td>' + esc((matBy(i.material) || {}).name || '') + '</td><td>' + esc(i.material) + '</td><td class="num">' + (i.req_qty != null ? qtyFmt(i.req_qty) : '') + '</td><td class="num">' + qtyFmt(i.qty) + '</td><td>' + esc(i.type ? '' : i.source || 'AUTO') + '</td><td>' + esc(i.to_dept || '') + '</td><td>' + esc(i.type ? '' : i.issue_type || 'Regular') + '</td><td><span class="st ' + (i.status === 'Approved' ? 'Done' : i.status === 'Pending' || i.status === 'Amend' ? 'Pending' : 'Cancelled') + '">' + esc(i.status || 'Approved') + '</span></td><td>' + esc(i.by) + '</td><td class="nowrap">' + fmtDT(i.at) + '</td><td>' + esc(i.approved_by || i.decided_by || '') + '</td><td class="nowrap">' + fmtDT(i.approved_at || i.decided_at || '') + '</td><td class="right"><button class="btn sm ghost" data-act="print-iss" data-id="' + esc(i.id) + '">Print</button></td></tr>').join('') : '<tr><td colspan="21" class="empty">No records</td></tr>') + '</table></div>';
+  return '<div class="tbl-wrap"><table><tr><th>No</th><th>Date</th><th>Type</th><th>Req No</th><th>Job Card</th><th>Process</th><th>Line</th><th>Picker Name</th><th>Item Name</th><th>Item Code</th><th class="num">Req Qty</th><th class="num">Qty</th><th>Issue Source</th><th>Issued To</th><th>Issue Type</th><th>Status</th><th>Issued By</th><th>Issued At</th><th>Approved / Decided By</th><th>Approved / Decided At</th><th></th></tr>' +
+    (list.length ? list.map(i => '<tr><td><b>' + esc(i.no) + '</b></td><td class="nowrap">' + fmtD(i.date) + '</td><td>' + (i.type === 'return' ? 'Return' : i.type === 'line_reject' ? '<span class="late-txt">Line Reject</span>' : i.type === 'scrap' ? 'Write-off' : 'Issue') + '</td><td>' + esc(i.req_no || '') + '</td><td>' + esc(i.to_jc || '') + '</td><td>' + esc(i.process || '') + '</td><td>' + esc(i.line || '') + '</td><td>' + esc(i.picker || '') + '</td><td>' + esc((matBy(i.material) || {}).name || '') + '</td><td>' + esc(i.material) + '</td><td class="num">' + (i.req_qty != null ? qtyFmt(i.req_qty) : '') + '</td><td class="num">' + qtyFmt(i.qty) + '</td><td>' + esc(i.type ? '' : i.source || 'AUTO') + '</td><td>' + esc(i.to_dept || '') + '</td><td>' + esc(i.type ? '' : i.issue_type || 'Regular') + '</td><td><span class="st ' + (i.status === 'Approved' ? 'Done' : i.status === 'Pending' || i.status === 'Amend' ? 'Pending' : 'Cancelled') + '">' + esc(i.status || 'Approved') + '</span></td><td>' + esc(i.by) + '</td><td class="nowrap">' + fmtDT(i.at) + '</td><td>' + esc(i.approved_by || i.decided_by || '') + '</td><td class="nowrap">' + fmtDT(i.approved_at || i.decided_at || '') + '</td><td class="right"><button class="btn sm ghost" data-act="print-iss" data-id="' + esc(i.id) + '">Print</button></td></tr>').join('') : '<tr><td colspan="22" class="empty">No records</td></tr>') + '</table></div>';
 }
 ACTIONS['iss-tab'] = el => { ISS_UI.tab = el.dataset.t; VIEWS.issuance.render(); };
 ACTIONS['lr-save'] = () => {
@@ -940,7 +940,7 @@ ACTIONS['ir-save'] = () => {
   if (bad) { msg(esc(bad)); return; }
   if (!out.length) { msg('Enter an Issue Qty.'); return; }
   const slipNo = r.no + '/' + (new Set(Store.all('issues').filter(i => i.req_no === r.no && i.slip_no).map(i => i.slip_no)).size + 1);
-  out.forEach(x => Store.put('issues', { id: uid(), no: nextNo('issues', 'ISS'), slip_no: slipNo, req_qty: num((r.lines.find(l => norm(l.material) === norm(x.material)) || {}).qty), date: todayYmd(), material: x.material, qty: x.qty, source: x.source, to_jc: r.jc_no || '', to_dept: to, line: r.line || '', picker: r.picker || '', issue_type: typ, req_no: r.no, status: 'Pending', by: ME.name, at: nowIso() }));
+  out.forEach(x => Store.put('issues', { id: uid(), no: nextNo('issues', 'ISS'), slip_no: slipNo, req_qty: num((r.lines.find(l => norm(l.material) === norm(x.material)) || {}).qty), date: todayYmd(), material: x.material, qty: x.qty, source: x.source, to_jc: r.jc_no || '', to_dept: to, process: r.process || '', line: r.line || '', picker: r.picker || '', issue_type: typ, req_no: r.no, status: 'Pending', by: ME.name, at: nowIso() }));
   r.status = r.lines.every(l => lineLeft(r, l) <= 1e-9) ? 'Sent for Approval' : 'Part Sent'; Store.put('requisitions', r);
   audit('req.issue', r.no, out.map(x => x.material + '×' + x.qty).join(', ') + ' → ' + to);
   ISS_UI.req = ''; flash(esc(r.no) + ': ' + out.length + ' item(s) sent for issue approval.'); VIEWS.issuance.render();
@@ -1287,14 +1287,16 @@ function lineLeft(r, l) { return l.closed ? 0 : Math.max(0, num(l.qty) - reqSent
 function freeStock(code) { return Math.max(0, stockOf(code) - reqHeld(code)); }
 // JC qty still to be asked for: required − issued − already on an open slip
 function jcOpenReqQty(jc, code) { return Store.all('requisitions').filter(r => reqIsOpen(r) && norm(r.jc_no) === norm(jc)).reduce((s2, r) => s2 + (r.lines || []).filter(l => norm(l.material) === norm(code)).reduce((a, l) => a + lineOpen(r, l), 0), 0); }
-function reqJcRows(jc) {
+function reqJcRows(jc, proc) {
   const j = jcBy(jc); if (!j) return [];
-  return (j.lines || []).map(l => {
+  return (j.lines || []).filter(l => !proc || !String(l.process || '').trim() || norm(l.process) === norm(proc)).map(l => {
     const pend = Math.max(0, num(l.required) - issuedToJc(j.no, l.material) - jcOpenReqQty(j.no, l.material));
     const free = freeStock(l.material);
     return { material: l.material, uom: l.uom || (matBy(l.material) || {}).uom || '', pend, free, cap: Math.min(pend, free) };
   }).filter(x => x.pend > 0.0001);
 }
+const reqProcs = () => { const j = REQ_UI.method === 'jc' && REQ_UI.jc ? jcBy(REQ_UI.jc) : null; const fromJc = j ? Array.from(new Set((j.lines || []).map(l => String(l.process || '').trim()).filter(Boolean))) : []; return fromJc.length ? fromJc : optList('process'); };
+const reqPR = () => '<label>Process *<select id="nrProc">' + selOpts(reqProcs(), REQ_UI.process || '') + '</select></label>';
 const reqLP = () => '<label>Line *<select id="nrLine">' + selOpts(optList('prod_line'), REQ_UI.line || '') + '</select></label><label>Picker Name *<select id="nrPick">' + selOpts(optList('picker'), REQ_UI.picker || '') + '</select></label>';
 const consumables = () => Store.all('materials').filter(m => /consumable/i.test(m.group || '')).sort((a, b) => String(a.name).localeCompare(String(b.name)));
 function reqCoverage(reqQty, stock) { return stock >= reqQty ? '<span class="st Done">Covered</span>' : stock > 0 ? '<span class="st Pending">' + qtyFmt(stock) + ' only</span>' : '<span class="st Late">No stock</span>'; }
@@ -1309,13 +1311,13 @@ VIEWS.requisition = {
       h += '<div class="card"><div class="card-b"><div class="row"><label>Method *<select id="nrMethod"><option value="jc">Job Card</option><option value="cons"' + (U.method === 'cons' ? ' selected' : '') + '>Consumable Items</option></select></label>';
       if (U.method === 'jc') {
         h += '<label>Job Card *<select id="nrJc"><option value="">— select —</option>' + Store.all('job_cards').filter(j => j.status !== 'Closed').sort((a, b) => String(a.no).localeCompare(String(b.no))).map(j => '<option value="' + esc(j.no) + '"' + (norm(j.no) === norm(U.jc) ? ' selected' : '') + '>' + esc(j.no + ' · ' + (j.brand || '') + ' · ' + (j.article || '')) + '</option>').join('') + '</select></label>';
-        h += reqLP() + '<label>Requested By<input value="' + esc(ME.name) + '" readonly></label></div>';
-        const rows = U.jc ? reqJcRows(U.jc) : [];
+        h += reqPR() + reqLP() + '<label>Requested By<input value="' + esc(ME.name) + '" readonly></label></div>';
+        const rows = U.jc && U.process ? reqJcRows(U.jc, U.process) : [];
         h += '<div class="tbl-wrap" style="margin-top:8px"><table class="bomflat nopage" id="nrTable"><tr><th>Item Name</th><th>UOM</th><th class="num">Req Qty</th><th class="num">Stock</th><th>Coverage</th><th class="num">Requisition Qty</th></tr>' +
-          (!U.jc ? '<tr><td colspan="6" class="empty">Select a Job Card</td></tr>' : rows.length ? rows.map(x => '<tr data-rrow data-mat="' + esc(x.material) + '" data-cap="' + x.cap + '"><td>' + esc((matBy(x.material) || {}).name || x.material) + '</td><td>' + esc(x.uom) + '</td><td class="num">' + qtyFmt(x.pend) + '</td><td class="num">' + qtyFmt(x.free) + '</td><td>' + reqCoverage(x.pend, x.free) + '</td><td><input class="qty right" type="number" min="0" max="' + x.cap + '" step="any" data-rq' + (x.free <= 0 ? ' disabled' : '') + '></td></tr>').join('') : '<tr><td colspan="6" class="empty">Nothing pending for this Job Card</td></tr>') + '</table></div>';
+          (!U.jc || !U.process ? '<tr><td colspan="6" class="empty">Select a Job Card and Process</td></tr>' : rows.length ? rows.map(x => '<tr data-rrow data-mat="' + esc(x.material) + '" data-cap="' + x.cap + '"><td>' + esc((matBy(x.material) || {}).name || x.material) + '</td><td>' + esc(x.uom) + '</td><td class="num">' + qtyFmt(x.pend) + '</td><td class="num">' + qtyFmt(x.free) + '</td><td>' + reqCoverage(x.pend, x.free) + '</td><td><input class="qty right" type="number" min="0" max="' + x.cap + '" step="any" data-rq' + (x.free <= 0 ? ' disabled' : '') + '></td></tr>').join('') : '<tr><td colspan="6" class="empty">Nothing pending for this Job Card</td></tr>') + '</table></div>';
         if (rows.some(x => x.cap > 0)) h += '<button class="btn sm" data-act="req-fill" style="margin-top:6px">Fill All Pending Qty</button>';
       } else {
-        h += '<label>Department *<select id="nrDept">' + selOpts(deptList(), U.dept || ME.department || '') + '</select></label>' + reqLP() + '<label>Requested By<input value="' + esc(ME.name) + '" readonly></label></div>';
+        h += '<label>Department *<select id="nrDept">' + selOpts(deptList(), U.dept || ME.department || '') + '</select></label>' + reqPR() + reqLP() + '<label>Requested By<input value="' + esc(ME.name) + '" readonly></label></div>';
         const cons = consumables();
         h += '<div class="tbl-wrap" style="margin-top:8px"><table class="bomflat nopage" id="nrTable"><tr><th>Item Name</th><th>UOM</th><th class="num">Stock</th><th>Coverage</th><th class="num">Requisition Qty</th><th></th></tr>' +
           (U.cons.length ? U.cons.map((c, i) => { const m = matBy(c.material); const free = m ? freeStock(m.code) : 0; return '<tr data-crow="' + i + '"><td><select data-cmat><option value="">— select —</option>' + cons.map(x => '<option value="' + esc(x.code) + '"' + (m && x.code === m.code ? ' selected' : '') + '>' + esc(x.name) + '</option>').join('') + '</select></td><td>' + esc(m ? m.uom : '') + '</td><td class="num">' + (m ? qtyFmt(free) : '') + '</td><td>' + (m ? reqCoverage(num(c.qty) || 0.0001, free) : '') + '</td><td><input class="qty right" type="number" min="0" step="any" data-cq value="' + esc(c.qty || '') + '"' + (m && free <= 0 ? ' disabled' : '') + '></td><td><button class="btn ghost sm" data-act="req-cdel" data-i="' + i + '">×</button></td></tr>'; }).join('') : '<tr><td colspan="6" class="empty">Add an item</td></tr>') + '</table></div><a class="small" data-act="req-cadd">+ Add item</a>';
@@ -1323,16 +1325,17 @@ VIEWS.requisition = {
       h += '</div><div class="card-f"><button class="btn primary" data-act="req-save">Generate Requisition Slip</button><span id="nrMsg" class="small"></span></div></div>';
     }
     const rows = Store.all('requisitions').slice().sort((a2, b2) => b2.no < a2.no ? -1 : 1);
-    h += '<div class="tbl-wrap"><table class="bomflat"><tr><th>Req No</th><th>Date</th><th>Method</th><th>JC / Dept</th><th>Line</th><th>Picker Name</th><th class="num">Sr</th><th>Item Name</th><th>Item Code</th><th class="num">Qty</th><th class="num">Issued</th><th>Status</th><th>Raised By</th><th>Issued By</th><th></th></tr>' +
-      (rows.length ? rows.map(r => r.lines.map((l, i) => '<tr' + (i === 0 ? ' class="bomfirst"' : '') + '><td><b>' + esc(r.no) + '</b></td><td>' + fmtD(r.date) + '</td><td>' + (r.method === 'cons' ? 'Consumable Items' : 'Job Card') + '</td><td>' + esc(r.jc_no || r.dept) + '</td><td>' + esc(r.line || '') + '</td><td>' + esc(r.picker || '') + '</td><td class="num">' + (i + 1) + '</td><td>' + esc((matBy(l.material) || {}).name || '') + '</td><td>' + esc(l.material) + '</td><td class="num">' + qtyFmt(l.qty) + '</td><td class="num">' + qtyFmt(reqIssued(r.no, l.material)) + '</td><td><span class="st ' + (r.status === 'Issued' ? 'Done' : r.status === 'Rejected' ? 'Late' : 'Pending') + '">' + esc(r.status) + '</span></td><td>' + esc(r.by) + '</td><td>' + esc(r.issued_by || '') + '</td><td class="right">' + (i === 0 ? '<button class="btn sm ghost" data-act="print-req" data-id="' + esc(r.id) + '">Print Slip</button>' : '') + '</td></tr>').join('')).join('') : '<tr><td colspan="15" class="empty">No requisitions</td></tr>') + '</table></div>';
+    h += '<div class="tbl-wrap"><table class="bomflat"><tr><th>Req No</th><th>Date</th><th>Method</th><th>JC / Dept</th><th>Process</th><th>Line</th><th>Picker Name</th><th class="num">Sr</th><th>Item Name</th><th>Item Code</th><th class="num">Qty</th><th class="num">Issued</th><th>Status</th><th>Raised By</th><th>Issued By</th><th></th></tr>' +
+      (rows.length ? rows.map(r => r.lines.map((l, i) => '<tr' + (i === 0 ? ' class="bomfirst"' : '') + '><td><b>' + esc(r.no) + '</b></td><td>' + fmtD(r.date) + '</td><td>' + (r.method === 'cons' ? 'Consumable Items' : 'Job Card') + '</td><td>' + esc(r.jc_no || r.dept) + '</td><td>' + esc(r.process || '') + '</td><td>' + esc(r.line || '') + '</td><td>' + esc(r.picker || '') + '</td><td class="num">' + (i + 1) + '</td><td>' + esc((matBy(l.material) || {}).name || '') + '</td><td>' + esc(l.material) + '</td><td class="num">' + qtyFmt(l.qty) + '</td><td class="num">' + qtyFmt(reqIssued(r.no, l.material)) + '</td><td><span class="st ' + (r.status === 'Issued' ? 'Done' : r.status === 'Rejected' ? 'Late' : 'Pending') + '">' + esc(r.status) + '</span></td><td>' + esc(r.by) + '</td><td>' + esc(r.issued_by || '') + '</td><td class="right">' + (i === 0 ? '<button class="btn sm ghost" data-act="print-req" data-id="' + esc(r.id) + '">Print Slip</button>' : '') + '</td></tr>').join('')).join('') : '<tr><td colspan="16" class="empty">No requisitions</td></tr>') + '</table></div>';
     setMain(h);
     const m = $('#main');
     m.addEventListener('change', e => {
       const t = e.target;
       if (t.id === 'nrMethod') { U.method = t.value; U.jc = ''; U.cons = []; VIEWS.requisition.render(); }
-      else if (t.id === 'nrJc') { U.jc = t.value; VIEWS.requisition.render(); }
+      else if (t.id === 'nrJc') { U.jc = t.value; U.process = ''; VIEWS.requisition.render(); }
       else if (t.id === 'nrDept') U.dept = t.value;
       else if (t.id === 'nrLine') U.line = t.value;
+      else if (t.id === 'nrProc') { U.process = t.value; if (U.method === 'jc') VIEWS.requisition.render(); }
       else if (t.id === 'nrPick') U.picker = t.value;
       else if (t.dataset.cmat != null) { const i = +t.closest('tr').dataset.crow; if (U.cons.some((c, k) => k !== i && c.material === t.value)) { flash('Item already added.', 'err'); t.value = U.cons[i].material || ''; return; } U.cons[i].material = t.value; VIEWS.requisition.render(); }
     });
@@ -1349,11 +1352,12 @@ ACTIONS['req-save'] = () => {
   const stale = staleReqs();
   if (stale.length && !canApprove()) { msg(esc(stale[0].no) + ' has been pending for 24h — Store must issue or reject it first.'); return; }
   const lines = []; let bad = '';
-  U.line = $('#nrLine').value; U.picker = $('#nrPick').value;
+  U.line = $('#nrLine').value; U.picker = $('#nrPick').value; U.process = $('#nrProc').value;
+  if (!U.process) { msg('Select the Process.'); return; }
   if (!U.line || !U.picker) { msg('Select Line and Picker Name.'); return; }
   if (U.method === 'jc') {
     if (!jcBy(U.jc)) { msg('Select a Job Card.'); return; }
-    const fresh = Object.fromEntries(reqJcRows(U.jc).map(x => [norm(x.material), x]));
+    const fresh = Object.fromEntries(reqJcRows(U.jc, U.process).map(x => [norm(x.material), x]));
     $$('#nrTable tr[data-rrow]').forEach(tr => {
       const q = num(($('[data-rq]', tr) || {}).value); if (q <= 0) return;
       const x = fresh[norm(tr.dataset.mat)];
@@ -1368,9 +1372,61 @@ ACTIONS['req-save'] = () => {
   }
   if (bad) { msg(esc(bad)); return; }
   if (!lines.length) { msg('Enter a requisition qty for at least one item.'); return; }
-  const r = Store.put('requisitions', { id: uid(), no: nextNo('requisitions', 'REQ'), date: todayYmd(), method: U.method, jc_no: U.method === 'jc' ? U.jc : '', dept: U.method === 'jc' ? 'Production' : U.dept, line: U.line, picker: U.picker, lines, status: 'Pending', by: ME.name, at: nowIso() });
+  const r = Store.put('requisitions', { id: uid(), no: nextNo('requisitions', 'REQ'), date: todayYmd(), method: U.method, jc_no: U.method === 'jc' ? U.jc : '', dept: U.method === 'jc' ? 'Production' : U.dept, process: U.process, line: U.line, picker: U.picker, lines, status: 'Pending', by: ME.name, at: nowIso() });
   audit('req.create', r.no, (r.jc_no || r.dept) + ' · ' + lines.map(l => l.material + '×' + l.qty).join(', ')); U.form = false; U.jc = ''; U.cons = [];
   flash('<b>' + esc(r.no) + '</b> created — sent to Store issuance.'); VIEWS.requisition.render();
+};
+
+/* ================= PRODUCTION REPORT ================= */
+const PR_UI = { form: false, jc: '', stage: '', qty: {}, remark: '' };
+function prodDone(jc, stage, size) { return Store.all('prod_reports').filter(p => norm(p.jc_no) === norm(jc) && p.stage === stage).reduce((a, p) => a + (p.sizes || []).filter(x => String(x.size) === String(size)).reduce((b, x) => b + num(x.qty), 0), 0); }
+VIEWS.prodreport = {
+  mod: 'production', render() {
+    const edit = can('production', 'edit'); const U = PR_UI;
+    let h = '<div class="toolbar"><span class="grow"></span>' + (edit ? newBtn('Production report', 'pr-new') : '') + '</div>';
+    if (U.form && edit) {
+      const j = U.jc ? jcBy(U.jc) : null; const o = j ? Store.all('orders').find(x => norm(x.no) === norm(j.order_no)) || {} : {};
+      h += '<div class="card"><div class="card-b"><div class="row"><label>Job Card *<select id="prJc">' + '<option value="">— select —</option>' + Store.all('job_cards').filter(x => x.status !== 'Closed').sort((a, b) => String(a.no).localeCompare(String(b.no))).map(x => '<option value="' + esc(x.no) + '"' + (norm(x.no) === norm(U.jc) ? ' selected' : '') + '>' + esc(x.no + ' · ' + (x.brand || '') + ' · ' + (x.article || '')) + '</option>').join('') + '</select></label>' +
+        '<label>Category<input value="' + esc(j ? j.category || o.category || '' : '') + '" readonly></label><label>Brand<input value="' + esc(j ? j.brand || '' : '') + '" readonly></label><label>Article<input value="' + esc(j ? j.article || '' : '') + '" readonly></label><label>Colour<input value="' + esc(j ? j.colour || '' : '') + '" readonly></label>' +
+        '<label>Stage *<select id="prStage">' + selOpts(optList('prod_stage'), U.stage) + '</select></label></div>';
+      const sizes = j ? (j.sizes || []) : [];
+      h += '<div class="tbl-wrap" style="margin-top:8px"><table class="bomflat nopage" id="prTable"><tr><th>Size</th><th class="num">Order Qty</th><th class="num">Produced till now (' + esc(U.stage || 'stage') + ')</th><th class="num">Balance</th><th class="num">Quantity produced (this report)</th></tr>' +
+        (!j ? '<tr><td colspan="5" class="empty">Select a Job Card</td></tr>' : !sizes.length ? '<tr><td colspan="5" class="empty">This Job Card has no size breakup</td></tr>' : sizes.map(z => {
+          const tgt = num(z.act); const done = U.stage ? prodDone(j.no, U.stage, z.size) : 0; const bal = Math.max(0, tgt - done);
+          return '<tr data-prs="' + esc(z.size) + '" data-bal="' + bal + '"><td><b>' + esc(z.size) + '</b></td><td class="num">' + qtyFmt(tgt) + '</td><td class="num">' + qtyFmt(done) + '</td><td class="num">' + qtyFmt(bal) + '</td><td><input class="qty right" type="number" min="0" step="1" data-prq value="' + esc(U.qty[z.size] || '') + '"' + (U.stage ? '' : ' disabled') + '></td></tr>';
+        }).join('') + '<tr class="tot"><td>Total</td><td class="num">' + qtyFmt(sizes.reduce((a, z) => a + num(z.act), 0)) + '</td><td class="num">' + (U.stage ? qtyFmt(sizes.reduce((a, z) => a + prodDone(j.no, U.stage, z.size), 0)) : '') + '</td><td></td><td class="num" id="prTot">' + qtyFmt(Object.values(U.qty).reduce((a, v) => a + num(v), 0)) + '</td></tr>') + '</table></div>' +
+        '<label style="margin-top:8px">Remark<textarea id="prRem" rows="2">' + esc(U.remark) + '</textarea></label>' +
+        '</div><div class="card-f"><button class="btn primary" data-act="pr-save">Save report</button><span id="prMsg" class="small"></span></div></div>';
+    }
+    const rows = Store.all('prod_reports').slice().sort((a, b) => (b.at || '') < (a.at || '') ? -1 : 1);
+    h += '<div class="tbl-wrap"><table class="bomflat"><tr><th>Report No</th><th>Date &amp; Time</th><th>Job Card</th><th>Category</th><th>Brand</th><th>Article</th><th>Colour</th><th>Stage</th><th>Size</th><th class="num">Qty Produced</th><th>Remark</th><th>Reported By</th></tr>' +
+      (rows.length ? rows.map(p => (p.sizes || []).filter(x => num(x.qty) > 0).map((x, i) => '<tr' + (i === 0 ? ' class="bomfirst"' : '') + '><td><b>' + esc(p.no) + '</b></td><td class="nowrap">' + fmtDT(p.at) + '</td><td>' + esc(p.jc_no) + '</td><td>' + esc(p.category || '') + '</td><td>' + esc(p.brand || '') + '</td><td>' + esc(p.article || '') + '</td><td>' + esc(p.colour || '') + '</td><td>' + esc(p.stage) + '</td><td>' + esc(x.size) + '</td><td class="num">' + qtyFmt(x.qty) + '</td><td>' + esc(p.remark || '') + '</td><td>' + esc(p.by) + '</td></tr>').join('')).join('') : '<tr><td colspan="12" class="empty">No production reports yet</td></tr>') + '</table></div>';
+    const m = setMain(h);
+    m.addEventListener('change', e => {
+      const t = e.target;
+      if (t.id === 'prJc') { U.jc = t.value; U.qty = {}; VIEWS.prodreport.render(); }
+      else if (t.id === 'prStage') { U.stage = t.value; U.qty = {}; VIEWS.prodreport.render(); }
+    });
+    m.addEventListener('input', e => {
+      if (e.target.dataset.prq != null) { U.qty[e.target.closest('tr').dataset.prs] = e.target.value; const tt = $('#prTot'); if (tt) tt.textContent = qtyFmt(Object.values(U.qty).reduce((a, v) => a + num(v), 0)); }
+      if (e.target.id === 'prRem') U.remark = e.target.value;
+    });
+  }
+};
+ACTIONS['pr-new'] = () => { Object.assign(PR_UI, { form: !PR_UI.form, jc: '', stage: '', qty: {}, remark: '' }); VIEWS.prodreport.render(); };
+ACTIONS['pr-save'] = () => {
+  if (!requirePerm('production', 'edit')) return;
+  const U = PR_UI; const msg = t => { $('#prMsg').innerHTML = '<span class="late-txt">' + t + '</span>'; };
+  const j = jcBy(U.jc); if (!j) { msg('Select a Job Card.'); return; }
+  if (!U.stage) { msg('Select the Stage.'); return; }
+  let bad = ''; const sizes = [];
+  $$('#prTable tr[data-prs]').forEach(tr => { const q = num(($('[data-prq]', tr) || {}).value); if (q <= 0) return; if (q > num(tr.dataset.bal) + 1e-9) bad = bad || 'Size ' + tr.dataset.prs + ': only ' + qtyFmt(tr.dataset.bal) + ' left at this stage.'; sizes.push({ size: tr.dataset.prs, qty: q }); });
+  if (bad) { msg(esc(bad)); return; }
+  if (!sizes.length) { msg('Enter the quantity produced for at least one size.'); return; }
+  const o = Store.all('orders').find(x => norm(x.no) === norm(j.order_no)) || {};
+  const p = Store.put('prod_reports', { id: uid(), no: nextNo('prod_reports', 'PRD'), at: nowIso(), date: todayYmd(), jc_no: j.no, order_no: j.order_no || '', category: j.category || o.category || '', brand: j.brand || '', article: j.article || '', colour: j.colour || '', stage: U.stage, sizes, total: sizes.reduce((a, x) => a + x.qty, 0), remark: String(U.remark || '').trim(), by: ME.name });
+  audit('prod.report', p.no, j.no + ' · ' + U.stage + ' · ' + p.total);
+  Object.assign(U, { form: false, jc: '', stage: '', qty: {}, remark: '' }); flash(esc(p.no) + ' saved — ' + qtyFmt(p.total) + ' pcs at ' + esc(p.stage) + '.'); VIEWS.prodreport.render();
 };
 
 VIEWS.prodtracker = {

@@ -56,6 +56,7 @@ VIEWS.home = {
       '<a href="#/tickets"><b>' + tOpen.length + '</b><span>Open tickets</span></a>' +
       '<div><b>' + qtyFmt(dspQty) + '</b><span>Dispatched this month</span></div></div>';
 
+    h += homeWork();
     // Escalations & tickets
     h += '<div class="grid2"><div><h2>Escalations</h2>';
     if (!escT.length && !escSteps.length) h += '<div class="panel empty">No escalations</div>';
@@ -87,6 +88,34 @@ VIEWS.home = {
     setMain(h);
   }
 };
+
+// Home: my score, my open work, what is held up because of me; Super Admin sees everyone
+function homeWork() {
+  const sa = isSuperAdmin(); const pa = paRows();
+  const mineOpen = pa.filter(r => paOpen(r) && (sa || paDef(r.k).can(r)));
+  const fLate = allOpenSteps().filter(x => x.step.status === 'Late' && (sa || isMyDoer(x.step.doer)));
+  const board = scoreBoard(); const me = board.find(b => b.u.id === ME.id);
+  let h = '<div class="kpis">' +
+    '<div><b>' + (me && me.score != null ? me.score + '%' : '—') + '</b><span>My score (30 days)</span></div>' +
+    '<div><b>' + (me ? me.onTime + ' / ' + me.done : '0 / 0') + '</b><span>Done on time</span></div>' +
+    '<div><b>' + mineOpen.length + '</b><span>' + (sa ? 'Open activities' : 'My open activities') + '</span></div>' +
+    '<div><b class="' + (mineOpen.filter(r => r.status === 'Late').length + fLate.length ? 'late-txt' : '') + '">' + (mineOpen.filter(r => r.status === 'Late').length + fLate.length) + '</b><span>Held up</span></div></div>';
+  const held = mineOpen.filter(r => r.status === 'Late').map(r => ({ what: r.act, ref: r.ref, party: r.party, resp: paDef(r.k).grp, planned: r.planned, delay: r.delay, waits: paDef(r.k).next }))
+    .concat(fLate.map(x => ({ what: x.step.name, ref: x.order.no, party: x.order.customer_name, resp: x.step.doer || '', planned: x.step.planned, delay: x.step.delayMinutes, waits: nextStepsOf(x) })))
+    .sort((a, b) => b.delay - a.delay);
+  h += '<h2>' + (sa ? 'Held up (everyone)' : 'Held up because of me') + '</h2><div class="tbl-wrap"><table><tr><th>Activity / Step</th><th>Reference</th><th>Party</th><th>Responsible</th><th>Planned</th><th class="num">Delay</th><th>Waiting on this</th></tr>' +
+    (held.length ? held.slice(0, 40).map(x => '<tr><td>' + esc(x.what) + '</td><td><b>' + esc(x.ref) + '</b></td><td>' + esc(x.party) + '</td><td>' + esc(x.resp) + '</td><td class="nowrap">' + fmtDT(x.planned) + '</td><td class="num late-txt">' + fmtDelay(x.delay) + '</td><td>' + esc(x.waits) + '</td></tr>').join('') : '<tr><td colspan="7" class="empty">Nothing is held up</td></tr>') + '</table></div>';
+  const pend = mineOpen.filter(r => r.status === 'Pending').sort((a, b) => a.planned - b.planned);
+  h += '<h2>' + (sa ? 'Open activities (everyone)' : 'My open activities') + '</h2><div class="tbl-wrap"><table><tr><th>Activity</th><th>Reference</th><th>Party</th><th>Responsible</th><th>Planned</th><th>Status</th></tr>' +
+    (pend.length ? pend.slice(0, 40).map(r => '<tr><td>' + esc(r.act) + '</td><td><b>' + esc(r.ref) + '</b></td><td>' + esc(r.party) + '</td><td>' + esc(paDef(r.k).grp) + '</td><td class="nowrap">' + fmtDT(r.planned) + '</td><td><span class="st Pending">Pending</span></td></tr>').join('') : '<tr><td colspan="6" class="empty">Nothing open</td></tr>') + '</table></div>';
+  if (sa) h += '<h2>People score (last 30 days)</h2><div class="tbl-wrap"><table><tr><th>Name</th><th>Doer</th><th>Department</th><th>Designation</th><th class="num">Done</th><th class="num">On time</th><th class="num">Score</th><th class="num">Open tasks</th><th class="num">Late tasks</th></tr>' +
+    (board.length ? board.sort((a, b) => (a.score == null ? 101 : a.score) - (b.score == null ? 101 : b.score)).map(b => '<tr><td>' + esc(b.u.name) + '</td><td>' + esc(b.u.doer || '') + '</td><td>' + esc(b.u.department || '') + '</td><td>' + esc(b.u.designation || '') + '</td><td class="num">' + b.done + '</td><td class="num">' + b.onTime + '</td><td class="num' + (b.score != null && b.score < 80 ? ' late-txt' : '') + '"><b>' + (b.score == null ? '—' : b.score + '%') + '</b></td><td class="num">' + b.pending + '</td><td class="num' + (b.lateOpen ? ' late-txt' : '') + '">' + b.lateOpen + '</td></tr>').join('') : '<tr><td colspan="9" class="empty">No activity yet</td></tr>') + '</table></div>';
+  return h;
+}
+function nextStepsOf(x) {
+  const deps = (x.spec.steps || []).filter(d => (Array.isArray(d.trigger) ? d.trigger : [d.trigger]).some(t => t && t.type === 'afterStep' && t.step === x.step.id));
+  return deps.map(d => d.name).join(', ');
+}
 
 /* ---------------- My Tasks ---------------- */
 const TASK_UI = { who: 'mine', when: 'open', q: '' };

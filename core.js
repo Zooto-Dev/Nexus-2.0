@@ -47,11 +47,32 @@ function flash(msg, type) {
 
 /* ================= store ================= */
 const DB_KEY = 'nexus2_db_v8';
-const COLS = ['users', 'roles', 'customers', 'items', 'materials', 'processes', 'orders', 'dispatches', 'purchase_orders', 'sourcing', 'grns', 'inwards', 'vendors', 'issues', 'rsjw', 'rtvs', 'boms', 'job_cards', 'requisitions', 'tickets', 'checklist', 'attributes', 'item_types', 'mail_queue', 'audit'];
+const COLS = ['users', 'roles', 'customers', 'items', 'materials', 'processes', 'orders', 'dispatches', 'purchase_orders', 'sourcing', 'grns', 'inwards', 'vendors', 'issues', 'rsjw', 'rtvs', 'boms', 'job_cards', 'requisitions', 'tickets', 'checklist', 'attributes', 'item_types', 'mail_queue', 'prod_reports', 'audit'];
 let DB = null;
 const CFG = window.NEXUS_CONFIG || {};
 const CLOUD = !!(CFG.SUPABASE_URL && CFG.SUPABASE_ANON_KEY && window.supabase);
 let SB = null;
+
+/* ---- small dialogs used by approvals: a reason box, and an edit box for sending corrections back ---- */
+function formDialog(title, fields, okLabel, cb, danger) {
+  const old = $('#fxDlg'); if (old) old.remove();
+  const d = document.createElement('div'); d.id = 'fxDlg'; d.className = 'dlg-back';
+  d.innerHTML = '<div class="dlg"><div class="dlg-h">' + esc(title) + '</div><table class="jckv">' + fields.map(f => '<tr><td class="k">' + esc(f.l) + (f.req ? ' *' : '') + '</td><td class="v">' +
+    (f.type === 'textarea' ? '<textarea data-fx="' + f.k + '" rows="3">' + esc(f.value || '') + '</textarea>' : f.type === 'static' ? esc(f.value || '') : '<input data-fx="' + f.k + '" type="' + (f.type || 'text') + '"' + (f.type === 'number' ? ' min="0" step="any"' : '') + ' value="' + esc(f.value == null ? '' : f.value) + '">') + '</td></tr>').join('') +
+    '</table><div class="dlg-f"><span id="fxMsg" class="small late-txt"></span><span class="grow"></span><button class="btn" data-fx-cancel>Cancel</button><button class="btn ' + (danger ? 'danger' : 'primary') + '" data-fx-ok>' + esc(okLabel) + '</button></div></div>';
+  document.body.appendChild(d); const first = $('[data-fx]', d); if (first) first.focus();
+  d.addEventListener('keydown', ev => { if (ev.key === 'Escape') d.remove(); });
+  d.addEventListener('click', ev => {
+    if (ev.target.closest('[data-fx-cancel]')) { d.remove(); return; }
+    if (!ev.target.closest('[data-fx-ok]')) return;
+    const v = {}; fields.forEach(f => { const i = $('[data-fx="' + f.k + '"]', d); if (i) v[f.k] = f.type === 'number' ? num(i.value) : i.value.trim(); });
+    const miss = fields.find(f => f.req && (v[f.k] === '' || v[f.k] == null || (f.type === 'number' && !(v[f.k] > 0))));
+    if (miss) { $('#fxMsg', d).textContent = miss.l + ' is required.'; return; }
+    const err = cb(v); if (err) { $('#fxMsg', d).textContent = err; return; }
+    d.remove();
+  });
+}
+const reasonDialog = (title, okLabel, cb, danger) => formDialog(title, [{ k: 'why', l: 'Reason', type: 'textarea', req: true }], okLabel, v => cb(v.why), danger);
 
 /* ---- change log: every create / edit / delete is written to the audit log with who, when and what changed ---- */
 const SNAP = new Map();                       // col|id -> JSON of the last saved copy
@@ -211,6 +232,8 @@ const DEF_OPTS = {
   gender: ['Gents', 'Ladies', 'Kids', 'Unisex'],
   packing: ['Assortment', 'Solid'],
   prod_line: ['ASSEMBLY LINE 1', 'ASSEMBLY LINE 2', 'CUTTING', 'PACKING LINE 1', 'STITCHING'],
+  process: ['Cutting', 'Stitching', 'Moulding', 'Assembly', 'Finishing', 'Packing'],
+  prod_stage: ['Cutting', 'Stitching', 'Moulding', 'Assembly', 'Finishing', 'QC Passed', 'Packing'],
   picker: []
 };
 function optList(key) {
@@ -480,12 +503,14 @@ const NAV = [
     { v: 'boms', l: 'Created BOM', mod: 'development' }] },
   { menu: 'Production', items: [
     { v: 'requisition', l: 'Requisition Slip', mod: 'production' },
+    { v: 'prodreport', l: 'Production Report', mod: 'production' },
     { v: 'prodtracker', l: 'Production Tracker', mod: 'production' },
     { v: 'mrs', l: 'MRS', mod: 'production' }] },
   { menu: 'Accounts', items: [
     { v: 'invoices', l: 'Invoices', mod: 'accounts' }] },
   { menu: 'Operations', items: [
     { v: 'activity', l: 'Activity List', mod: 'audit' },
+    { v: 'planactual', l: 'Plan vs Actual', mod: 'audit' },
     { v: 'tickets', l: 'Raise Ticket', mod: 'tickets' },
     { v: 'users', l: 'Manage Users', mod: 'users' },
     { v: 'roles', l: 'Access', mod: 'roles' },
