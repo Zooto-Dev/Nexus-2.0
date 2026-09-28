@@ -209,6 +209,7 @@ function accessLevel(dept, desig, mod) {
 }
 function can(mod, level) {             // level: 'view' | 'edit'
   const r = myRole(); if (!r) return false;
+  if (mod === 'users') return !!r.system;           // user management: Super Admin only
   if (r.system || r.admin) return true;
   const p = r.perms ? (r.perms[mod] || 'none') : accessLevel(ME.department, ME.designation, mod);
   return level === 'edit' ? p === 'edit' : (p === 'view' || p === 'edit');

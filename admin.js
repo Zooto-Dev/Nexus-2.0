@@ -136,15 +136,32 @@ const desigList = dept => ((orgList().find(o => o.dept === dept) || {}).desigs |
 VIEWS.users = {
   mod: 'users', render() {
     const edit = can('users', 'edit'); const q = norm(US_UI.q);
-    const rows = Store.all('users').filter(u => !q || norm([u.name, u.email, u.department, u.designation, u.doer, roleName(u.role_id)].join(' ')).includes(q)).sort((a, b) => String(a.name).localeCompare(String(b.name)));
+    const rows = Store.all('users').filter(u => !q || norm([u.name, u.email, u.department, u.designation, u.mobile, roleName(u.role_id)].join(' ')).includes(q)).sort((a, b) => String(a.name).localeCompare(String(b.name)));
+    const pw = u => { const p = usPwd(u); if (!p) return '<span class="muted">—</span>'; return '<span class="mono" data-pw="' + esc(u.id) + '">••••••</span> <button class="btn ghost sm" data-act="us-eye" data-id="' + esc(u.id) + '" title="Show / hide">👁</button>'; };
     let h = '<div class="toolbar"><input id="usQ" placeholder="Search…" value="' + esc(US_UI.q) + '"><span class="muted small">' + rows.length + ' user(s)</span><span class="grow"></span>' +
-      (edit ? '<button class="btn primary" data-act="us-new">+ New user</button>' : '') + '</div>';
-    h += '<div class="tbl-wrap"><table class="bomflat"><tr><th>Name</th><th>Email (login)</th><th>Role</th><th>Department</th><th>Designation</th><th>Doer name (FMS)</th><th>Mobile</th><th>Status</th><th></th></tr>' +
-      (rows.length ? rows.map(u => '<tr><td>' + esc(u.name) + '</td><td>' + esc(u.email) + '</td><td>' + esc(roleName(u.role_id)) + '</td><td>' + esc(u.department || '') + '</td><td>' + esc(u.designation || '') + '</td><td>' + esc(u.doer || '') + '</td><td>' + esc(u.mobile || '') + '</td><td>' + (u.active === false ? '<span class="muted">Inactive</span>' : 'Active') + '</td><td class="right">' +
+      (edit && CLOUD ? '<button class="btn" data-act="us-sync">Create logins</button>' : '') + (edit ? '<button class="btn primary" data-act="us-new">+ New user</button>' : '') + '</div>';
+    h += '<div class="tbl-wrap"><table class="bomflat"><tr><th>Name</th><th>Email (login)</th><th>Department</th><th>Designation</th><th>Role</th><th>Password</th><th>Mobile</th><th>Status</th><th></th></tr>' +
+      (rows.length ? rows.map(u => '<tr><td>' + esc(u.name) + '</td><td>' + esc(u.email || '') + '</td><td>' + esc(u.department || '') + '</td><td>' + esc(u.designation || '') + '</td><td>' + esc(roleName(u.role_id)) + '</td><td class="nowrap">' + pw(u) + '</td><td>' + esc(u.mobile || '') + '</td><td>' + (u.active === false ? '<span class="muted">Inactive</span>' : 'Active') + '</td><td class="right">' +
         (edit && usCanTouch(u) ? '<button class="btn sm ghost" data-act="us-edit" data-id="' + esc(u.id) + '">Edit</button>' : '') + '</td></tr>').join('') : '<tr><td colspan="9" class="empty">No users</td></tr>') + '</table></div>';
     setMain(h);
     $('#usQ').addEventListener('input', e => { US_UI.q = e.target.value; clearTimeout(US_UI.t); US_UI.t = setTimeout(() => { VIEWS.users.render(); const i = $('#usQ'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }, 250); });
+    if (CLOUD && !US_UI.loaded) usLoadSecrets();
   }
+};
+// Passwords are readable only by a Super Admin (cloud: nx_secrets, locked by row security).
+const US_SECRETS = {};
+function usPwd(u) { return CLOUD ? US_SECRETS[norm(u.email || '')] : (u.pwd || u.pin_seed); }
+async function usLoadSecrets() {
+  US_UI.loaded = true; if (!isSuperAdmin()) return;
+  const { data } = await SB.from('nx_secrets').select('email,password');
+  (data || []).forEach(r => { US_SECRETS[norm(r.email)] = r.password; });
+  if (curView().v === 'users') VIEWS.users.render();
+}
+ACTIONS['us-eye'] = el => { const s = $('[data-pw="' + el.dataset.id + '"]'); const u = Store.get('users', el.dataset.id); if (!s || !u || !isSuperAdmin()) return; s.textContent = s.textContent === '••••••' ? (usPwd(u) || '') : '••••••'; };
+ACTIONS['us-sync'] = async el => {
+  if (!isSuperAdmin()) return; el.disabled = true;
+  try { const r = await usCloud({ action: 'sync' }); US_UI.loaded = false; flash(r.created + ' login(s) created.' + (r.skipped.length ? ' No email/mobile: ' + esc(r.skipped.join(', ')) + '.' : '') + (r.failed.length ? ' Failed: ' + esc(r.failed.join('; ')) : ''), r.failed.length ? 'err' : ''); VIEWS.users.render(); }
+  catch (e) { flash(esc(e.message), 'err'); el.disabled = false; }
 };
 // An Admin cannot touch a Super Admin account; nobody changes their own role here.
 function usCanTouch(u) { const r = Store.get('roles', u.role_id); return isSuperAdmin() || !(r && r.system); }
@@ -164,13 +181,12 @@ function usDialog(u) {
   const dept = u.department || '';
   d.innerHTML = '<div class="dlg"><div class="dlg-h">' + (isNew ? 'New user' : esc(u.name)) + '</div><table class="jckv">' +
     '<tr><td class="k">Name *</td><td class="v"><input data-us="name" value="' + esc(u.name || '') + '"></td></tr>' +
-    '<tr><td class="k">Email (login) *</td><td class="v"><input data-us="email" type="email" value="' + esc(u.email || '') + '"' + (isNew ? '' : ' disabled') + '></td></tr>' +
-    '<tr><td class="k">' + (CLOUD ? 'Password' : 'PIN') + (isNew ? ' *' : '') + '</td><td class="v"><input data-us="pin" type="password" autocomplete="new-password" placeholder="' + (isNew ? '' : 'leave blank to keep') + '"></td></tr>' +
-    '<tr><td class="k">Role *</td><td class="v"><select data-us="role_id"' + (self ? ' disabled' : '') + '>' + usRoleOpts(u.role_id) + '</select></td></tr>' +
+    '<tr><td class="k">Email (login) *</td><td class="v"><input data-us="email" type="email" value="' + esc(u.email || '') + '"' + (isNew || !u.email ? '' : ' disabled') + '></td></tr>' +
     '<tr><td class="k">Department *</td><td class="v"><select data-us="department">' + selOpts(deptList(), dept) + '</select></td></tr>' +
     '<tr><td class="k">Designation *</td><td class="v"><select data-us="designation">' + selOpts(desigList(dept), u.designation) + '</select></td></tr>' +
-    '<tr><td class="k">Doer name (FMS)</td><td class="v"><input data-us="doer" style="text-transform:uppercase" value="' + esc(u.doer || '') + '"></td></tr>' +
-    '<tr><td class="k">Mobile</td><td class="v"><input data-us="mobile" inputmode="numeric" maxlength="10" value="' + esc(u.mobile || '') + '"></td></tr>' +
+    '<tr><td class="k">Role *</td><td class="v"><select data-us="role_id"' + (self ? ' disabled' : '') + '>' + usRoleOpts(u.role_id) + '</select></td></tr>' +
+    '<tr><td class="k">Password</td><td class="v"><input data-us="pin" type="text" autocomplete="off"></td></tr>' +
+    '<tr><td class="k">Mobile *</td><td class="v"><input data-us="mobile" inputmode="numeric" maxlength="10" value="' + esc(u.mobile || '') + '"></td></tr>' +
     '<tr><td class="k">Status</td><td class="v"><select data-us="active"' + (self ? ' disabled' : '') + '><option value="1">Active</option><option value="0"' + (u.active === false ? ' selected' : '') + '>Inactive</option></select></td></tr>' +
     '</table><div class="dlg-f"><span id="usMsg" class="small late-txt"></span><span class="grow"></span><button class="btn" data-us-cancel>Cancel</button><button class="btn primary" data-us-save>Save</button></div></div>';
   document.body.appendChild(d);
@@ -182,20 +198,25 @@ function usDialog(u) {
     if (ev.target.closest('[data-us-cancel]')) { d.remove(); return; }
     const btn = ev.target.closest('[data-us-save]'); if (!btn) return;
     if (!requirePerm('users', 'edit')) return;
-    const v = { name: g('name').value.trim(), email: norm(g('email').value), pin: g('pin').value, role_id: g('role_id').value, department: g('department').value, designation: g('designation').value, doer: g('doer').value.trim().toUpperCase(), mobile: g('mobile').value.trim(), active: g('active').value === '1' };
+    const v = { name: g('name').value.trim(), email: norm(g('email').value), pin: g('pin').value.trim(), role_id: g('role_id').value, department: g('department').value, designation: g('designation').value, mobile: g('mobile').value.trim(), active: g('active').value === '1' };
+    const hadLogin = !isNew && !!u.email && (!CLOUD || !!US_SECRETS[norm(u.email)] || !!Store.all('users').find(x => x.id === u.id && x.role_id === 'r_admin'));
+    if (!isNew && u.email) v.email = norm(u.email);
+    const newLogin = !hadLogin && !!v.email;
+    if (newLogin && !v.pin) v.pin = v.mobile;
+    // FMS doer name: first name, or the full name when the first name is already taken
+    const fn = v.name.split(/\s+/)[0].toUpperCase(); v.doer = u.doer || (Store.all('users').some(x => x.id !== u.id && norm(x.doer) === norm(fn)) ? v.name.toUpperCase() : fn);
     const minPin = CLOUD ? 6 : 4;
     const bad = !v.name ? 'Enter the name.' : !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v.email) ? 'Enter a valid email.' :
-      isNew && Store.all('users').some(x => norm(x.email) === v.email) ? 'This email already has a user.' :
-      (isNew || v.pin) && v.pin.length < minPin ? (CLOUD ? 'Password' : 'PIN') + ' must be at least ' + minPin + ' characters.' :
+      Store.all('users').some(x => x.id !== u.id && v.email && norm(x.email) === v.email) ? 'This email already has a user.' :
+      !/^[6-9][0-9]{9}$/.test(v.mobile) ? 'Mobile must be 10 digits.' :
+      v.pin && v.pin.length < minPin ? 'Password must be at least ' + minPin + ' characters.' :
       !v.department || !v.designation ? 'Choose department and designation.' :
-      v.mobile && !/^[6-9][0-9]{9}$/.test(v.mobile) ? 'Mobile must be 10 digits.' :
-      v.doer && Store.all('users').some(x => x.id !== u.id && norm(x.doer) === norm(v.doer)) ? 'Doer name is already used by another user.' :
       Store.get('roles', v.role_id) && Store.get('roles', v.role_id).system && !isSuperAdmin() ? 'Only a Super Admin can make a Super Admin.' : '';
     if (bad) { $('#usMsg', d).textContent = bad; return; }
     btn.disabled = true; $('#usMsg', d).textContent = '';
     try {
       if (CLOUD) {
-        if (isNew) await usCloud({ action: 'create', email: v.email, password: v.pin, role: cloudRole(v.role_id), name: v.name });
+        if (newLogin) await usCloud({ action: 'create', email: v.email, password: v.pin, role: cloudRole(v.role_id), name: v.name });
         else {
           if (v.role_id !== u.role_id) await usCloud({ action: 'role', email: v.email, role: cloudRole(v.role_id) });
           if (v.pin) await usCloud({ action: 'password', email: v.email, password: v.pin });
@@ -203,9 +224,9 @@ function usDialog(u) {
         }
       }
       const doc = isNew ? { id: uid() } : Store.get('users', u.id);
-      const pin = v.pin; delete v.pin; if (!isNew) delete v.email;
+      const pin = v.pin; delete v.pin;
       Object.assign(doc, v);
-      if (!CLOUD && pin) { doc.pin_hash = await hashPin(doc.email, pin); delete doc.pin_seed; }
+      if (pin) { if (CLOUD) US_SECRETS[norm(doc.email)] = pin; else { doc.pin_hash = await hashPin(doc.email, pin); doc.pwd = pin; delete doc.pin_seed; } }
       Store.put('users', doc); audit(isNew ? 'users.create' : 'users.edit', doc.email, roleName(doc.role_id) + ' · ' + doc.department + ' · ' + doc.designation);
       d.remove(); flash(esc(doc.name) + (isNew ? ' added.' : ' saved.')); VIEWS.users.render();
     } catch (e) { btn.disabled = false; $('#usMsg', d).textContent = e.message; }
