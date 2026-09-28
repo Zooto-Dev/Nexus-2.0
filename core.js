@@ -146,7 +146,7 @@ function fyNo(col, tag, width) {
   return head + String(max + 1).padStart(width || 3, '0');
 }
 // Approvals (PO approve/reject etc.) need Admin or Manager — plain edit access is not enough.
-function canApprove() { const r = myRole(); return !!r && (r.system || norm(r.name) === 'manager'); }
+function canApprove() { return isAdminRole() || can('approve', 'edit'); }
 function isSuperAdmin() { const r = myRole(); return !!(r && r.system); }
 function nextNo(col, prefix) {
   const yr = new Date().getFullYear(); const head = prefix + '-' + yr + '-';
@@ -187,17 +187,30 @@ const MODULES = [
   { key: 'tracker', label: 'FMS Tracker', note: 'Edit = mark anyone\'s step, undo' },
   { key: 'builder', label: 'FMS Builder', note: 'Edit = change & activate flows' },
   { key: 'masters', label: 'Brands, Articles & Materials' },
+  { key: 'approve', label: 'Approvals (PO, requisition)' },
+  { key: 'excess', label: 'Excess material approval' },
   { key: 'users', label: 'Users' },
-  { key: 'roles', label: 'Roles & Access' },
+  { key: 'roles', label: 'Access' },
   { key: 'settings', label: 'Settings' },
   { key: 'audit', label: 'Audit Log' }
 ];
 let ME = null;
 function myRole() { return ME ? Store.get('roles', ME.role_id) : null; }
+// Departments and designations: taken from Nexus Payroll (staff), shared by every screen.
+const DEF_ORG = [{"dept": "ACCOUNTS", "desigs": ["EXECUTIVE"]}, {"dept": "ACCOUNTS AND FINANCE", "desigs": ["ACCOUNTS EXECUTIVE", "EXECUTIVE", "MANAGER"]}, {"dept": "ADMIN", "desigs": ["EXECUTIVE"]}, {"dept": "DEVELOPMENT", "desigs": ["DESIGNER", "EXECUTIVE", "GRAPHIC DESIGNER", "MANAGER", "STITCHER"]}, {"dept": "DISPATCH", "desigs": ["EXECUTIVE", "OPERATOR"]}, {"dept": "FACILITY", "desigs": ["HOUSEKEEPING STAFF"]}, {"dept": "HR", "desigs": ["EXECUTIVE"]}, {"dept": "MAINTENANCE", "desigs": ["EXECUTIVE", "HELPER"]}, {"dept": "MANAGEMENT", "desigs": ["EXECUTIVE ASSISTANT"]}, {"dept": "MERCHANDISING", "desigs": ["INTERN", "JUNIOR MERCHANT", "SR MERCHANT"]}, {"dept": "MIS", "desigs": ["EXECUTIVE"]}, {"dept": "OPERATIONS", "desigs": ["HEAD OF OPERATIONS", "MIS EXECUTIVE", "PC"]}, {"dept": "PLANNING", "desigs": ["MANAGER"]}, {"dept": "PPC", "desigs": ["EXECUTIVE", "HEAD"]}, {"dept": "PRODUCTION", "desigs": ["HELPER", "MANAGER", "MOULDER", "OPERATOR", "PRODUCTION INCHARGE", "QC PERSON", "SPOTTER", "SUPERVISOR"]}, {"dept": "PURCHASE", "desigs": ["EXECUTIVE", "HEAD", "MANAGER"]}, {"dept": "QUALITY", "desigs": ["EXECUTIVE", "QC PERSON"]}, {"dept": "STORE", "desigs": ["DATA ENTRY OPERATOR", "EXECUTIVE", "MANAGER"]}];
+function orgList() { const o = settings().org; return o && o.length ? o : DEF_ORG; }
+function isAdminRole() { const r = myRole(); return !!(r && (r.system || r.admin)); }
+function accessOf() { const a = settings().access; return a && a.dept ? a : defaultAccess(); }
+// Access for a User: designation setting wins over the department setting.
+function accessLevel(dept, desig, mod) {
+  const a = accessOf(); const d = (a.desig || {})[(dept || '') + '|' + (desig || '')];
+  if (d && d[mod]) return d[mod];
+  return ((a.dept || {})[dept || ''] || {})[mod] || 'none';
+}
 function can(mod, level) {             // level: 'view' | 'edit'
   const r = myRole(); if (!r) return false;
-  if (r.system) return true;
-  const p = (r.perms || {})[mod] || 'none';
+  if (r.system || r.admin) return true;
+  const p = r.perms ? (r.perms[mod] || 'none') : accessLevel(ME.department, ME.designation, mod);
   return level === 'edit' ? p === 'edit' : (p === 'view' || p === 'edit');
 }
 function requirePerm(mod, level) { if (can(mod, level)) return true; flash('You do not have ' + level + ' access to ' + mod + '.', 'err'); return false; }
@@ -424,7 +437,7 @@ const NAV = [
     { v: 'activity', l: 'Activity List', mod: 'audit' },
     { v: 'tickets', l: 'Raise Ticket', mod: 'tickets' },
     { v: 'users', l: 'Manage Users', mod: 'users' },
-    { v: 'roles', l: 'Roles & Access', mod: 'roles' },
+    { v: 'roles', l: 'Access', mod: 'roles' },
     { v: 'settings', l: 'Settings', mod: 'settings' },
     { v: 'audit', l: 'Audit Log', mod: 'audit' }] },
   { menu: 'Dispatch', cnt: 'dispatch', items: [
@@ -609,6 +622,7 @@ const PAGE_SIZE = 20;
 const PAGER_STATE = new Map();   // hash|tableIndex -> current page
 function applyPagination(root) {
   root.querySelectorAll('.tbl-wrap > table').forEach((tbl, ti) => {
+    if (tbl.classList.contains('nopage')) return;
     const rows = Array.from(tbl.rows).filter(r => !r.querySelector('th'));
     if (!rows.length || rows.some(r => r.querySelector('.empty'))) return;
     // group rows that must stay together: rowspan continuations + attached rows (size grid, inline forms)

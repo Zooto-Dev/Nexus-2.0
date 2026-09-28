@@ -519,7 +519,7 @@ ACTIONS['grn-save'] = () => {
 };
 
 /* ================= Excess approval (CEO) ================= */
-function canApproveExcess() { const r = myRole(); return !!r && (r.system || norm(r.name) === 'ceo'); }
+function canApproveExcess() { return isAdminRole() || can('excess', 'edit'); }
 VIEWS.excessapproval = {
   mod: 'purchase', render() {
     const ok = canApproveExcess(); const rows = [];

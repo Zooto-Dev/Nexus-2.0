@@ -6,6 +6,25 @@ const DEFAULT_O2D_SPEC = {"process": {"id": "o2d", "name": "Order to Dispatch", 
 const ALL_EDIT = () => Object.fromEntries(MODULES.map(m => [m.key, 'edit']));
 function rolePerms(edit, view) { const p = {}; MODULES.forEach(m => p[m.key] = 'none'); view.forEach(k => p[k] = 'view'); edit.forEach(k => p[k] = 'edit'); return p; }
 const WORK_VIEW = ['dashboard', 'orders', 'tracker', 'dispatch'];
+// Starting access per department (changed later in Operations › Access); managers and heads can approve.
+function defaultAccess() {
+  const T = {
+    ops: rolePerms(['tasks', 'orders', 'purchase', 'merchant', 'store', 'development', 'production', 'accounts', 'dispatch', 'tickets', 'checklist', 'tracker', 'masters'], ['dashboard', 'builder', 'users', 'audit']),
+    purchase: rolePerms(['tasks', 'purchase', 'tickets', 'checklist'], WORK_VIEW.concat(['store', 'masters'])),
+    merchant: rolePerms(['tasks', 'orders', 'merchant', 'masters', 'tickets', 'checklist'], WORK_VIEW.concat(['development'])),
+    store: rolePerms(['tasks', 'store', 'tickets', 'checklist'], WORK_VIEW.concat(['purchase', 'production', 'masters'])),
+    dev: rolePerms(['tasks', 'development', 'tickets', 'checklist'], WORK_VIEW.concat(['store', 'masters'])),
+    production: rolePerms(['tasks', 'production', 'tickets', 'checklist'], WORK_VIEW.concat(['store', 'development'])),
+    accounts: rolePerms(['tasks', 'accounts', 'tickets', 'checklist'], WORK_VIEW.concat(['masters'])),
+    qc: rolePerms(['tasks', 'tickets', 'checklist'], WORK_VIEW),
+    dispatch: rolePerms(['tasks', 'dispatch', 'tickets', 'checklist'], ['dashboard', 'orders', 'tracker', 'accounts']),
+    view: rolePerms(['tasks', 'tickets', 'checklist'], WORK_VIEW)
+  };
+  const map = { 'OPERATIONS': 'ops', 'MANAGEMENT': 'ops', 'MIS': 'ops', 'PURCHASE': 'purchase', 'MERCHANDISING': 'merchant', 'STORE': 'store', 'DEVELOPMENT': 'dev', 'PRODUCTION': 'production', 'PPC': 'production', 'PLANNING': 'production', 'ACCOUNTS': 'accounts', 'ACCOUNTS AND FINANCE': 'accounts', 'QUALITY': 'qc', 'DISPATCH': 'dispatch' };
+  const dept = {}; const desig = {};
+  orgList().forEach(o => { dept[o.dept] = clone(T[map[o.dept] || 'view']); o.desigs.forEach(g => { if (/MANAGER|HEAD/.test(g)) desig[o.dept + '|' + g] = { approve: 'edit' }; }); });
+  return { dept, desig };
+}
 
 function fyTag() { const d = new Date(); const y = d.getMonth() >= 3 ? d.getFullYear() : d.getFullYear() - 1; return y + '-' + String((y + 1) % 100).padStart(2, '0'); }
 function seedData(cloud) {
@@ -18,32 +37,24 @@ function seedData(cloud) {
       holidays: [{ date: now.getFullYear() + '-10-02', name: 'Gandhi Jayanti' }]
     },
     roles: [
-      { id: 'r_admin', name: 'Super Admin', system: true, perms: ALL_EDIT() },
-      { id: 'r_manager', name: 'Manager', perms: rolePerms(['tasks', 'orders', 'purchase', 'merchant', 'store', 'development', 'production', 'accounts', 'dispatch', 'tickets', 'checklist', 'tracker', 'masters'], ['dashboard', 'builder', 'users', 'audit']) },
-      { id: 'r_purchase', name: 'Purchase', perms: rolePerms(['tasks', 'purchase', 'tickets', 'checklist'], WORK_VIEW.concat(['store', 'masters'])) },
-      { id: 'r_merchant', name: 'Merchant', perms: rolePerms(['tasks', 'orders', 'merchant', 'masters', 'tickets', 'checklist'], WORK_VIEW.concat(['development'])) },
-      { id: 'r_store', name: 'Store', perms: rolePerms(['tasks', 'store', 'tickets', 'checklist'], WORK_VIEW.concat(['purchase', 'production', 'masters'])) },
-      { id: 'r_dev', name: 'Development', perms: rolePerms(['tasks', 'development', 'tickets', 'checklist'], WORK_VIEW.concat(['store', 'masters'])) },
-      { id: 'r_production', name: 'Production', perms: rolePerms(['tasks', 'production', 'tickets', 'checklist'], WORK_VIEW.concat(['store', 'development'])) },
-      { id: 'r_accounts', name: 'Accounts', perms: rolePerms(['tasks', 'accounts', 'tickets', 'checklist'], WORK_VIEW.concat(['masters'])) },
-      { id: 'r_qc', name: 'QC', perms: rolePerms(['tasks', 'tickets', 'checklist'], WORK_VIEW) },
-      { id: 'r_dispatch', name: 'Dispatch', perms: rolePerms(['tasks', 'dispatch', 'tickets', 'checklist'], ['dashboard', 'orders', 'tracker', 'accounts']) },
-      { id: 'r_viewer', name: 'Viewer', perms: rolePerms([], WORK_VIEW.concat(['tickets', 'checklist'])) }
+      { id: 'r_admin', name: 'Super Admin', system: true },
+      { id: 'r_adm', name: 'Admin', admin: true },
+      { id: 'r_user', name: 'User' }
     ],
     users: [], customers: [], items: [], materials: [], vendors: [], rsjw: [], processes: [], orders: [], dispatches: [], purchase_orders: [], sourcing: [], grns: [], inwards: [], issues: [], rtvs: [], boms: [], job_cards: [], requisitions: [], tickets: [], checklist: [], audit: []
   };
-  const U = (name, email, role_id, doer) => ({ id: 'u_' + doer.toLowerCase(), name, email, role_id, doer, active: true, pin_seed: '1234', seed: !!cloud });
+  const U = (name, email, role_id, doer, department, designation) => ({ id: 'u_' + doer.toLowerCase(), name, email, role_id, doer, department: department || '', designation: designation || '', active: true, pin_seed: '1234', seed: !!cloud });
   base.users = cloud ? [U('Super Admin', 'admin@nexus.local', 'r_admin', 'ADMIN')] : [
     U('Admin', 'admin@nexus.local', 'r_admin', 'ADMIN'),
-    U('Pankaj (Manager)', 'ops@nexus.local', 'r_manager', 'OPS'),
-    U('Ashish (Purchase)', 'purchase@nexus.local', 'r_purchase', 'PURCHASE'),
-    U('Pooja (Merchant)', 'merchant@nexus.local', 'r_merchant', 'MERCHANT'),
-    U('Suresh (Store)', 'store@nexus.local', 'r_store', 'STORE'),
-    U('Manoj (Development)', 'development@nexus.local', 'r_dev', 'DEVELOPMENT'),
-    U('Vikas (Production)', 'production@nexus.local', 'r_production', 'PRODUCTION'),
-    U('Neha (Accounts)', 'accounts@nexus.local', 'r_accounts', 'ACCOUNTS'),
-    U('Kavita (QC)', 'qc@nexus.local', 'r_qc', 'QC'),
-    U('Pintu (Dispatch)', 'dispatch@nexus.local', 'r_dispatch', 'DISPATCH')
+    U('Pankaj (Operations)', 'ops@nexus.local', 'r_user', 'OPS', 'OPERATIONS', 'HEAD OF OPERATIONS'),
+    U('Ashish (Purchase)', 'purchase@nexus.local', 'r_user', 'PURCHASE', 'PURCHASE', 'EXECUTIVE'),
+    U('Pooja (Merchant)', 'merchant@nexus.local', 'r_user', 'MERCHANT', 'MERCHANDISING', 'SR MERCHANT'),
+    U('Suresh (Store)', 'store@nexus.local', 'r_user', 'STORE', 'STORE', 'EXECUTIVE'),
+    U('Manoj (Development)', 'development@nexus.local', 'r_user', 'DEVELOPMENT', 'DEVELOPMENT', 'EXECUTIVE'),
+    U('Vikas (Production)', 'production@nexus.local', 'r_user', 'PRODUCTION', 'PRODUCTION', 'SUPERVISOR'),
+    U('Neha (Accounts)', 'accounts@nexus.local', 'r_user', 'ACCOUNTS', 'ACCOUNTS AND FINANCE', 'EXECUTIVE'),
+    U('Kavita (QC)', 'qc@nexus.local', 'r_user', 'QC', 'QUALITY', 'EXECUTIVE'),
+    U('Pintu (Dispatch)', 'dispatch@nexus.local', 'r_user', 'DISPATCH', 'DISPATCH', 'EXECUTIVE')
   ];
   base.processes = [{ id: 'p_o2d_v1', code: 'o2d', version: 1, name: DEFAULT_O2D_SPEC.process.name, spec: clone(DEFAULT_O2D_SPEC), active: true, created_at: now.toISOString(), created_by: 'system', note: 'Built from Nexus O2D flow chart' }];
   if (cloud) return base;

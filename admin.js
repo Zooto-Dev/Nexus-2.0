@@ -129,58 +129,121 @@ VIEWS.items = {
 };
 
 /* ---------- users ---------- */
+const US_UI = { q: '' };
+const roleName = id => (Store.get('roles', id) || {}).name || '';
+const deptList = () => orgList().map(o => o.dept);
+const desigList = dept => ((orgList().find(o => o.dept === dept) || {}).desigs || []);
 VIEWS.users = {
   mod: 'users', render() {
-    masterView({
-      col: 'users', mod: 'users', title: 'Users', view: VIEWS.users, sort: 'name',
-      cols: [{ k: 'name', l: 'Name', ph: 'Full name' }, { k: 'email', l: 'Email (login)', ph: 'name@company.com' }, { k: 'role_id', l: 'Role', opts: () => Store.all('roles').map(r => ({ v: r.id, l: r.name })) },
-        { k: 'doer', l: 'Doer name (FMS)', w: 130, upper: true, ph: 'e.g. SALES' }, { k: 'mobile', l: 'Mobile', w: 120 }, { k: 'active', l: 'Active', type: 'check' }].concat(CLOUD ? [] : [{ k: 'new_pin', l: 'Set PIN', w: 80, ph: '4+ digits', secret: true, noPaste: true }]),
-      defaults: { role_id: 'r_viewer', active: true },
-      validate: (d, old) => {
-        const e = uniq('users', 'email', 'Email')(d); if (e) return e;
-        if (!/^[^@\s]+@[^@\s]+$/.test(d.email)) return 'Enter a valid email.';
-        if (old && old.id === ME.id && (d.active === false || d.role_id !== old.role_id)) return 'You cannot deactivate or change the role of your own account.';
-        if (!old && !CLOUD && !(d.new_pin && d.new_pin.length >= 4)) return 'Set a PIN (4+ digits) for the new user.';
-        if (d.new_pin && d.new_pin.length < 4) return 'PIN must be at least 4 characters.';
-        return '';
-      },
-      beforeAdd: d => { d.email = norm(d.email); if (d.new_pin) { const p = d.new_pin; d.new_pin = ''; hashPin(d.email, p).then(hsh => { d.pin_hash = hsh; Store.put('users', d); }); } },
-      after: (d, k) => { if (k === 'email') { d.email = norm(d.email); Store.put('users', d); } if (k === 'new_pin' && d.new_pin) { const p = d.new_pin; d.new_pin = ''; delete d.pin_seed; hashPin(d.email, p).then(hsh => { d.pin_hash = hsh; Store.put('users', d); VIEWS.users.render(); }); } },
-      canDelete: d => d.id !== ME.id,
-      inUse: d => d.id === ME.id ? 'You cannot delete yourself.' : ''
-    });
-    $('#main').insertAdjacentHTML('beforeend', '');
+    const edit = can('users', 'edit'); const q = norm(US_UI.q);
+    const rows = Store.all('users').filter(u => !q || norm([u.name, u.email, u.department, u.designation, u.doer, roleName(u.role_id)].join(' ')).includes(q)).sort((a, b) => String(a.name).localeCompare(String(b.name)));
+    let h = '<div class="toolbar"><input id="usQ" placeholder="Search…" value="' + esc(US_UI.q) + '"><span class="muted small">' + rows.length + ' user(s)</span><span class="grow"></span>' +
+      (edit ? '<button class="btn primary" data-act="us-new">+ New user</button>' : '') + '</div>';
+    h += '<div class="tbl-wrap"><table class="bomflat"><tr><th>Name</th><th>Email (login)</th><th>Role</th><th>Department</th><th>Designation</th><th>Doer name (FMS)</th><th>Mobile</th><th>Status</th><th></th></tr>' +
+      (rows.length ? rows.map(u => '<tr><td>' + esc(u.name) + '</td><td>' + esc(u.email) + '</td><td>' + esc(roleName(u.role_id)) + '</td><td>' + esc(u.department || '') + '</td><td>' + esc(u.designation || '') + '</td><td>' + esc(u.doer || '') + '</td><td>' + esc(u.mobile || '') + '</td><td>' + (u.active === false ? '<span class="muted">Inactive</span>' : 'Active') + '</td><td class="right">' +
+        (edit && usCanTouch(u) ? '<button class="btn sm ghost" data-act="us-edit" data-id="' + esc(u.id) + '">Edit</button>' : '') + '</td></tr>').join('') : '<tr><td colspan="9" class="empty">No users</td></tr>') + '</table></div>';
+    setMain(h);
+    $('#usQ').addEventListener('input', e => { US_UI.q = e.target.value; clearTimeout(US_UI.t); US_UI.t = setTimeout(() => { VIEWS.users.render(); const i = $('#usQ'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }, 250); });
   }
 };
+// An Admin cannot touch a Super Admin account; nobody changes their own role here.
+function usCanTouch(u) { const r = Store.get('roles', u.role_id); return isSuperAdmin() || !(r && r.system); }
+function usRoleOpts(cur) { return Store.all('roles').filter(r => isSuperAdmin() || !r.system).sort((a, b) => (b.system ? 2 : b.admin ? 1 : 0) - (a.system ? 2 : a.admin ? 1 : 0)).map(r => '<option value="' + esc(r.id) + '"' + (r.id === cur ? ' selected' : '') + '>' + esc(r.name) + '</option>').join(''); }
+async function usCloud(body) {
+  const { data, error } = await SB.functions.invoke('nx-users', { body });
+  if (error) { let m = error.message; try { const j = await error.context.json(); m = j.error || m; } catch (e) { } throw new Error(m); }
+  if (data && data.error) throw new Error(data.error);
+  return data;
+}
+const cloudRole = id => { const r = Store.get('roles', id) || {}; return r.system ? 'superadmin' : r.admin ? 'admin' : 'user'; };
+function usDialog(u) {
+  const old = $('#usDlg'); if (old) old.remove();
+  const isNew = !u; u = u || { role_id: 'r_user', active: true };
+  const self = !isNew && ME && u.id === ME.id;
+  const d = document.createElement('div'); d.id = 'usDlg'; d.className = 'dlg-back';
+  const dept = u.department || '';
+  d.innerHTML = '<div class="dlg"><div class="dlg-h">' + (isNew ? 'New user' : esc(u.name)) + '</div><table class="jckv">' +
+    '<tr><td class="k">Name *</td><td class="v"><input data-us="name" value="' + esc(u.name || '') + '"></td></tr>' +
+    '<tr><td class="k">Email (login) *</td><td class="v"><input data-us="email" type="email" value="' + esc(u.email || '') + '"' + (isNew ? '' : ' disabled') + '></td></tr>' +
+    '<tr><td class="k">' + (CLOUD ? 'Password' : 'PIN') + (isNew ? ' *' : '') + '</td><td class="v"><input data-us="pin" type="password" autocomplete="new-password" placeholder="' + (isNew ? '' : 'leave blank to keep') + '"></td></tr>' +
+    '<tr><td class="k">Role *</td><td class="v"><select data-us="role_id"' + (self ? ' disabled' : '') + '>' + usRoleOpts(u.role_id) + '</select></td></tr>' +
+    '<tr><td class="k">Department *</td><td class="v"><select data-us="department">' + selOpts(deptList(), dept) + '</select></td></tr>' +
+    '<tr><td class="k">Designation *</td><td class="v"><select data-us="designation">' + selOpts(desigList(dept), u.designation) + '</select></td></tr>' +
+    '<tr><td class="k">Doer name (FMS)</td><td class="v"><input data-us="doer" style="text-transform:uppercase" value="' + esc(u.doer || '') + '"></td></tr>' +
+    '<tr><td class="k">Mobile</td><td class="v"><input data-us="mobile" inputmode="numeric" maxlength="10" value="' + esc(u.mobile || '') + '"></td></tr>' +
+    '<tr><td class="k">Status</td><td class="v"><select data-us="active"' + (self ? ' disabled' : '') + '><option value="1">Active</option><option value="0"' + (u.active === false ? ' selected' : '') + '>Inactive</option></select></td></tr>' +
+    '</table><div class="dlg-f"><span id="usMsg" class="small late-txt"></span><span class="grow"></span><button class="btn" data-us-cancel>Cancel</button><button class="btn primary" data-us-save>Save</button></div></div>';
+  document.body.appendChild(d);
+  $('[data-us="name"]', d).focus();
+  const g = k => $('[data-us="' + k + '"]', d);
+  g('department').addEventListener('change', () => { g('designation').innerHTML = selOpts(desigList(g('department').value), ''); });
+  d.addEventListener('keydown', ev => { if (ev.key === 'Escape') d.remove(); });
+  d.addEventListener('click', async ev => {
+    if (ev.target.closest('[data-us-cancel]')) { d.remove(); return; }
+    const btn = ev.target.closest('[data-us-save]'); if (!btn) return;
+    if (!requirePerm('users', 'edit')) return;
+    const v = { name: g('name').value.trim(), email: norm(g('email').value), pin: g('pin').value, role_id: g('role_id').value, department: g('department').value, designation: g('designation').value, doer: g('doer').value.trim().toUpperCase(), mobile: g('mobile').value.trim(), active: g('active').value === '1' };
+    const minPin = CLOUD ? 6 : 4;
+    const bad = !v.name ? 'Enter the name.' : !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v.email) ? 'Enter a valid email.' :
+      isNew && Store.all('users').some(x => norm(x.email) === v.email) ? 'This email already has a user.' :
+      (isNew || v.pin) && v.pin.length < minPin ? (CLOUD ? 'Password' : 'PIN') + ' must be at least ' + minPin + ' characters.' :
+      !v.department || !v.designation ? 'Choose department and designation.' :
+      v.mobile && !/^[6-9][0-9]{9}$/.test(v.mobile) ? 'Mobile must be 10 digits.' :
+      v.doer && Store.all('users').some(x => x.id !== u.id && norm(x.doer) === norm(v.doer)) ? 'Doer name is already used by another user.' :
+      Store.get('roles', v.role_id) && Store.get('roles', v.role_id).system && !isSuperAdmin() ? 'Only a Super Admin can make a Super Admin.' : '';
+    if (bad) { $('#usMsg', d).textContent = bad; return; }
+    btn.disabled = true; $('#usMsg', d).textContent = '';
+    try {
+      if (CLOUD) {
+        if (isNew) await usCloud({ action: 'create', email: v.email, password: v.pin, role: cloudRole(v.role_id), name: v.name });
+        else {
+          if (v.role_id !== u.role_id) await usCloud({ action: 'role', email: v.email, role: cloudRole(v.role_id) });
+          if (v.pin) await usCloud({ action: 'password', email: v.email, password: v.pin });
+          if (v.active !== (u.active !== false)) await usCloud({ action: 'active', email: v.email, active: v.active });
+        }
+      }
+      const doc = isNew ? { id: uid() } : Store.get('users', u.id);
+      const pin = v.pin; delete v.pin; if (!isNew) delete v.email;
+      Object.assign(doc, v);
+      if (!CLOUD && pin) { doc.pin_hash = await hashPin(doc.email, pin); delete doc.pin_seed; }
+      Store.put('users', doc); audit(isNew ? 'users.create' : 'users.edit', doc.email, roleName(doc.role_id) + ' · ' + doc.department + ' · ' + doc.designation);
+      d.remove(); flash(esc(doc.name) + (isNew ? ' added.' : ' saved.')); VIEWS.users.render();
+    } catch (e) { btn.disabled = false; $('#usMsg', d).textContent = e.message; }
+  });
+}
+ACTIONS['us-new'] = () => { if (requirePerm('users', 'edit')) usDialog(null); };
+ACTIONS['us-edit'] = el => { const u = Store.get('users', el.dataset.id); if (u && usCanTouch(u) && requirePerm('users', 'edit')) usDialog(u); };
 
-/* ---------- roles & access matrix ---------- */
+/* ---------- access by department / designation ---------- */
+const AC_UI = { dept: '', desig: '' };
 VIEWS.roles = {
   mod: 'roles', render() {
-    const edit = can('roles', 'edit'); const roles = Store.all('roles');
-    let h = '';
-    h += '<div class="tbl-wrap"><table><tr><th>Module</th>' + roles.map(r => '<th class="nowrap">' + esc(r.name) + '</th>').join('') + '</tr>' +
-      MODULES.map(m => '<tr><td>' + esc(m.label) + '</td>' + roles.map(r => {
-        const p = r.system ? 'edit' : ((r.perms || {})[m.key] || 'none');
-        const txt = p === 'edit' ? '<b style="color:var(--accent)">Edit</b>' : p === 'view' ? 'View' : '<span class="muted">—</span>';
-        return '<td' + (edit && !r.system ? ' class="click" data-act="perm" data-r="' + esc(r.id) + '" data-m="' + m.key + '" style="cursor:pointer"' : '') + '>' + txt + '</td>';
-      }).join('') + '</tr>').join('') + '</table></div>';
-    if (edit) h += '<div class="row" style="margin-top:10px"><label>New role<input id="newRole" placeholder="e.g. Merchandiser"></label><label>Copy access from<select id="copyRole"><option value="">— none —</option>' + roles.map(r => '<option value="' + esc(r.id) + '">' + esc(r.name) + '</option>').join('') + '</select></label><button class="btn" data-act="role-add">Add role</button></div>';
-    h += '';
-    setMain(h);
+    const edit = can('roles', 'edit'); const a = accessOf();
+    if (!AC_UI.dept) AC_UI.dept = deptList()[0] || '';
+    const key = AC_UI.dept + '|' + AC_UI.desig; const dm = (a.dept || {})[AC_UI.dept] || {}; const gm = AC_UI.desig ? ((a.desig || {})[key] || {}) : null;
+    const L = { none: 'No access', view: 'View', edit: 'Edit' };
+    let h = '<div class="toolbar"><label>Department<select id="acDept">' + deptList().map(x => '<option' + (x === AC_UI.dept ? ' selected' : '') + '>' + esc(x) + '</option>').join('') + '</select></label>' +
+      '<label>Designation<select id="acDesig"><option value="">All designations</option>' + desigList(AC_UI.dept).map(x => '<option' + (x === AC_UI.desig ? ' selected' : '') + '>' + esc(x) + '</option>').join('') + '</select></label></div>';
+    h += '<div class="tbl-wrap"><table class="bomflat nopage"><tr><th>Screen</th><th>Access</th><th>Users</th></tr>' + MODULES.map(m => {
+      const dl = dm[m.key] || 'none';
+      const cur = gm ? (gm[m.key] || '') : dl;
+      const opts = (gm ? [['', 'Same as department (' + L[dl] + ')']] : []).concat(Object.entries(L));
+      return '<tr><td>' + esc(m.label) + '</td><td><select data-acm="' + m.key + '"' + (edit ? '' : ' disabled') + '>' + opts.map(([v, l]) => '<option value="' + v + '"' + (v === cur ? ' selected' : '') + '>' + esc(l) + '</option>').join('') + '</select></td><td class="num">' +
+        Store.all('users').filter(u => u.active !== false && !(Store.get('roles', u.role_id) || {}).system && !(Store.get('roles', u.role_id) || {}).admin && u.department === AC_UI.dept && (!AC_UI.desig || u.designation === AC_UI.desig) && accessLevel(u.department, u.designation, m.key) !== 'none').length + '</td></tr>';
+    }).join('') + '</table></div>';
+    const m = setMain(h);
+    $('#acDept').addEventListener('change', e => { AC_UI.dept = e.target.value; AC_UI.desig = ''; VIEWS.roles.render(); });
+    $('#acDesig').addEventListener('change', e => { AC_UI.desig = e.target.value; VIEWS.roles.render(); });
+    m.addEventListener('change', e => {
+      const k = e.target.dataset.acm; if (!k || !requirePerm('roles', 'edit')) return;
+      const st = settings(); const acc = clone(accessOf()); acc.dept = acc.dept || {}; acc.desig = acc.desig || {};
+      if (AC_UI.desig) { const g = acc.desig[AC_UI.dept + '|' + AC_UI.desig] = acc.desig[AC_UI.dept + '|' + AC_UI.desig] || {}; if (e.target.value) g[k] = e.target.value; else delete g[k]; }
+      else { const g = acc.dept[AC_UI.dept] = acc.dept[AC_UI.dept] || {}; g[k] = e.target.value; }
+      st.access = acc; Store.setSettings(st); audit('access.edit', AC_UI.dept + (AC_UI.desig ? ' / ' + AC_UI.desig : ''), k + ' → ' + (e.target.value || 'same as department'));
+      flash('Saved.'); renderNav(); VIEWS.roles.render();
+    });
   }
 };
-ACTIONS['perm'] = el => {
-  if (!requirePerm('roles', 'edit')) return; const r = Store.get('roles', el.dataset.r); r.perms = r.perms || {};
-  const cur = r.perms[el.dataset.m] || 'none'; const nx = { none: 'view', view: 'edit', edit: 'none' }[cur];
-  r.perms[el.dataset.m] = nx; Store.put('roles', r); audit('role.perm', r.name, el.dataset.m + ': ' + cur + ' → ' + nx); VIEWS.roles.render(); renderNav();
-};
-ACTIONS['role-add'] = () => {
-  const n = $('#newRole').value.trim(); if (!n) return;
-  if (Store.all('roles').some(r => norm(r.name) === norm(n))) { flash('Role exists.', 'err'); return; }
-  const src = Store.get('roles', $('#copyRole').value);
-  Store.put('roles', { id: 'r_' + uid(), name: n, perms: src ? clone(src.system ? ALL_EDIT() : src.perms) : rolePerms([], ['dashboard']) }); audit('role.create', n, src ? 'copied from ' + src.name : ''); VIEWS.roles.render();
-};
-ACTIONS['role-del'] = el => { const r = Store.get('roles', el.dataset.r); Store.del('roles', r.id); audit('role.delete', r.name, ''); VIEWS.roles.render(); };
 
 /* ---------- settings ---------- */
 VIEWS.settings = {
