@@ -84,11 +84,15 @@ VIEWS.builder = {
     const edit = can('builder', 'edit'); const proc = Store.get('processes', B.pid);
     const versions = Store.all('processes').filter(p => p.code === proc.code).sort((a, b) => a.version - b.version);
     const v = validateSpec(B.draft);
-    let h = '<div class="toolbar"><span>' + esc(B.draft.process.name) + '</span><span class="grow"></span>' +
+    const codes = Array.from(new Set(Store.all('processes').map(p => p.code)));
+    const nameOf = c => { const ps = Store.all('processes').filter(p => p.code === c); const a = ps.find(p => p.active) || ps.sort((x, y) => y.version - x.version)[0]; return (a && (a.name || (a.spec.process || {}).name)) || c; };
+    let h = '<div class="bldbar"><div class="toolbar"><select id="bldCode">' + codes.map(c => '<option value="' + esc(c) + '"' + (c === proc.code ? ' selected' : '') + '>' + esc(nameOf(c)) + '</option>').join('') + '</select>' +
+      (edit ? '<button class="btn sm" data-act="bld-new">+ New FMS</button>' : '') + '<span class="grow"></span>' +
       '<span class="muted small">Version</span>' + seg('ver', versions.map(p => ({ v: p.id, l: 'v' + p.version + (p.active ? ' ✓' : '') })), B.pid) + '</div>';
     h += '<div class="toolbar"><span class="small">' + (proc.active ? '<b>v' + proc.version + ' is live</b> — new orders use it.' : 'v' + proc.version + ' is not live.') + ' ' + (B.dirty ? '<span class="late-txt">Unsaved changes.</span>' : '') + '</span><span class="grow"></span>' +
       (edit ? (B.dirty ? '<button class="btn" data-act="bld-discard" data-confirm="Discard?">Discard</button><button class="btn primary" data-save data-act="bld-save"' + (v.errors.length ? ' disabled title="Fix errors first"' : '') + '>Save as v' + (versions[versions.length - 1].version + 1) + '</button>' : '') +
-        (!B.dirty && !proc.active ? '<button class="btn primary" data-act="bld-activate" data-confirm="Make live?"' + (v.errors.length ? ' disabled' : '') + '>Activate v' + proc.version + '</button>' : '') : '<span class="muted small">Read only</span>') + '</div>';
+        (!B.dirty && !proc.active ? '<button class="btn primary" data-act="bld-activate" data-confirm="Make live?"' + (v.errors.length ? ' disabled' : '') + '>Activate v' + proc.version + '</button>' : '') : '<span class="muted small">Read only</span>') + '</div>' +
+      (B.dirty && v.errors.length ? '<ul class="val" style="margin:0 0 6px;padding-left:18px">' + v.errors.map(x => '<li class="e">' + esc(x) + '</li>').join('') + '</ul>' : '') + '</div>';
     h += '<div class="tabs">' + [['flow', 'Flow'], ['tables', 'Doer Tables'], ['sim', 'Simulate'], ['fields', 'Fields & JSON']].map(([k, l]) => '<a data-act="bld-tab" data-t="' + k + '" class="' + (B.tab === k ? 'on' : '') + '">' + l + '</a>').join('') + '</div>';
     if (B.tab === 'flow') h += '<div class="bld"><div class="panel" style="padding:0"><div id="bSteps" class="steplist"></div>' + (edit ? '<div style="padding:8px"><button class="btn sm" data-act="bld-add">+ Add step</button></div>' : '') + '</div><div class="panel ed" id="bEd"></div><div><div id="bPv" class="toolbar"></div><div class="chart-wrap" id="bChart"></div><div id="bVal" class="panel small" style="margin-top:10px"></div></div></div>';
     else if (B.tab === 'sim') h += '<div id="bSim"></div>';
@@ -96,6 +100,7 @@ VIEWS.builder = {
     else h += '<div id="bFields"></div>';
     setMain(h);
     onSeg(bldSeg);
+    $('#bldCode').addEventListener('change', e => { if (B.dirty) { flash('Save or discard your changes first.', 'err'); e.target.value = proc.code; return; } const ps = Store.all('processes').filter(p => p.code === e.target.value); const p = ps.find(x => x.active) || ps.sort((a, b) => b.version - a.version)[0]; bldLoad(p.id); VIEWS.builder.render(); });
     if (B.tab === 'flow') { bldSide(); bldEditor(); const m = $('#main'); m.addEventListener('input', bldInput); m.addEventListener('change', bldInput); }
     if (B.tab === 'sim') bldSim();
     if (B.tab === 'tables') bldTables();
@@ -138,71 +143,78 @@ function bldSide() {
   const saveBtn = $('[data-act="bld-save"]'); if (saveBtn) saveBtn.disabled = !!v.errors.length;
 }
 function bldChart(spec, order) {
-  const L = FMSEngine.layout(spec);
   const fields = Object.assign({ created_at: new Date().toISOString(), delivery_date: ymdOf(new Date(Date.now() + 10 * 86400000)) }, B.pv);
   let res = null; try { res = FMSEngine.resolveInstance(Object.assign({}, spec, { calendar: calendar() }), { fields, actuals: {} }); } catch (e) { }
   const W = 172, H = 58, GX = 188, GY = 92, PILL = 30, PAD = 16;
   const trig0 = st => (Array.isArray(st.trigger) ? st.trigger[0] : st.trigger) || {};
-  const byId = Object.fromEntries(spec.steps.map(s => [s.id, s]));
-  const lanes = ['main', 'external', 'date'].filter(l => L.nodes.some(n => n.lane === l));
-  const pillText = l => {
-    if (l === 'main') return 'Order punch';
-    const f = Array.from(new Set(L.nodes.filter(n => n.lane === l && n.rank === 0).map(n => trig0(byId[n.id]).field).filter(Boolean))).map(fieldLabel);
-    return (l === 'date' ? 'Counted back from ' : 'Starts on ') + (f.join(' / ') || 'a date');
-  };
-  // column counts per lane/rank → overall width
-  const cnt = {}; L.nodes.forEach(n => { const k = n.lane + ':' + n.rank; cnt[k] = (cnt[k] || 0) + 1; });
-  const maxCols = Math.max(...Object.values(cnt));
-  const width = Math.max(560, PAD * 2 + maxCols * GX - (GX - W));
-  const pos = {}; const pills = {}; let y = PAD;
-  lanes.forEach(l => {
-    pills[l] = { x: width / 2, y: y + PILL / 2 }; y += PILL + 34;
-    const ranks = Math.max(...L.nodes.filter(n => n.lane === l).map(n => n.rank)) + 1;
-    for (let r = 0; r < ranks; r++) {
-      const cx = n => { const ps = L.edges.filter(e => e.to === n.id && e.kind === 'primary' && pos[e.from]).map(e => pos[e.from].x); return ps.length ? ps.reduce((a, b) => a + b, 0) / ps.length : width / 2; };
-      const row = L.nodes.filter(n => n.lane === l && n.rank === r).sort((a, b) => cx(a) - cx(b)); const tw = row.length * GX - (GX - W);
-      row.forEach((n, i) => { pos[n.id] = { x: (width - tw) / 2 + i * GX, y }; });
-      y += GY;
-    }
-    y += 18;
-  });
-  const height = y;
-  const C = { line: '#aab2bd', blue: '#1f5fae', green: '#2e7d32', amber: '#b26a00', grey: '#c9ced6', txt: '#1c2430', sub: '#6b7482' };
+  const ids = spec.steps.map(s => s.id); const byId = Object.fromEntries(spec.steps.map(s => [s.id, s]));
+  // one graph: step links + dashed links from the step that asks a date to the steps that run on that date
+  const edges = [];
+  spec.steps.forEach(s => (Array.isArray(s.trigger) ? s.trigger : [s.trigger]).forEach((t, i) => { if (t && t.type === 'afterStep' && byId[t.step]) edges.push({ from: t.step, to: s.id, kind: i === 0 ? 'primary' : 'fallback' }); }));
+  spec.steps.forEach(s => { const t = trig0(s); if (['beforeDate', 'afterDate', 'external'].includes(t.type)) { const src = spec.steps.find(x => x.capture && x.capture.field === t.field); if (src) edges.push({ from: src.id, to: s.id, kind: t.type === 'beforeDate' ? 'before' : 'date' }); } });
+  const rank = {}; ids.forEach(id => rank[id] = 0);
+  const relax = skip => { for (let n = 0; n < ids.length + 2; n++) { let ch = false; edges.forEach(e => { if (e.kind === 'fallback' || e.kind === 'before' || skip.has(e.to) || skip.has(e.from)) return; if (rank[e.to] < rank[e.from] + 1) { rank[e.to] = rank[e.from] + 1; ch = true; } }); if (!ch) break; } };
+  const beforeRoots = edges.filter(e => e.kind === 'before').map(e => e.to);
+  const late = new Set(beforeRoots); let grew = true; while (grew) { grew = false; edges.forEach(e => { if (e.kind === 'primary' && late.has(e.from) && !late.has(e.to)) { late.add(e.to); grew = true; } }); }
+  relax(late);
+  const M = Math.max(0, ...ids.filter(id => !late.has(id)).map(id => rank[id]));
+  beforeRoots.forEach(id => { const src = edges.find(e => e.to === id && e.kind === 'before'); rank[id] = Math.max(rank[src.from] + 1, M - 2); });
+  relax(new Set());
+  const maxR = Math.max(...ids.map(id => rank[id]));
+  const cnt = {}; ids.forEach(id => cnt[rank[id]] = (cnt[rank[id]] || 0) + 1);
+  const width = Math.max(560, PAD * 2 + Math.max(...Object.values(cnt)) * GX - (GX - W)) + 14;
+  const pos = {}; const pill = { x: width / 2, y: PAD + PILL / 2 }; let y = PAD + PILL + 34;
+  for (let r = 0; r <= maxR; r++) {
+    const cx = id => { const ps = edges.filter(e => e.to === id && pos[e.from]).map(e => pos[e.from].x); return ps.length ? ps.reduce((a, b) => a + b, 0) / ps.length : width / 2; };
+    const row = ids.filter(id => rank[id] === r).sort((a, b) => cx(a) - cx(b)); const tw = row.length * GX - (GX - W);
+    if (row.some(id => beforeRoots.includes(id))) y += 44;
+    row.forEach((id, i) => { pos[id] = { x: (width - tw) / 2 + i * GX + 4, y }; });
+    if (row.length) y += GY;
+  }
+  const height = y + 4;
+  const C = { line: '#aab2bd', date: '#6a4fb3', blue: '#1f5fae', green: '#2e7d32', amber: '#b26a00', grey: '#c9ced6', txt: '#1c2430', sub: '#6b7482' };
   let s = '<svg xmlns="http://www.w3.org/2000/svg" width="' + width + '" height="' + height + '" viewBox="0 0 ' + width + ' ' + height + '">';
-  s += '<defs><marker id="ar" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="' + C.line + '"/></marker>' +
+  s += '<defs><marker id="ar" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="' + C.line + '"/></marker><marker id="ard" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="' + C.date + '"/></marker>' +
     '<filter id="sh" x="-5%" y="-5%" width="110%" height="120%"><feDropShadow dx="0" dy="1" stdDeviation="1.2" flood-color="#000" flood-opacity=".10"/></filter></defs>';
   const vcurve = (x1, y1, x2, y2) => { const my = (y1 + y2) / 2; return 'M' + x1 + ',' + y1 + ' C' + x1 + ',' + my + ' ' + x2 + ',' + my + ' ' + x2 + ',' + y2; };
-  // pills + lines from pill to rank-0 steps
-  lanes.forEach(l => {
-    const p = pills[l]; const t = pillText(l); const pw = Math.max(120, t.length * 6.6 + 28);
-    L.nodes.filter(n => n.lane === l && n.rank === 0).forEach(n => { const b = pos[n.id]; s += '<path d="' + vcurve(p.x, p.y + PILL / 2, b.x + W / 2, b.y - 2) + '" fill="none" stroke="' + C.line + '" stroke-width="1.3" marker-end="url(#ar)"/>'; });
-    s += '<rect x="' + (p.x - pw / 2) + '" y="' + (p.y - PILL / 2) + '" width="' + pw + '" height="' + PILL + '" rx="15" fill="' + (l === 'main' ? '#0e6a73' : l === 'date' ? '#6a4fb3' : '#8a5a12') + '"/>' +
-      '<text x="' + p.x + '" y="' + (p.y + 4) + '" text-anchor="middle" fill="#fff" font-weight="600">' + esc(t) + '</text>';
+  const starters = ids.filter(id => !edges.some(e => e.to === id && e.kind !== 'fallback'));
+  starters.forEach(id => { const b = pos[id]; s += '<path d="' + vcurve(pill.x, pill.y + PILL / 2, b.x + W / 2, b.y - 2) + '" fill="none" stroke="' + C.line + '" stroke-width="1.3" marker-end="url(#ar)"/>'; });
+  const pt = (spec.process && spec.process.startEvent) || 'Start'; const pw = Math.max(120, pt.length * 6.6 + 28);
+  s += '<rect x="' + (pill.x - pw / 2) + '" y="' + (pill.y - PILL / 2) + '" width="' + pw + '" height="' + PILL + '" rx="15" fill="#0e6a73"/><text x="' + pill.x + '" y="' + (pill.y + 4) + '" text-anchor="middle" fill="#fff" font-weight="600">' + esc(pt) + '</text>';
+  // dates counted back: one line from the step that asks the date to a "T" pill, then short lines to each step
+  Array.from(new Set(edges.filter(e => e.kind === 'before').map(e => e.from))).forEach(src => {
+    const tos = edges.filter(e => e.kind === 'before' && e.from === src).map(e => e.to); const a = pos[src];
+    const tx = tos.reduce((m, id) => m + pos[id].x + W / 2, 0) / tos.length, ty = Math.min(...tos.map(id => pos[id].y)) - 34;
+    const f = byId[tos[0]]; const lbl = 'T = ' + fieldLabel(trig0(f).field); const tw2 = Math.max(110, lbl.length * 6.2 + 24);
+    const left = a.x + W / 2 < width / 2; const ex = left ? a.x : a.x + W, gx = left ? 6 : width - 6, px = left ? tx - tw2 / 2 - 2 : tx + tw2 / 2 + 2;
+    s += '<path d="M' + ex + ',' + (a.y + H / 2) + ' L' + gx + ',' + (a.y + H / 2) + ' L' + gx + ',' + ty + ' L' + px + ',' + ty + '" fill="none" stroke="' + C.date + '" stroke-width="1.3" stroke-dasharray="4 3" marker-end="url(#ard)"/>';
+    tos.forEach(id => { const b = pos[id]; s += '<path d="' + vcurve(tx, ty + 12, b.x + W / 2, b.y - 2) + '" fill="none" stroke="' + C.date + '" stroke-width="1.3" stroke-dasharray="4 3" marker-end="url(#ard)"/>'; });
+    s += '<rect x="' + (tx - tw2 / 2) + '" y="' + (ty - 12) + '" width="' + tw2 + '" height="24" rx="12" fill="' + C.date + '"/><text x="' + tx + '" y="' + (ty + 4) + '" text-anchor="middle" fill="#fff" font-weight="600">' + esc(lbl) + '</text>';
   });
-  L.edges.forEach(e => {
+  edges.forEach(e => {
+    if (e.kind === 'before') return;
     const a = pos[e.from], b = pos[e.to]; if (!a || !b) return;
-    const dim = res && (!res.steps[e.from].applies || !res.steps[e.to].applies);
-    const up = b.y <= a.y;
-    const d = up ? 'M' + (a.x + W) + ',' + (a.y + H / 2) + ' C' + (a.x + W + 40) + ',' + (a.y + H / 2) + ' ' + (b.x + W + 40) + ',' + (b.y + H / 2) + ' ' + (b.x + W + 2) + ',' + (b.y + H / 2) : vcurve(a.x + W / 2, a.y + H, b.x + W / 2, b.y - 2);
-    s += '<path d="' + d + '" fill="none" stroke="' + C.line + '" stroke-width="1.3"' + (e.kind === 'fallback' ? ' stroke-dasharray="4 3"' : '') + (dim ? ' opacity=".3"' : '') + ' marker-end="url(#ar)"/>';
+    const dim = res && (!res.steps[e.from].applies || !res.steps[e.to].applies); const dated = e.kind === 'before' || e.kind === 'date';
+    const d = b.y <= a.y ? 'M' + (a.x + W) + ',' + (a.y + H / 2) + ' C' + (a.x + W + 40) + ',' + (a.y + H / 2) + ' ' + (b.x + W + 40) + ',' + (b.y + H / 2) + ' ' + (b.x + W + 2) + ',' + (b.y + H / 2) : vcurve(a.x + W / 2, a.y + H, b.x + W / 2, b.y - 2);
+    s += '<path d="' + d + '" fill="none" stroke="' + (dated ? C.date : C.line) + '" stroke-width="1.3"' + (e.kind !== 'primary' ? ' stroke-dasharray="4 3"' : '') + (dim ? ' opacity=".3"' : '') + ' marker-end="url(#' + (dated ? 'ard' : 'ar') + ')"/>';
   });
-  L.nodes.forEach(n => {
-    const st = byId[n.id]; const p = pos[n.id]; const r = res && res.steps[n.id];
-    const on = n.id === B.sel; const applies = !r || r.applies; const t0 = trig0(st);
+  ids.forEach(id => {
+    const st = byId[id]; const p = pos[id]; const r = res && res.steps[id];
+    const on = id === B.sel; const applies = !r || r.applies; const t0 = trig0(st);
     const auto = st.status && st.status.type === 'auto';
     const bar = !applies ? C.grey : auto ? C.green : st.applies ? C.amber : C.blue;
     const who = (r && r.doer ? r.doer : doerText(st.doer)) || '—';
-    const time = t0.type === 'beforeDate' ? 'T−' + ((t0.tat || st.tat || {}).value || 0) + 'd' : t0.type === 'external' ? 'on date' : tatStr(t0.tat || st.tat).replace(' / urgent ', ' · U ');
+    const time = t0.type === 'beforeDate' ? 'T−' + ((t0.tat || st.tat || {}).value || 0) + 'd' : t0.type === 'external' ? 'on ' + fieldLabel(t0.field) : tatStr(t0.tat || st.tat).replace(' / urgent ', ' · U ');
     const cut = (x, k) => x.length > k ? x.slice(0, k - 1) + '…' : x;
-    s += '<g data-act="bld-sel" data-s="' + esc(n.id) + '" style="cursor:pointer" opacity="' + (applies ? 1 : .45) + '">' +
+    s += '<g data-act="bld-sel" data-s="' + esc(id) + '" style="cursor:pointer" opacity="' + (applies ? 1 : .45) + '">' +
       '<rect x="' + p.x + '" y="' + p.y + '" width="' + W + '" height="' + H + '" rx="8" fill="' + (on ? '#eaf1fa' : '#fff') + '" stroke="' + (on ? C.blue : '#dde1e6') + '" stroke-width="' + (on ? 1.8 : 1) + '" filter="url(#sh)"/>' +
       '<rect x="' + p.x + '" y="' + (p.y + 6) + '" width="4" height="' + (H - 12) + '" rx="2" fill="' + bar + '"/>' +
       '<text x="' + (p.x + 13) + '" y="' + (p.y + 20) + '" fill="' + C.txt + '" font-weight="600">' + esc(cut(st.name || '', 25)) + '</text>' +
       '<text x="' + (p.x + 13) + '" y="' + (p.y + 36) + '" fill="' + C.sub + '">' + esc(cut(who, 22)) + '</text>' +
-      '<text x="' + (p.x + 13) + '" y="' + (p.y + 50) + '" fill="' + C.sub + '">' + esc(time) + '</text>' +
+      '<text x="' + (p.x + 13) + '" y="' + (p.y + 50) + '" fill="' + C.sub + '">' + esc(cut(time, 22)) + '</text>' +
       (auto ? '<text x="' + (p.x + W - 8) + '" y="' + (p.y + 50) + '" text-anchor="end" fill="' + C.green + '" font-weight="600">auto</text>' : '') +
       (st.applies ? '<text x="' + (p.x + W - 8) + '" y="' + (p.y + 20) + '" text-anchor="end" fill="' + C.amber + '" font-weight="600">if</text>' : '') +
-      (st.capture ? '<text x="' + (p.x + W - 8) + '" y="' + (p.y + 36) + '" text-anchor="end" fill="' + C.blue + '">asks date</text>' : '') + '</g>';
+      (st.capture ? '<text x="' + (p.x + W - 8) + '" y="' + (p.y + 36) + '" text-anchor="end" fill="' + C.date + '">asks date</text>' : '') + '</g>';
   });
   return s + '</svg>';
 }
@@ -332,6 +344,11 @@ ACTIONS['bld-add'] = () => {
 ACTIONS['bld-move'] = el => { bldCollect(); const i = B.draft.steps.findIndex(s => s.id === B.sel); const j = i + num(el.dataset.d); if (j < 0 || j >= B.draft.steps.length) return; const a = B.draft.steps; [a[i], a[j]] = [a[j], a[i]]; B.dirty = true; VIEWS.builder.render(); };
 ACTIONS['bld-del'] = () => {
   const i = B.draft.steps.findIndex(s => s.id === B.sel); if (i < 0) return;
+  const gone = B.draft.steps[i]; const gt = (Array.isArray(gone.trigger) ? gone.trigger[0] : gone.trigger) || { type: 'instanceStart' };
+  B.draft.steps.forEach(st => {
+    const list = (Array.isArray(st.trigger) ? st.trigger : [st.trigger]).map(t => t && t.type === 'afterStep' && t.step === gone.id ? Object.assign(clone(gt), t.when ? { when: t.when } : {}, t.orNext ? { orNext: true } : {}) : t);
+    st.trigger = list.length === 1 ? list[0] : list;
+  });
   B.draft.steps.splice(i, 1); B.sel = (B.draft.steps[Math.max(0, i - 1)] || {}).id; B.dirty = true; VIEWS.builder.render();
 };
 ACTIONS['cand-add'] = () => { bldCollect(); const s = curStep(); const t = (Array.isArray(s.trigger) ? s.trigger : [s.trigger]).filter(Boolean); t.push({ type: 'afterStep', step: '' }); s.trigger = t; if (!bldMarkDirty()) { bldEditor(); bldSide(); } };
@@ -344,6 +361,15 @@ ACTIONS['cond-add'] = el => {
   if (!bldMarkDirty()) { bldEditor(); bldSide(); }
 };
 ACTIONS['cond-del'] = el => { el.closest('.condrow').remove(); bldCollect(); if (!bldMarkDirty()) { bldEditor(); bldSide(); } };
+ACTIONS['bld-new'] = () => {
+  if (!bldEditAllowed()) return; if (B.dirty) { flash('Save or discard your changes first.', 'err'); return; }
+  const name = (prompt('Name of the new FMS') || '').trim(); if (!name) return;
+  let code = slug(name); while (Store.all('processes').some(p => p.code === code)) code += '_2';
+  const base = activeProcess() || Store.all('processes')[0];
+  const spec = { process: { id: code, name, startEvent: 'Start', instanceLabel: 'Record', endStep: 'step_1' }, fields: clone(base ? base.spec.fields : []), priority: base ? clone(base.spec.priority) : undefined, doerTables: {}, steps: [{ id: 'step_1', name: 'First step', doer: { type: 'fixed', name: '' }, trigger: { type: 'instanceStart' }, tat: { value: 1, unit: 'days' } }] };
+  const p = Store.put('processes', { id: uid(), code, version: 1, name, spec, active: false, created_at: nowIso(), created_by: ME.name });
+  audit('fms.new', code, name); bldLoad(p.id); B.tab = 'flow'; VIEWS.builder.render(); flash(name + ' created. Add its steps, then Save and Activate.');
+};
 ACTIONS['bld-discard'] = () => { bldLoad(B.pid); VIEWS.builder.render(); };
 ACTIONS['bld-save'] = () => {
   if (!bldEditAllowed()) return; if ($('#bEd')) bldCollect();

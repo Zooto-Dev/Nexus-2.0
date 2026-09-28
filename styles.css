@@ -347,3 +347,5 @@ label.attach{flex-direction:row!important;width:auto}
 .ed .qcol select { width: 100%; }
 .ed .condrow .qline select { min-width: 70px; }
 .ed .condrow .qline { flex-wrap: nowrap; }
+
+.bldbar { position: sticky; top: 44px; z-index: 9; background: var(--bg, #f5f6f8); padding-top: 4px; }
