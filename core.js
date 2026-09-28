@@ -516,8 +516,7 @@ const NAV = [
     { v: 'roles', l: 'Access', mod: 'roles' },
     { v: 'settings', l: 'Settings', mod: 'settings' },
     { v: 'audit', l: 'Audit Log', mod: 'audit' },
-    { v: 'wainbox', l: 'WhatsApp Inbox', mod: 'audit' },
-    { v: 'walog', l: 'WhatsApp Log', mod: 'audit' }] },
+    { v: 'wainbox', l: 'WhatsApp', mod: 'audit' }] },
   { menu: 'Dispatch', cnt: 'dispatch', items: [
     { v: 'dispatch', l: 'Ready to Dispatch', mod: 'dispatch' },
     { v: 'dispatch', p: 'upcoming', l: 'Upcoming Orders', mod: 'dispatch' },

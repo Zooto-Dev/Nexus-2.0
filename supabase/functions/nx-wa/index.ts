@@ -2,6 +2,7 @@
 // The browser only says WHICH event happened for WHICH record (and, for PO/GRN, hands over the PDF).
 // Template parameters and recipient numbers are worked out here from the database, so a user
 // cannot use this function to message arbitrary numbers or send arbitrary text.
+// Every message sent or received is kept in nx_wa_msgs, which the WhatsApp screen shows as chats.
 // Secrets (set in Supabase → Edge Functions → Secrets): WA_TOKEN, WA_PHONE_ID.
 import { createClient } from 'npm:@supabase/supabase-js@2';
 
@@ -29,49 +30,45 @@ function adminKey(): string {
   try { const k = JSON.parse(Deno.env.get('SUPABASE_SECRET_KEYS') || '{}'); const v = k.default || Object.values(k)[0]; if (v) return String(v); } catch (_e) { /* not set */ }
   return Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
 }
-// The caller's own profile, read with their own login (row-level security lets a user read their own row).
-async function myProfile(jwt: string) {
-  let pub = '';
-  try { const k = JSON.parse(Deno.env.get('SUPABASE_PUBLISHABLE_KEYS') || '{}'); pub = String(k.default || Object.values(k)[0] || ''); } catch (_e) { /* not set */ }
-  pub = pub || Deno.env.get('SUPABASE_ANON_KEY') || '';
-  const u = createClient(Deno.env.get('SUPABASE_URL')!, pub, { auth: { persistSession: false }, global: { headers: { Authorization: 'Bearer ' + jwt } } });
-  const { data: who } = await u.auth.getUser(jwt);
-  if (!who?.user) return { user: null, profile: null };
-  const { data: profile } = await u.from('nx_profiles').select('role, email').eq('user_id', who.user.id).maybeSingle();
-  return { user: who.user, profile: profile as { role: string; email: string } | null };
+// The platform has already verified the login token (verify_jwt), so only its user id is read here.
+function jwtUser(jwt: string): string {
+  try {
+    const part = jwt.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+    const p = JSON.parse(atob(part + '='.repeat((4 - part.length % 4) % 4)));
+    return p.role === 'authenticated' ? String(p.sub || '') : '';
+  } catch (_e) { return ''; }
 }
+// one client per warm worker, reused across calls
+const db = createClient(Deno.env.get('SUPABASE_URL')!, adminKey(), { auth: { persistSession: false } });
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
   if (req.method !== 'POST') return out({ error: 'Method not allowed' }, 405);
   try {
-    const jwt = (req.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '');
-    const { user, profile: me } = await myProfile(jwt);
-    if (!user) return out({ error: 'Not signed in' }, 401);
-    if (!me) return out({ error: 'No Nexus profile for ' + (user.email || 'this login') }, 403);
-    const db = createClient(Deno.env.get('SUPABASE_URL')!, adminKey(), { auth: { persistSession: false } });
-    { const { error: kErr } = await db.from('nx_docs').select('id').limit(1); if (kErr) return out({ error: 'Server key problem: ' + kErr.message }, 500); }
-
     const b = await req.json();
+    if (b.action === 'ping') return out({ ok: true });   // wakes the function when the WhatsApp screen opens
+    const uid = jwtUser((req.headers.get('Authorization') || '').replace(/^Bearer\s+/i, ''));
+    if (!uid) return out({ error: 'Not signed in' }, 401);
+    const { data: me, error: pErr } = await db.from('nx_profiles').select('role, email').eq('user_id', uid).maybeSingle();
+    if (pErr) return out({ error: 'Server key problem: ' + pErr.message }, 500);
+    if (!me) return out({ error: 'No Nexus profile for this login' }, 403);
+    const isAdmin = ['superadmin', 'admin'].includes(me.role);
+
     const event = String(b.event || ''), id = String(b.id || ''), resend = b.resend === true;
     if (!id && !['test', 'reply', 'media'].includes(b.action)) return out({ error: 'Missing record id' }, 400);
-    if (resend && !['superadmin', 'admin'].includes(me.role)) return out({ error: 'Only Admin can resend' }, 403);
-
-    const getDoc = async (col: string, key: string) => (await db.from('nx_docs').select('data').eq('collection', col).eq('id', key).maybeSingle()).data?.data as Doc | undefined;
-    const all = async (col: string) => ((await db.from('nx_docs').select('data').eq('collection', col)).data || []).map((r: { data: Doc }) => r.data);
-    const users = (await all('users')).filter((u) => u.active !== false);
-    const byName = Object.fromEntries(users.map((u) => [norm(u.name), u]));
-    const actor = users.find((u) => norm(u.email) === norm(me.email));
-    const isHead = (u: Doc) => ['r_admin', 'r_adm'].includes(u.role_id) || /HEAD|MANAGER|INCHARGE/.test(norm(u.designation));
-    const inDept = (u: Doc, re: RegExp) => re.test(norm(u.department));
-    const heads = (re: RegExp) => users.filter((u) => inDept(u, re) && isHead(u));
-    const dept = (re: RegExp) => users.filter((u) => inDept(u, re));
-    const superAdmins = () => users.filter((u) => u.role_id === 'r_admin');
-    const vendorOf = async (name: string) => (await all('vendors')).find((v) => norm(v.name) === norm(name));
-    const staff = (list: Doc[], template: string, params: [string, string][], doc = false): Msg[] => list.map((u) => ({ to: phone(u.mobile), name: String(u.name || ''), template, params, doc }));
-    const byFirstName = (n: string) => users.find((u) => norm(u.doer) === norm(n) || norm(String(u.name || '').split(/[\s(]/)[0]) === norm(n));
+    if (resend && !isAdmin) return out({ error: 'Only Admin can resend' }, 403);
 
     const token = Deno.env.get('WA_TOKEN') || '', phoneId = Deno.env.get('WA_PHONE_ID') || '';
+    let actorName = '';
+    const actor = async () => {
+      if (!actorName) { const { data } = await db.from('nx_docs').select('data').eq('collection', 'users').ilike('data->>email', me.email).limit(1); actorName = String(data?.[0]?.data?.name || me.email); }
+      return actorName;
+    };
+    // context of the event being sent, stored with each chat message so it can be resent
+    let ctx = { event: '', rid: '', ref: '' };
+    const keepOut = async (to: string, type: string, body: string, template: string, wamid: string, err: string, filename = '', name = '') => {
+      await db.from('nx_wa_msgs').insert({ id: wamid || crypto.randomUUID(), wa: to, name: name || null, dir: 'out', type, body, template: template || null, filename: filename || null, status: err ? 'failed' : 'sent', error: err || null, by_name: await actor(), seen: true, event: ctx.event || null, rid: ctx.rid || null, ref: ctx.ref || null });
+    };
     const uploadPdf = async (b64: string, name: string): Promise<{ id?: string; error?: string }> => {
       const bytes = Uint8Array.from(atob(String(b64 || '')), (c) => c.charCodeAt(0));
       if (!bytes.length || bytes.length > MAX_PDF || String.fromCharCode(...bytes.slice(0, 5)) !== '%PDF-') return { error: 'PDF missing or invalid' };
@@ -82,11 +79,6 @@ Deno.serve(async (req) => {
       const uj = await up.json().catch(() => ({}));
       return uj.id ? { id: uj.id } : { error: 'PDF upload failed: ' + (uj.error?.message || up.status) };
     };
-    const byName2 = actor?.name || me.email;
-    // every outgoing message also goes into the conversation list (WhatsApp Inbox)
-    const keepOut = async (to: string, type: string, body: string, template: string, wamid: string, err: string, filename = '') => {
-      await db.from('nx_wa_msgs').insert({ id: wamid || crypto.randomUUID(), wa: to, dir: 'out', type, body, template: template || null, filename: filename || null, status: err ? 'failed' : 'sent', error: err || null, by_name: byName2, seen: true });
-    };
     const sendTpl = async (m: Msg, media: string, fileName: string): Promise<string> => {
       const comp: Doc[] = [];
       if (m.doc) comp.push({ type: 'header', parameters: [{ type: 'document', document: { id: media, filename: fileName } }] });
@@ -94,27 +86,27 @@ Deno.serve(async (req) => {
       const r = await fetch(GRAPH + phoneId + '/messages', { method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify({ messaging_product: 'whatsapp', to: m.to, type: 'template', template: { name: m.template, language: { code: 'en' }, components: comp } }) });
       const j = await r.json().catch(() => ({}));
       const err = j.messages && j.messages.length ? '' : String(j.error?.error_data?.details || j.error?.message || r.status);
-      await keepOut(m.to, 'template', m.params.map(([k, v]) => k + ': ' + v).join(' | '), m.template, j.messages?.[0]?.id || '', err, m.doc ? fileName : '').catch(() => {});
+      await keepOut(m.to, 'template', m.params.map(([k, v]) => k + ': ' + v).join(' | '), m.template, j.messages?.[0]?.id || '', err, m.doc ? fileName : '', m.name).catch(() => {});
       return err;
     };
-    const isAdmin = ['superadmin', 'admin'].includes(me.role);
 
-    // WhatsApp Inbox: reply with free text to someone who has written to us
+    // Reply with free text to someone who has written to us (WhatsApp allows it for 24 hours)
     if (b.action === 'reply') {
       if (!isAdmin) return out({ error: 'Only Admin can reply' }, 403);
       if (!token || !phoneId) return out({ error: 'WhatsApp is not set up (WA_TOKEN / WA_PHONE_ID)' }, 400);
       const to = String(b.to || '').replace(/\D/g, ''); const text = String(b.text || '').trim();
       if (!to || !text) return out({ error: 'Number and message are required' }, 400);
       if (text.length > 4000) return out({ error: 'Message is too long (max 4000 characters)' }, 400);
-      const { data: last } = await db.from('nx_wa_msgs').select('at').eq('wa', to).eq('dir', 'in').order('at', { ascending: false }).limit(1);
+      const [{ data: last }] = await Promise.all([db.from('nx_wa_msgs').select('at').eq('wa', to).eq('dir', 'in').order('at', { ascending: false }).limit(1), actor()]);
       if (!last || !last.length) return out({ error: 'This number has not written to us — only templates can be sent to it' }, 400);
       const r = await fetch(GRAPH + phoneId + '/messages', { method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify({ messaging_product: 'whatsapp', recipient_type: 'individual', to, type: 'text', text: { body: text, preview_url: false } }) });
       const j = await r.json().catch(() => ({}));
       const err = j.messages && j.messages.length ? '' : String(j.error?.error_data?.details || j.error?.message || r.status);
-      await keepOut(to, 'text', text, '', j.messages?.[0]?.id || '', err);
-      return err ? out({ ok: false, error: err }) : out({ ok: true });
+      const wamid = j.messages?.[0]?.id || '';
+      await keepOut(to, 'text', text, '', wamid, err);
+      return err ? out({ ok: false, error: err }) : out({ ok: true, id: wamid });
     }
-    // WhatsApp Inbox: open a photo / document someone sent us
+    // Open a photo / document someone sent us
     if (b.action === 'media') {
       if (!isAdmin) return out({ error: 'Only Admin can open attachments' }, 403);
       const mid = String(b.media_id || '');
@@ -127,34 +119,47 @@ Deno.serve(async (req) => {
       let s = ''; for (let i = 0; i < bin.length; i += 0x8000) s += String.fromCharCode(...bin.subarray(i, i + 0x8000));
       return out({ ok: true, mime: row.media_mime || meta.mime_type || 'application/octet-stream', filename: row.filename || '', data: btoa(s) });
     }
-
     // Super Admin: one sample of every template to one number, to check the WhatsApp setup
     if (b.action === 'test') {
       if (me.role !== 'superadmin') return out({ error: 'Only a Super Admin can send test messages' }, 403);
       const to = phone(b.to); if (!to) return out({ error: 'Enter a valid 10-digit mobile number' }, 400);
       if (!token || !phoneId) return out({ error: 'WhatsApp is not set up (WA_TOKEN / WA_PHONE_ID missing in Supabase secrets)' }, 400);
+      ctx = { event: 'test', rid: '', ref: 'Test' };
       const S: Msg[] = [
-        { to, name: 'Test', template: 'po_approval_request', params: [['po_number', 'TEST/PO/001'], ['creator_name', 'Nexus Test']] },
-        { to, name: 'Test', template: 'po_approval_vendor', params: [['po_number', 'TEST/PO/001'], ['total_amount', '1180.00'], ['delivery_date', '05-Oct-2026']], doc: true },
-        { to, name: 'Test', template: 'po_approval_creator', params: [['po_number', 'TEST/PO/001'], ['creator_name', 'Nexus Test']], doc: true },
-        { to, name: 'Test', template: 'gate_entry_alert', params: [['vendor_name', 'Test Vendor'], ['invoice_no', 'INV-TEST-1']] },
-        { to, name: 'Test', template: 'invoice_approved_store', params: [['invoice_no', 'INV-TEST-1'], ['vendor_name', 'Test Vendor']] },
-        { to, name: 'Test', template: 'swatch_reject_merchant', params: [['invoice_no', 'INV-TEST-1'], ['vendor_name', 'Test Vendor']] },
-        { to, name: 'Test', template: 'excess_approval_md', params: [['vendor_name', 'Test Vendor'], ['invoice_no', 'INV-TEST-1']] },
-        { to, name: 'Test', template: 'grn_accounts_alert', params: [['vendor_name', 'Test Vendor'], ['total_qty', '100']], doc: true },
-        { to, name: 'Test', template: 'grn_vendor_alert', params: [['vendor_name', 'Test Vendor']], doc: true }
+        { to, name: '', template: 'po_approval_request', params: [['po_number', 'TEST/PO/001'], ['creator_name', 'Nexus Test']] },
+        { to, name: '', template: 'po_approval_vendor', params: [['po_number', 'TEST/PO/001'], ['total_amount', '1180.00'], ['delivery_date', '05-Oct-2026']], doc: true },
+        { to, name: '', template: 'po_approval_creator', params: [['po_number', 'TEST/PO/001'], ['creator_name', 'Nexus Test']], doc: true },
+        { to, name: '', template: 'gate_entry_alert', params: [['vendor_name', 'Test Vendor'], ['invoice_no', 'INV-TEST-1']] },
+        { to, name: '', template: 'invoice_approved_store', params: [['invoice_no', 'INV-TEST-1'], ['vendor_name', 'Test Vendor']] },
+        { to, name: '', template: 'swatch_reject_merchant', params: [['invoice_no', 'INV-TEST-1'], ['vendor_name', 'Test Vendor']] },
+        { to, name: '', template: 'excess_approval_md', params: [['vendor_name', 'Test Vendor'], ['invoice_no', 'INV-TEST-1']] },
+        { to, name: '', template: 'grn_accounts_alert', params: [['vendor_name', 'Test Vendor'], ['total_qty', '100']], doc: true },
+        { to, name: '', template: 'grn_vendor_alert', params: [['vendor_name', 'Test Vendor']], doc: true }
       ];
       const up = await uploadPdf(b.pdf, 'Nexus_Test.pdf');
-      const now = new Date().toISOString(); const by = actor?.name || me.email;
       const results: { template: string; ok: boolean; error: string }[] = [];
       for (const m of S) {
-        const err = m.doc && !up.id ? (up.error || 'PDF upload failed') : await sendTpl(m, up.id || '', 'Nexus_Test.pdf');
+        let err = '';
+        if (m.doc && !up.id) { err = up.error || 'PDF upload failed'; await keepOut(to, 'template', m.params.map(([k, v]) => k + ': ' + v).join(' | '), m.template, '', err, 'Nexus_Test.pdf'); }
+        else err = await sendTpl(m, up.id || '', 'Nexus_Test.pdf');
         results.push({ template: m.template, ok: !err, error: err });
       }
-      const rows = results.map((r, k) => { const rid = crypto.randomUUID(); return { collection: 'wa_log', id: rid, data: { id: rid, key: 'test|' + now, rid: '', event: 'test', ref: 'Test', template: r.template, to, name: 'Test', params: S[k].params.map(([a, v]) => a + ': ' + v).join(' | ') + (S[k].doc ? ' | PDF' : ''), status: r.ok ? 'sent' : 'failed', error: r.error, at: now, by } }; });
-      await db.from('nx_docs').insert(rows);
       return out({ ok: results.every((r) => r.ok), results });
     }
+
+    // ----- business events: recipients and parameters come from the records -----
+    const getDoc = async (col: string, key: string) => (await db.from('nx_docs').select('data').eq('collection', col).eq('id', key).maybeSingle()).data?.data as Doc | undefined;
+    const all = async (col: string) => ((await db.from('nx_docs').select('data').eq('collection', col)).data || []).map((r: { data: Doc }) => r.data);
+    const users = (await all('users')).filter((u) => u.active !== false);
+    const byName = Object.fromEntries(users.map((u) => [norm(u.name), u]));
+    const isHead = (u: Doc) => ['r_admin', 'r_adm'].includes(u.role_id) || /HEAD|MANAGER|INCHARGE/.test(norm(u.designation));
+    const inDept = (u: Doc, re: RegExp) => re.test(norm(u.department));
+    const heads = (re: RegExp) => users.filter((u) => inDept(u, re) && isHead(u));
+    const dept = (re: RegExp) => users.filter((u) => inDept(u, re));
+    const superAdmins = () => users.filter((u) => u.role_id === 'r_admin');
+    const vendorOf = async (name: string) => (await all('vendors')).find((v) => norm(v.name) === norm(name));
+    const staff = (list: Doc[], template: string, params: [string, string][], doc = false): Msg[] => list.map((u) => ({ to: phone(u.mobile), name: String(u.name || ''), template, params, doc }));
+    const byFirstName = (n: string) => users.find((u) => norm(u.doer) === norm(n) || norm(String(u.name || '').split(/[\s(]/)[0]) === norm(n));
 
     let msgs: Msg[] = []; let ref = ''; let pdfName = ''; let needPdf = false; let round = '';
 
@@ -209,6 +214,7 @@ Deno.serve(async (req) => {
         msgs.push({ to: phone(v?.mobile), name: String(g.vendor || ''), template: 'grn_vendor_alert', params: [['vendor_name', safe(g.vendor)]], doc: true });
       }
     } else return out({ error: 'Unknown event' }, 400);
+    ctx = { event, rid: id, ref };
 
     // one send per event and record, unless an Admin asks to resend
     const logKey = event + '|' + id + (round && round !== '0' ? '|' + round : '');
@@ -218,26 +224,27 @@ Deno.serve(async (req) => {
     }
 
     const now = new Date().toISOString();
-    const by = actor?.name || me.email;
+    const by = await actor();
     const log = (m: Msg, status: string, error = '') => ({ collection: 'wa_log', id: crypto.randomUUID(), data: { id: '', key: logKey, rid: id, event, ref, template: m.template, to: m.to, name: m.name, params: m.params.map(([k, v]) => k + ': ' + v).join(' | ') + (m.doc ? ' | PDF' : ''), status, error, at: now, by } });
 
-    // unique recipients per template; numbers we cannot reach are logged, not dropped silently
+    // unique recipients per template; people we cannot reach are recorded, not dropped silently
     const seen = new Set<string>(); msgs = msgs.filter((m) => { const k = m.template + m.to; if (m.to && seen.has(k)) return false; seen.add(k); return true; });
     const rows: ReturnType<typeof log>[] = [];
     const finish = async () => { rows.forEach((r) => { r.data.id = r.id; }); if (rows.length) await db.from('nx_docs').insert(rows); };
+    const notSent = (m: Msg, why: string) => keepOut(m.to || '', 'template', m.name + ' — ' + m.params.map(([k, v]) => k + ': ' + v).join(' | '), m.template, '', why, m.doc ? pdfName : '', m.name).catch(() => {});
 
-    if (!token || !phoneId) { msgs.forEach((m) => rows.push(log(m, 'not_configured', 'WhatsApp is not set up (WA_TOKEN / WA_PHONE_ID)'))); await finish(); return out({ ok: false, error: 'WhatsApp is not set up yet', count: msgs.length }); }
+    if (!token || !phoneId) { for (const m of msgs) { rows.push(log(m, 'not_configured', 'WhatsApp is not set up')); await notSent(m, 'WhatsApp is not set up (WA_TOKEN / WA_PHONE_ID)'); } await finish(); return out({ ok: false, error: 'WhatsApp is not set up yet', count: msgs.length }); }
 
     let media = '';
     if (needPdf) {
       const up = await uploadPdf(b.pdf, pdfName);
-      if (!up.id) { msgs.forEach((m) => rows.push(log(m, 'failed', up.error || 'PDF upload failed'))); await finish(); return out({ ok: false, error: up.error }); }
+      if (!up.id) { for (const m of msgs) { rows.push(log(m, 'failed', up.error || 'PDF upload failed')); await notSent(m, up.error || 'PDF upload failed'); } await finish(); return out({ ok: false, error: up.error }); }
       media = up.id;
     }
 
     let sent = 0, failed = 0;
     for (const m of msgs) {
-      if (!m.to) { rows.push(log(m, 'no_mobile', 'No valid mobile number')); failed++; continue; }
+      if (!m.to) { rows.push(log(m, 'no_mobile', 'No valid mobile number')); await notSent(m, 'No valid mobile number for ' + (m.name || 'this person')); failed++; continue; }
       const err = await sendTpl(m, media, pdfName);
       if (!err) { rows.push(log(m, 'sent')); sent++; } else { rows.push(log(m, 'failed', err)); failed++; }
     }

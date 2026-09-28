@@ -103,12 +103,33 @@ const WAI = { msgs: [], loaded: false, loading: false, sel: '', draft: {}, sub: 
   document.head.appendChild(st);
 })();
 function waiWho(num) {
+  if (!num) return 'Not sent — no mobile number';
   const d = String(num || '').replace(/\D/g, '').slice(-10);
   const hit = list => list.find(x => String(x.mobile || '').replace(/\D/g, '').slice(-10) === d);
   const u = hit(Store.all('users')); if (u) return u.name;
   const v = hit(Store.all('vendors')); if (v) return v.name;
   const m = WAI.msgs.find(x => x.wa === num && x.name); return m ? m.name : '+' + num;
 }
+function waiMerge(rows) {
+  let changed = false;
+  rows.forEach(r => {
+    const k = WAI.msgs.findIndex(x => x.id === r.id);
+    if (k >= 0) { if (JSON.stringify(WAI.msgs[k]) !== JSON.stringify(r)) { WAI.msgs[k] = r; changed = true; } }
+    else { WAI.msgs.push(r); changed = true; }
+  });
+  if (changed && curView().v === 'wainbox') VIEWS.wainbox.render();
+}
+// backup refresh every 5 s while the screen is open, in case a live update is missed
+let WAI_POLL = null, WAI_PING = 0;
+function waiPoll() {
+  if (WAI_POLL) return;
+  WAI_POLL = setInterval(async () => {
+    if (curView().v !== 'wainbox' || document.hidden) return;
+    try { const { data } = await SB.from('nx_wa_msgs').select('*').order('at', { ascending: false }).limit(100); if (data) waiMerge(data); } catch (e) { }
+  }, 5000);
+}
+// wake the server function when the screen opens, so the first reply is not slow
+function waiWake() { if (Date.now() - WAI_PING < 240000) return; WAI_PING = Date.now(); SB.functions.invoke('nx-wa', { body: { action: 'ping' } }).catch(() => { }); }
 async function waiLoad() {
   if (WAI.loading) return; WAI.loading = true;
   try {
@@ -117,8 +138,7 @@ async function waiLoad() {
     WAI.msgs = data || []; WAI.loaded = true;
     if (!WAI.sub) WAI.sub = SB.channel('nx-wa-msgs').on('postgres_changes', { event: '*', schema: 'public', table: 'nx_wa_msgs' }, p => {
       const r = p.new && p.new.id ? p.new : null; if (!r) return;
-      const k = WAI.msgs.findIndex(x => x.id === r.id); if (k >= 0) WAI.msgs[k] = r; else WAI.msgs.push(r);
-      if (curView().v === 'wainbox') VIEWS.wainbox.render();
+      waiMerge([r]);
     }).subscribe();
   } catch (e) { flash('WhatsApp Inbox could not load: ' + esc(e.message || e), 'err'); }
   WAI.loading = false;
@@ -127,27 +147,31 @@ async function waiLoad() {
 VIEWS.wainbox = {
   mod: 'audit', render() {
     if (!CLOUD || !isAdminRole()) { setMain('<div class="tbl-wrap"><table><tr><td class="empty">' + (CLOUD ? 'Only Admin and Super Admin can see WhatsApp chats' : 'WhatsApp Inbox works in cloud mode') + '</td></tr></table></div>'); return; }
+    waiWake(); waiPoll();
     if (!WAI.loaded) { setMain('<div class="tbl-wrap"><table><tr><td class="empty">Loading…</td></tr></table></div>'); waiLoad(); return; }
     const conv = {};
     WAI.msgs.forEach(m => { const c = conv[m.wa] || (conv[m.wa] = { wa: m.wa, last: m, unread: 0, lastIn: '' }); if ((m.at || '') >= (c.last.at || '')) c.last = m; if (m.dir === 'in') { if (!m.seen) c.unread++; if ((m.at || '') > c.lastIn) c.lastIn = m.at; } });
     const list = Object.values(conv).sort((a, b) => (b.last.at || '') < (a.last.at || '') ? -1 : 1);
     if (!WAI.sel && list.length) WAI.sel = list[0].wa;
     const snip = m => (m.dir === 'out' ? '↩ ' : '') + (m.template ? m.template : m.body || (m.filename || m.type || ''));
-    let h = '<div class="wai"><div class="wai-list"><div class="rows">' +
+    let h = (isSuperAdmin() ? '<div class="toolbar"><span class="grow"></span><button class="btn" data-act="wa-test">Send test messages</button></div>' : '') +
+      '<div class="wai"><div class="wai-list"><div class="rows">' +
       (list.length ? list.map(c => '<div class="wai-c' + (c.wa === WAI.sel ? ' on' : '') + '" data-act="wai-open" data-wa="' + esc(c.wa) + '"><div class="n">' + esc(waiWho(c.wa)) + '</div><div class="t">' + fmtDT(c.last.at) + '</div><div class="s">' + esc(snip(c.last)) + '</div>' + (c.unread ? '<div class="u">' + c.unread + '</div>' : '<div></div>') + '</div>').join('')
         : '<div class="wai-c"><div class="s">No chats yet</div></div>') + '</div></div>';
     const c = conv[WAI.sel];
     if (c) {
       const msgs = WAI.msgs.filter(m => m.wa === c.wa).sort((a, b) => (a.at || '') < (b.at || '') ? -1 : 1);
-      const tick = m => m.dir !== 'out' ? '' : m.status === 'read' ? ' <span class="rd">✓✓</span>' : m.status === 'delivered' ? ' ✓✓' : m.status === 'failed' ? ' ✕' : ' ✓';
+      const tick = m => m.dir !== 'out' ? '' : m.status === 'sending' ? ' 🕓' : m.status === 'read' ? ' <span class="rd">✓✓</span>' : m.status === 'delivered' ? ' ✓✓' : m.status === 'failed' ? ' ✕' : ' ✓';
       const open = c.lastIn && (Date.now() - new Date(c.lastIn).getTime()) < 24 * 3600 * 1000;
-      h += '<div class="wai-chat"><div class="wai-h">' + esc(waiWho(c.wa)) + '<small>+' + esc(c.wa) + '</small></div><div class="wai-m" id="waiM">' +
+      h += '<div class="wai-chat"><div class="wai-h">' + esc(waiWho(c.wa)) + (c.wa ? '<small>+' + esc(c.wa) + '</small>' : '') + '</div><div class="wai-m" id="waiM">' +
         msgs.map(m => '<div class="wai-b ' + m.dir + '">' + (m.template ? '<div class="tpl">' + esc(m.template) + '</div>' : '') + esc(m.body || '') +
           (m.media_id ? '<div><a data-act="wai-media" data-id="' + esc(m.media_id) + '">📎 ' + esc(m.filename || m.type || 'Attachment') + '</a></div>' : (m.filename && m.dir === 'out' ? '<div>📎 ' + esc(m.filename) + '</div>' : '')) +
+          (m.ref ? '<div class="meta" style="text-align:left">' + esc(m.ref) + '</div>' : '') +
           (m.error ? '<div class="err">' + esc(m.error) + '</div>' : '') +
+          (m.status === 'failed' && m.event && m.rid && isAdminRole() ? '<div><a data-act="wa-resend" data-e="' + esc(m.event) + '" data-id="' + esc(m.rid) + '">Resend</a></div>' : '') +
           '<div class="meta">' + (m.by_name ? esc(m.by_name) + ' · ' : '') + fmtDT(m.at) + tick(m) + '</div></div>').join('') + '</div>' +
-        (open ? '' : '<div class="wai-note">' + (c.lastIn ? 'Reply closed — no message from this number in the last 24 hours.' : 'Reply closed — this number has not written to us.') + '</div>') +
-        '<div class="wai-f"><textarea id="waiTxt"' + (open ? '' : ' disabled') + '>' + esc(WAI.draft[c.wa] || '') + '</textarea><button class="btn primary" data-act="wai-send"' + (open ? '' : ' disabled') + '>Send</button></div></div>';
+        (open || !c.wa ? '' : '<div class="wai-note">' + (c.lastIn ? 'Reply closed — no message from this number in the last 24 hours.' : 'Reply closed — this number has not written to us.') + '</div>') +
+        (!c.wa ? '' : '<div class="wai-f"><textarea id="waiTxt"' + (open ? '' : ' disabled') + '>' + esc(WAI.draft[c.wa] || '') + '</textarea><button class="btn primary" data-act="wai-send"' + (open ? '' : ' disabled') + '>Send</button></div>') + '</div>';
     } else h += '<div class="wai-chat"></div>';
     h += '</div>';
     const main = setMain(h);
@@ -165,15 +189,20 @@ ACTIONS['wai-open'] = el => { WAI.sel = el.dataset.wa; VIEWS.wainbox.render(); }
 ACTIONS['wai-send'] = async () => {
   const t = $('#waiTxt'); const text = t ? t.value.trim() : ''; const to = WAI.sel;
   if (!text || !to) return;
-  const btn = $('[data-act="wai-send"]'); if (btn) btn.disabled = true;
+  const tmp = { id: 'tmp-' + Date.now(), wa: to, dir: 'out', type: 'text', body: text, status: 'sending', by_name: ME.name, seen: true, at: new Date().toISOString() };
+  WAI.msgs.push(tmp); WAI.draft[to] = ''; VIEWS.wainbox.render();
+  let msg = '', id = '';
   try {
     const { data, error } = await SB.functions.invoke('nx-wa', { body: { action: 'reply', to, text } });
-    let msg = data && data.error;
+    msg = data && data.error; id = data && data.id;
     if (error) { msg = error.message; try { const j = await error.context.json(); msg = j.error || msg; } catch (e) { } }
-    if (msg) flash('Not sent: ' + esc(msg), 'err');
-    else { WAI.draft[to] = ''; audit('wa.reply', '+' + to, text.slice(0, 80)); }
-  } catch (e) { flash('Not sent: ' + esc(e.message), 'err'); }
-  if (btn) btn.disabled = false;
+  } catch (e) { msg = e.message; }
+  const k = WAI.msgs.indexOf(tmp);
+  if (msg) { if (k >= 0) Object.assign(WAI.msgs[k], { status: 'failed', error: msg }); WAI.draft[to] = text; flash('Not sent: ' + esc(msg), 'err'); }
+  else {
+    audit('wa.reply', '+' + to, text.slice(0, 80));
+    if (k >= 0) { if (id && WAI.msgs.some(x => x.id === id)) WAI.msgs.splice(k, 1); else Object.assign(WAI.msgs[k], { id: id || tmp.id, status: 'sent' }); }
+  }
   if (curView().v === 'wainbox') VIEWS.wainbox.render();
 };
 ACTIONS['wai-media'] = async el => {

@@ -162,3 +162,6 @@ grant select, insert, update, delete on table public.nx_wa_msgs to service_role;
 create policy "wa admin read" on public.nx_wa_msgs for select to authenticated using (public.nx_is_admin());
 create policy "wa admin seen" on public.nx_wa_msgs for update to authenticated using (public.nx_is_admin()) with check (public.nx_is_admin());
 alter publication supabase_realtime add table public.nx_wa_msgs;
+alter table public.nx_wa_msgs add column if not exists event text;
+alter table public.nx_wa_msgs add column if not exists rid text;
+alter table public.nx_wa_msgs add column if not exists ref text;
