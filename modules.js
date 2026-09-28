@@ -818,8 +818,8 @@ VIEWS.issuance = {
     const edit = can('store', 'edit'); const appr = canApprove(); const U = ISS_UI;
     const pend = pendingIssues();
     const open = Store.all('requisitions').filter(r => reqIsOpen(r)).sort((a, b) => String(a.no).localeCompare(String(b.no)));
-    if (!U.tab) U.tab = pend.length ? 'approve' : 'req';
-    let h = '<div class="tabs">' + [['approve', 'Issue Approvals (' + pend.length + ')'], ['req', 'Issue Against Requisition (' + open.length + ')'], ['direct', 'Direct Issue / Return'], ['reg', 'Issue Register']].map(([k, l]) => '<a data-act="iss-tab" data-t="' + k + '" class="' + (U.tab === k ? 'on' : '') + '">' + l + '</a>').join('') + '</div>';
+    if (!U.tab || !['iss', 'approve', 'ret', 'lr', 'reg'].includes(U.tab)) U.tab = 'iss';
+    let h = '<div class="tabs">' + [['iss', 'Issuance (' + open.length + ')'], ['approve', 'Issue Approvals (' + pend.length + ')'], ['ret', 'Material Return'], ['lr', 'Line Rejection'], ['reg', 'Issue Register']].map(([k, l]) => '<a data-act="iss-tab" data-t="' + k + '" class="' + (U.tab === k ? 'on' : '') + '">' + l + '</a>').join('') + '</div>';
 
     if (U.tab === 'approve') {
       h += '<div class="tbl-wrap"><table class="bomflat"><tr><th>No</th><th>Date</th><th>Req No</th><th>JC / Dept</th><th>Line</th><th>Picker Name</th><th>Item Name</th><th>Item Code</th><th class="num">Qty</th><th>Issue Source</th><th>Issued To</th><th>Issue Type</th><th>Sent By</th>' + (appr ? '<th></th>' : '') + '</tr>' +
@@ -827,7 +827,7 @@ VIEWS.issuance = {
           (appr ? '<td class="right nowrap"><button class="btn sm primary" data-act="iss-approve" data-id="' + esc(i.id) + '">Approve</button> <button class="btn sm ghost danger" data-act="iss-deny" data-id="' + esc(i.id) + '" data-confirm="Reject?">Reject</button></td>' : '') + '</tr>').join('') : '<tr><td colspan="14" class="empty">No issue approvals pending</td></tr>') + '</table></div>';
     }
 
-    if (U.tab === 'req') {
+    if (U.tab === 'iss') {
       if (U.req && !open.some(r => r.id === U.req)) U.req = '';
       const r0 = U.req ? Store.get('requisitions', U.req) : null;
       const people = Store.all('users').filter(u => u.active !== false).map(u => u.name).sort();
@@ -846,24 +846,19 @@ VIEWS.issuance = {
         (edit ? '<div class="card-f"><button class="btn primary" data-act="ir-save"' + (r0 ? '' : ' disabled') + '>Issue</button>' + (r0 ? '<button class="btn ghost danger" data-act="req-reject" data-id="' + esc(r0.id) + '" data-confirm="Reject this slip?">Reject slip</button>' : '') + '<span id="irMsg" class="small"></span></div>' : '') + '</div>';
     }
 
-    if (U.tab === 'direct') {
-      h += '<div class="toolbar">' + (edit ? '<button class="btn sm" data-act="iss-new">' + (U.form ? 'Close' : '+ Issue material') + '</button><button class="btn sm" data-act="ret-new">' + (U.ret ? 'Close' : '+ Material return') + '</button><button class="btn sm" data-act="lr-new">' + (U.lr ? 'Close' : '+ Line rejection') + '</button>' : '') + '</div>';
-      if (U.lr && edit) h += '<div class="panel" style="margin-bottom:10px">' + dlMat('dlMatLr') + dlVendor() + '<datalist id="dlJc4">' + Store.all('job_cards').map(j => '<option value="' + esc(j.no) + '">').join('') + '</datalist>' +
-        '<div class="row"><label>Job Card *<input id="lrJc" list="dlJc4"></label><label>Material *<input id="lrMat" list="dlMatLr"></label><label>Rejected Qty *<input id="lrQty" type="number" min="0" step="any"></label>' +
+    if (U.tab === 'ret') {
+      if (edit) h += '<div class="panel" style="margin-bottom:10px">' + dlMat('dlMatRt') + '<datalist id="dlJc3">' + Store.all('job_cards').map(j => '<option value="' + esc(j.no) + '">').join('') + '</datalist>' +
+        '<div class="row"><label>Job Card *<select id="rtJc">' + selOpts(Store.all('job_cards').map(j => j.no).sort(), '') + '</select></label><label>Material *<select id="rtMat"><option value="">— select —</option>' + Store.all('materials').slice().sort((a2, b2) => String(a2.name).localeCompare(String(b2.name))).map(m => '<option value="' + esc(m.code) + '">' + esc(m.name + ' · ' + m.code) + '</option>').join('') + '</select></label><label>Return Qty *<input id="rtQty" type="number" min="0" style="width:100px"></label><label>Returned By *<select id="rtBy">' + selOpts(Store.all('users').filter(u => u.active !== false).map(u => u.name).sort(), ME.name) + '</select></label><label style="flex:1">Remark<input id="rtRem"></label><button class="btn primary" data-act="ret-save">Return to stock</button><span id="rtMsg" class="small"></span></div></div>';
+      h += issueTable(Store.all('issues').filter(i => i.type === 'return').slice().sort((a2, b2) => (b2.at || '') < (a2.at || '') ? -1 : 1));
+    }
+    if (U.tab === 'lr') {
+      if (edit) h += '<div class="panel" style="margin-bottom:10px">' + dlMat('dlMatLr') + dlVendor() + '<datalist id="dlJc4">' + Store.all('job_cards').map(j => '<option value="' + esc(j.no) + '">').join('') + '</datalist>' +
+        '<div class="row"><label>Job Card *<select id="lrJc">' + selOpts(Store.all('job_cards').map(j => j.no).sort(), '') + '</select></label><label>Material *<select id="lrMat"><option value="">— select —</option>' + Store.all('materials').slice().sort((a2, b2) => String(a2.name).localeCompare(String(b2.name))).map(m => '<option value="' + esc(m.code) + '">' + esc(m.name + ' · ' + m.code) + '</option>').join('') + '</select></label><label>Rejected Qty *<input id="lrQty" type="number" min="0" step="any"></label>' +
         '<label>Reason<select id="lrWhy">' + LR_REASONS.map(x => '<option>' + x + '</option>').join('') + '</select></label>' +
         '<label>Condition' + seg('lrCond', [{ v: 'used', l: 'Used — not returnable' }, { v: 'unused', l: 'Unused — back to vendor' }], 'used') + '</label>' +
-        '<label>Vendor<input id="lrVen" list="dlVen"></label><label>Remark<input id="lrRem"></label>' +
+        '<label>Vendor<select id="lrVen">' + selOpts(vendorNames(), '') + '</select></label><label>Remark<input id="lrRem"></label>' +
         '<button class="btn primary" data-act="lr-save">Save line rejection</button><span id="lrMsg" class="small"></span></div></div>';
-      if (U.form && edit) h += '<div class="panel" style="margin-bottom:10px">' + dlMat('dlMatIs') + '<datalist id="dlJc2">' + Store.all('job_cards').filter(j => j.status !== 'Closed').map(j => '<option value="' + esc(j.no) + '">').join('') + '</datalist>' +
-        '<div class="row"><label>Material *<input id="isMat" list="dlMatIs"></label><label>Issue Qty *<input id="isQty" type="number" min="0" style="width:100px"></label><label>Job Card<input id="isJc" list="dlJc2"></label>' +
-        '<label>Line<select id="isLine">' + selOpts(optList('prod_line'), '') + '</select></label><label>Picker Name<select id="isPick">' + selOpts(optList('picker'), '') + '</select></label>' +
-        '<label>Issued To *<select id="isTo">' + selOpts(Store.all('users').filter(u => u.active !== false).map(u => u.name).sort(), '') + '</select></label>' +
-        '<label>Issue Type' + seg('isTyp', ['Regular', 'Sample'], 'Regular') + '</label>' +
-        '<label>Issue Source' + seg('isSrc', [{ v: 'AUTO', l: 'Auto' }, { v: 'RSJW', l: 'RESERVED STOCK' }, { v: 'OPEN', l: 'OPEN STOCK' }], 'AUTO') + '</label><button class="btn primary" data-act="iss-save">Request issue</button><span id="isMsg" class="small"></span></div></div>';
-      if (U.ret && edit) h += '<div class="panel" style="margin-bottom:10px">' + dlMat('dlMatRt') + '<datalist id="dlJc3">' + Store.all('job_cards').map(j => '<option value="' + esc(j.no) + '">').join('') + '</datalist>' +
-        '<div class="row"><label>Job Card *<input id="rtJc" list="dlJc3"></label><label>Material *<input id="rtMat" list="dlMatRt"></label><label>Return Qty *<input id="rtQty" type="number" min="0" style="width:100px"></label><label>Returned By *<input id="rtBy" value="' + esc(ME.name) + '"></label><label style="flex:1">Remark<input id="rtRem"></label><button class="btn primary" data-act="ret-save">Return to stock</button><span id="rtMsg" class="small"></span></div></div>';
-      const dir = Store.all('issues').filter(i => !i.req_no).slice().sort((a2, b2) => (b2.at || '') < (a2.at || '') ? -1 : 1);
-      h += issueTable(dir);
+      h += issueTable(Store.all('issues').filter(i => i.type === 'line_reject' || i.type === 'scrap').slice().sort((a2, b2) => (b2.at || '') < (a2.at || '') ? -1 : 1));
     }
 
     if (U.tab === 'reg') h += issueTable(Store.all('issues').filter(i => i.status !== 'Pending').slice().sort((a2, b2) => (b2.at || '') < (a2.at || '') ? -1 : 1));
@@ -877,9 +872,6 @@ function issueTable(list) {
     (list.length ? list.map(i => '<tr><td><b>' + esc(i.no) + '</b></td><td class="nowrap">' + fmtD(i.date) + '</td><td>' + (i.type === 'return' ? 'Return' : i.type === 'line_reject' ? '<span class="late-txt">Line Reject</span>' : i.type === 'scrap' ? 'Write-off' : 'Issue') + '</td><td>' + esc(i.req_no || '') + '</td><td>' + esc(i.to_jc || '') + '</td><td>' + esc(i.line || '') + '</td><td>' + esc(i.picker || '') + '</td><td>' + esc((matBy(i.material) || {}).name || '') + '</td><td>' + esc(i.material) + '</td><td class="num">' + qtyFmt(i.qty) + '</td><td>' + esc(i.type ? '' : i.source || 'AUTO') + '</td><td>' + esc(i.to_dept || '') + '</td><td>' + esc(i.type ? '' : i.issue_type || 'Regular') + '</td><td><span class="st ' + (i.status === 'Approved' ? 'Done' : i.status === 'Pending' ? 'Pending' : 'Cancelled') + '">' + esc(i.status || 'Approved') + '</span></td><td>' + esc(i.by) + '</td><td>' + esc(i.approved_by || '') + '</td><td class="right"><button class="btn sm ghost" data-act="print-iss" data-id="' + esc(i.id) + '">Print</button></td></tr>').join('') : '<tr><td colspan="17" class="empty">No records</td></tr>') + '</table></div>';
 }
 ACTIONS['iss-tab'] = el => { ISS_UI.tab = el.dataset.t; VIEWS.issuance.render(); };
-ACTIONS['iss-new'] = () => { ISS_UI.form = !ISS_UI.form; ISS_UI.ret = false; VIEWS.issuance.render(); };
-ACTIONS['ret-new'] = () => { ISS_UI.ret = !ISS_UI.ret; ISS_UI.form = false; ISS_UI.lr = false; VIEWS.issuance.render(); };
-ACTIONS['lr-new'] = () => { ISS_UI.lr = !ISS_UI.lr; ISS_UI.form = false; ISS_UI.ret = false; VIEWS.issuance.render(); };
 ACTIONS['lr-save'] = () => {
   if (!requirePerm('store', 'edit')) return;
   const jc = $('#lrJc').value.trim(); const m = matBy($('#lrMat').value); const qty = num($('#lrQty').value);
@@ -892,22 +884,9 @@ ACTIONS['lr-save'] = () => {
   if (returnable && !vendor) { $('#lrMsg').innerHTML = '<span class="late-txt">Vendor is required for material that goes back to the vendor.</span>'; return; }
   const i = Store.put('issues', { id: uid(), no: nextNo('issues', 'ISS'), date: todayYmd(), type: 'line_reject', material: m.code, qty, to_jc: jc, returnable, vendor, reason: $('#lrWhy').value, remark: $('#lrRem').value.trim(), status: 'Approved', by: ME.name, approved_by: ME.name, at: nowIso() });
   audit('issue.line_reject', i.no, m.code + ' × ' + qty + ' ← ' + jc + (returnable ? ' (returnable to ' + vendor + ')' : ' (not returnable)'));
-  ISS_UI.lr = false; flash('Line rejection saved — ' + esc(jc) + ' can be re-issued ' + qtyFmt(qty) + ' as replacement (not excess).'); VIEWS.issuance.render();
+  flash('Line rejection saved — ' + esc(jc) + ' can be re-issued ' + qtyFmt(qty) + ' as replacement (not excess).'); VIEWS.issuance.render();
 };
 const LR_REASONS = ['Defective material', 'Damaged in production', 'Wrong cutting', 'Colour / shade mismatch', 'Size mismatch', 'Other'];
-ACTIONS['iss-save'] = () => {
-  if (!requirePerm('store', 'edit')) return;
-  const m = matBy($('#isMat').value); const qty = num($('#isQty').value); const src = segVal($('[data-seg="isSrc"]')) || 'AUTO'; const jc = $('#isJc').value.trim();
-  if (!m || qty <= 0) { $('#isMsg').innerHTML = '<span class="late-txt">Material and qty are required.</span>'; return; }
-  if (src === 'RSJW' && (!jc || reservedOf(m.code, jc) < qty)) { $('#isMsg').innerHTML = '<span class="late-txt">' + (jc ? 'Reserved for this JC is only ' + qtyFmt(reservedOf(m.code, jc)) + '.' : 'A JC is required to issue from reserved stock.') + '</span>'; return; }
-  const avail = src === 'OPEN' ? openStockOf(m.code) : src === 'RSJW' ? reservedOf(m.code, jc) : (openStockOf(m.code) + (jc ? reservedOf(m.code, jc) : 0));
-  if (qty > avail) { $('#isMsg').innerHTML = '<span class="late-txt">Available stock is only ' + qtyFmt(avail) + ' (' + src + ').</span>'; return; }
-  const to = $('#isTo').value.trim();
-  if (!to) { $('#isMsg').innerHTML = '<span class="late-txt">Select Issued To.</span>'; return; }
-  const i = Store.put('issues', { id: uid(), no: nextNo('issues', 'ISS'), date: todayYmd(), material: m.code, qty, source: src, to_jc: segVal($('[data-seg="isTyp"]')) === 'Sample' ? 'SAMPLE' : jc, to_dept: to, line: $('#isLine').value, picker: $('#isPick').value, issue_type: segVal($('[data-seg="isTyp"]')) || 'Regular', status: 'Pending', by: ME.name, at: nowIso() });
-  audit('issue.request', i.no, m.code + ' × ' + qty + ' (' + src + ')'); ISS_UI.form = false;
-  flash(esc(i.no) + ' request sent — stock is deducted after approval.'); VIEWS.issuance.render();
-};
 ACTIONS['ir-save'] = () => {
   if (!requirePerm('store', 'edit')) return;
   const msg = t => { $('#irMsg').innerHTML = '<span class="late-txt">' + t + '</span>'; };
@@ -965,7 +944,7 @@ ACTIONS['ret-save'] = () => {
   const net = issuedToJc(jc, m.code);
   if (qty > net) { $('#rtMsg').innerHTML = '<span class="late-txt">Net issued to this JC is only ' + qtyFmt(net) + ' — cannot return more.</span>'; return; }
   const i = Store.put('issues', { id: uid(), no: nextNo('issues', 'ISS'), date: todayYmd(), type: 'return', material: m.code, qty, to_jc: jc, status: 'Approved', by: ($('#rtBy') ? $('#rtBy').value.trim() : ME.name) || ME.name, approved_by: ME.name, at: nowIso(), remark: $('#rtRem').value.trim() });
-  audit('issue.return', i.no, m.code + ' × ' + qty + ' ← ' + jc); ISS_UI.ret = false; flash('Returned — open stock increased.'); VIEWS.issuance.render();
+  audit('issue.return', i.no, m.code + ' × ' + qty + ' ← ' + jc); flash('Returned — open stock increased.'); VIEWS.issuance.render();
 };
 ACTIONS['req-reject'] = el => { const r = Store.get('requisitions', el.dataset.id); r.status = 'Rejected'; Store.put('requisitions', r); audit('req.reject', r.no, ''); VIEWS.issuance.render(); };
 
