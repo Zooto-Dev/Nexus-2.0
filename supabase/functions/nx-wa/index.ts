@@ -38,7 +38,7 @@ Deno.serve(async (req) => {
 
     const b = await req.json();
     const event = String(b.event || ''), id = String(b.id || ''), resend = b.resend === true;
-    if (!id) return out({ error: 'Missing record id' }, 400);
+    if (!id && b.action !== 'test') return out({ error: 'Missing record id' }, 400);
     if (resend && !['superadmin', 'admin'].includes(me.role)) return out({ error: 'Only Admin can resend' }, 403);
 
     const getDoc = async (col: string, key: string) => (await db.from('nx_docs').select('data').eq('collection', col).eq('id', key).maybeSingle()).data?.data as Doc | undefined;
@@ -54,6 +54,54 @@ Deno.serve(async (req) => {
     const vendorOf = async (name: string) => (await all('vendors')).find((v) => norm(v.name) === norm(name));
     const staff = (list: Doc[], template: string, params: [string, string][], doc = false): Msg[] => list.map((u) => ({ to: phone(u.mobile), name: String(u.name || ''), template, params, doc }));
     const byFirstName = (n: string) => users.find((u) => norm(u.doer) === norm(n) || norm(String(u.name || '').split(/[\s(]/)[0]) === norm(n));
+
+    const token = Deno.env.get('WA_TOKEN') || '', phoneId = Deno.env.get('WA_PHONE_ID') || '';
+    const uploadPdf = async (b64: string, name: string): Promise<{ id?: string; error?: string }> => {
+      const bytes = Uint8Array.from(atob(String(b64 || '')), (c) => c.charCodeAt(0));
+      if (!bytes.length || bytes.length > MAX_PDF || String.fromCharCode(...bytes.slice(0, 5)) !== '%PDF-') return { error: 'PDF missing or invalid' };
+      const fd = new FormData();
+      fd.append('messaging_product', 'whatsapp');
+      fd.append('file', new Blob([bytes], { type: 'application/pdf' }), name);
+      const up = await fetch(GRAPH + phoneId + '/media', { method: 'POST', headers: { Authorization: 'Bearer ' + token }, body: fd });
+      const uj = await up.json().catch(() => ({}));
+      return uj.id ? { id: uj.id } : { error: 'PDF upload failed: ' + (uj.error?.message || up.status) };
+    };
+    const sendTpl = async (m: Msg, media: string, fileName: string): Promise<string> => {
+      const comp: Doc[] = [];
+      if (m.doc) comp.push({ type: 'header', parameters: [{ type: 'document', document: { id: media, filename: fileName } }] });
+      comp.push({ type: 'body', parameters: m.params.map(([k, v]) => ({ type: 'text', parameter_name: k, text: v })) });
+      const r = await fetch(GRAPH + phoneId + '/messages', { method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify({ messaging_product: 'whatsapp', to: m.to, type: 'template', template: { name: m.template, language: { code: 'en' }, components: comp } }) });
+      const j = await r.json().catch(() => ({}));
+      return j.messages && j.messages.length ? '' : String(j.error?.error_data?.details || j.error?.message || r.status);
+    };
+
+    // Super Admin: one sample of every template to one number, to check the WhatsApp setup
+    if (b.action === 'test') {
+      if (me.role !== 'superadmin') return out({ error: 'Only a Super Admin can send test messages' }, 403);
+      const to = phone(b.to); if (!to) return out({ error: 'Enter a valid 10-digit mobile number' }, 400);
+      if (!token || !phoneId) return out({ error: 'WhatsApp is not set up (WA_TOKEN / WA_PHONE_ID missing in Supabase secrets)' }, 400);
+      const S: Msg[] = [
+        { to, name: 'Test', template: 'po_approval_request', params: [['po_number', 'TEST/PO/001'], ['creator_name', 'Nexus Test']] },
+        { to, name: 'Test', template: 'po_approval_vendor', params: [['po_number', 'TEST/PO/001'], ['total_amount', '1180.00'], ['delivery_date', '05-Oct-2026']], doc: true },
+        { to, name: 'Test', template: 'po_approval_creator', params: [['po_number', 'TEST/PO/001'], ['creator_name', 'Nexus Test']], doc: true },
+        { to, name: 'Test', template: 'gate_entry_alert', params: [['vendor_name', 'Test Vendor'], ['invoice_no', 'INV-TEST-1']] },
+        { to, name: 'Test', template: 'invoice_approved_store', params: [['invoice_no', 'INV-TEST-1'], ['vendor_name', 'Test Vendor']] },
+        { to, name: 'Test', template: 'swatch_reject_merchant', params: [['invoice_no', 'INV-TEST-1'], ['vendor_name', 'Test Vendor']] },
+        { to, name: 'Test', template: 'excess_approval_md', params: [['vendor_name', 'Test Vendor'], ['invoice_no', 'INV-TEST-1']] },
+        { to, name: 'Test', template: 'grn_accounts_alert', params: [['vendor_name', 'Test Vendor'], ['total_qty', '100']], doc: true },
+        { to, name: 'Test', template: 'grn_vendor_alert', params: [['vendor_name', 'Test Vendor']], doc: true }
+      ];
+      const up = await uploadPdf(b.pdf, 'Nexus_Test.pdf');
+      const now = new Date().toISOString(); const by = actor?.name || me.email;
+      const results: { template: string; ok: boolean; error: string }[] = [];
+      for (const m of S) {
+        const err = m.doc && !up.id ? (up.error || 'PDF upload failed') : await sendTpl(m, up.id || '', 'Nexus_Test.pdf');
+        results.push({ template: m.template, ok: !err, error: err });
+      }
+      const rows = results.map((r, k) => { const rid = crypto.randomUUID(); return { collection: 'wa_log', id: rid, data: { id: rid, key: 'test|' + now, rid: '', event: 'test', ref: 'Test', template: r.template, to, name: 'Test', params: S[k].params.map(([a, v]) => a + ': ' + v).join(' | ') + (S[k].doc ? ' | PDF' : ''), status: r.ok ? 'sent' : 'failed', error: r.error, at: now, by } }; });
+      await db.from('nx_docs').insert(rows);
+      return out({ ok: results.every((r) => r.ok), results });
+    }
 
     let msgs: Msg[] = []; let ref = ''; let pdfName = ''; let needPdf = false; let round = '';
 
@@ -116,7 +164,6 @@ Deno.serve(async (req) => {
       if (prev && prev.length) return out({ ok: true, skipped: 'already sent' });
     }
 
-    const token = Deno.env.get('WA_TOKEN') || '', phoneId = Deno.env.get('WA_PHONE_ID') || '';
     const now = new Date().toISOString();
     const by = actor?.name || me.email;
     const log = (m: Msg, status: string, error = '') => ({ collection: 'wa_log', id: crypto.randomUUID(), data: { id: '', key: logKey, rid: id, event, ref, template: m.template, to: m.to, name: m.name, params: m.params.map(([k, v]) => k + ': ' + v).join(' | ') + (m.doc ? ' | PDF' : ''), status, error, at: now, by } });
@@ -130,27 +177,16 @@ Deno.serve(async (req) => {
 
     let media = '';
     if (needPdf) {
-      const b64 = String(b.pdf || '');
-      const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
-      if (!bytes.length || bytes.length > MAX_PDF || String.fromCharCode(...bytes.slice(0, 5)) !== '%PDF-') { msgs.forEach((m) => rows.push(log(m, 'failed', 'PDF missing or invalid'))); await finish(); return out({ ok: false, error: 'PDF missing or invalid' }, 400); }
-      const fd = new FormData();
-      fd.append('messaging_product', 'whatsapp');
-      fd.append('file', new Blob([bytes], { type: 'application/pdf' }), pdfName);
-      const up = await fetch(GRAPH + phoneId + '/media', { method: 'POST', headers: { Authorization: 'Bearer ' + token }, body: fd });
-      const uj = await up.json().catch(() => ({}));
-      media = uj.id || '';
-      if (!media) { msgs.forEach((m) => rows.push(log(m, 'failed', 'PDF upload failed: ' + (uj.error?.message || up.status)))); await finish(); return out({ ok: false, error: 'PDF upload failed' }); }
+      const up = await uploadPdf(b.pdf, pdfName);
+      if (!up.id) { msgs.forEach((m) => rows.push(log(m, 'failed', up.error || 'PDF upload failed'))); await finish(); return out({ ok: false, error: up.error }); }
+      media = up.id;
     }
 
     let sent = 0, failed = 0;
     for (const m of msgs) {
       if (!m.to) { rows.push(log(m, 'no_mobile', 'No valid mobile number')); failed++; continue; }
-      const comp: Doc[] = [];
-      if (m.doc) comp.push({ type: 'header', parameters: [{ type: 'document', document: { id: media, filename: pdfName } }] });
-      comp.push({ type: 'body', parameters: m.params.map(([k, v]) => ({ type: 'text', parameter_name: k, text: v })) });
-      const r = await fetch(GRAPH + phoneId + '/messages', { method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify({ messaging_product: 'whatsapp', to: m.to, type: 'template', template: { name: m.template, language: { code: 'en' }, components: comp } }) });
-      const j = await r.json().catch(() => ({}));
-      if (j.messages && j.messages.length) { rows.push(log(m, 'sent')); sent++; } else { rows.push(log(m, 'failed', String(j.error?.message || r.status))); failed++; }
+      const err = await sendTpl(m, media, pdfName);
+      if (!err) { rows.push(log(m, 'sent')); sent++; } else { rows.push(log(m, 'failed', err)); failed++; }
     }
     await finish();
     return out({ ok: failed === 0, sent, failed });
