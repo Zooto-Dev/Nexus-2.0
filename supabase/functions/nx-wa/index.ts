@@ -54,7 +54,7 @@ Deno.serve(async (req) => {
 
     const b = await req.json();
     const event = String(b.event || ''), id = String(b.id || ''), resend = b.resend === true;
-    if (!id && b.action !== 'test') return out({ error: 'Missing record id' }, 400);
+    if (!id && !['test', 'reply', 'media'].includes(b.action)) return out({ error: 'Missing record id' }, 400);
     if (resend && !['superadmin', 'admin'].includes(me.role)) return out({ error: 'Only Admin can resend' }, 403);
 
     const getDoc = async (col: string, key: string) => (await db.from('nx_docs').select('data').eq('collection', col).eq('id', key).maybeSingle()).data?.data as Doc | undefined;
@@ -82,14 +82,51 @@ Deno.serve(async (req) => {
       const uj = await up.json().catch(() => ({}));
       return uj.id ? { id: uj.id } : { error: 'PDF upload failed: ' + (uj.error?.message || up.status) };
     };
+    const byName2 = actor?.name || me.email;
+    // every outgoing message also goes into the conversation list (WhatsApp Inbox)
+    const keepOut = async (to: string, type: string, body: string, template: string, wamid: string, err: string, filename = '') => {
+      await db.from('nx_wa_msgs').insert({ id: wamid || crypto.randomUUID(), wa: to, dir: 'out', type, body, template: template || null, filename: filename || null, status: err ? 'failed' : 'sent', error: err || null, by_name: byName2, seen: true });
+    };
     const sendTpl = async (m: Msg, media: string, fileName: string): Promise<string> => {
       const comp: Doc[] = [];
       if (m.doc) comp.push({ type: 'header', parameters: [{ type: 'document', document: { id: media, filename: fileName } }] });
       comp.push({ type: 'body', parameters: m.params.map(([k, v]) => ({ type: 'text', parameter_name: k, text: v })) });
       const r = await fetch(GRAPH + phoneId + '/messages', { method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify({ messaging_product: 'whatsapp', to: m.to, type: 'template', template: { name: m.template, language: { code: 'en' }, components: comp } }) });
       const j = await r.json().catch(() => ({}));
-      return j.messages && j.messages.length ? '' : String(j.error?.error_data?.details || j.error?.message || r.status);
+      const err = j.messages && j.messages.length ? '' : String(j.error?.error_data?.details || j.error?.message || r.status);
+      await keepOut(m.to, 'template', m.params.map(([k, v]) => k + ': ' + v).join(' | '), m.template, j.messages?.[0]?.id || '', err, m.doc ? fileName : '').catch(() => {});
+      return err;
     };
+    const isAdmin = ['superadmin', 'admin'].includes(me.role);
+
+    // WhatsApp Inbox: reply with free text to someone who has written to us
+    if (b.action === 'reply') {
+      if (!isAdmin) return out({ error: 'Only Admin can reply' }, 403);
+      if (!token || !phoneId) return out({ error: 'WhatsApp is not set up (WA_TOKEN / WA_PHONE_ID)' }, 400);
+      const to = String(b.to || '').replace(/\D/g, ''); const text = String(b.text || '').trim();
+      if (!to || !text) return out({ error: 'Number and message are required' }, 400);
+      if (text.length > 4000) return out({ error: 'Message is too long (max 4000 characters)' }, 400);
+      const { data: last } = await db.from('nx_wa_msgs').select('at').eq('wa', to).eq('dir', 'in').order('at', { ascending: false }).limit(1);
+      if (!last || !last.length) return out({ error: 'This number has not written to us — only templates can be sent to it' }, 400);
+      const r = await fetch(GRAPH + phoneId + '/messages', { method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify({ messaging_product: 'whatsapp', recipient_type: 'individual', to, type: 'text', text: { body: text, preview_url: false } }) });
+      const j = await r.json().catch(() => ({}));
+      const err = j.messages && j.messages.length ? '' : String(j.error?.error_data?.details || j.error?.message || r.status);
+      await keepOut(to, 'text', text, '', j.messages?.[0]?.id || '', err);
+      return err ? out({ ok: false, error: err }) : out({ ok: true });
+    }
+    // WhatsApp Inbox: open a photo / document someone sent us
+    if (b.action === 'media') {
+      if (!isAdmin) return out({ error: 'Only Admin can open attachments' }, 403);
+      const mid = String(b.media_id || '');
+      const { data: row } = await db.from('nx_wa_msgs').select('media_mime, filename').eq('media_id', mid).limit(1).maybeSingle();
+      if (!row) return out({ error: 'Attachment not found' }, 404);
+      const meta = await (await fetch(GRAPH + mid, { headers: { Authorization: 'Bearer ' + token } })).json().catch(() => ({}));
+      if (!meta.url) return out({ error: 'Attachment is no longer available on WhatsApp' }, 404);
+      const bin = new Uint8Array(await (await fetch(meta.url, { headers: { Authorization: 'Bearer ' + token } })).arrayBuffer());
+      if (bin.length > 12 * 1024 * 1024) return out({ error: 'Attachment is too large to open here' }, 413);
+      let s = ''; for (let i = 0; i < bin.length; i += 0x8000) s += String.fromCharCode(...bin.subarray(i, i + 0x8000));
+      return out({ ok: true, mime: row.media_mime || meta.mime_type || 'application/octet-stream', filename: row.filename || '', data: btoa(s) });
+    }
 
     // Super Admin: one sample of every template to one number, to check the WhatsApp setup
     if (b.action === 'test') {

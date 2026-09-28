@@ -141,3 +141,24 @@ where d.collection = 'inwards';
 
 revoke all on public.approved_po_lines, public.job_card_lines, public.bom_lines, public.gate_entry_qc from anon, public;
 grant select on public.approved_po_lines, public.job_card_lines, public.bom_lines, public.gate_entry_qc to authenticated;
+
+-- Server-side functions (secret key = service_role) read and write these tables.
+grant select, insert, update, delete on table public.nx_docs to service_role;
+grant select, insert, update, delete on table public.nx_profiles to service_role;
+grant select, insert, update, delete on table public.nx_secrets to service_role;
+
+-- WhatsApp conversations (incoming + outgoing). Written only by server functions; read by Admin/Super Admin.
+create table if not exists public.nx_wa_msgs (
+  id text primary key, wa text not null, name text, dir text not null check (dir in ('in', 'out')),
+  type text, body text, template text, media_id text, media_mime text, filename text,
+  status text, error text, by_name text, seen boolean not null default false, at timestamptz not null default now()
+);
+create index if not exists nx_wa_msgs_wa_at on public.nx_wa_msgs (wa, at desc);
+alter table public.nx_wa_msgs enable row level security;
+revoke all on table public.nx_wa_msgs from anon, authenticated;
+grant select on table public.nx_wa_msgs to authenticated;
+grant update (seen) on table public.nx_wa_msgs to authenticated;
+grant select, insert, update, delete on table public.nx_wa_msgs to service_role;
+create policy "wa admin read" on public.nx_wa_msgs for select to authenticated using (public.nx_is_admin());
+create policy "wa admin seen" on public.nx_wa_msgs for update to authenticated using (public.nx_is_admin()) with check (public.nx_is_admin());
+alter publication supabase_realtime add table public.nx_wa_msgs;
