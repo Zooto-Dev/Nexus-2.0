@@ -24,17 +24,33 @@ const phone = (m: unknown) => { const d = String(m ?? '').replace(/\D/g, ''); re
 const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const fmtD = (s: unknown) => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(s ?? '')); return m ? m[3] + '-' + MON[+m[2] - 1] + '-' + m[1] : safe(s); };
 const qty = (n: number) => String(Math.round(n * 1000) / 1000);
+// Server key: the new secret key (sb_secret_…) when the project has one, else the legacy service_role key.
+function adminKey(): string {
+  try { const k = JSON.parse(Deno.env.get('SUPABASE_SECRET_KEYS') || '{}'); const v = k.default || Object.values(k)[0]; if (v) return String(v); } catch (_e) { /* not set */ }
+  return Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
+}
+// The caller's own profile, read with their own login (row-level security lets a user read their own row).
+async function myProfile(jwt: string) {
+  let pub = '';
+  try { const k = JSON.parse(Deno.env.get('SUPABASE_PUBLISHABLE_KEYS') || '{}'); pub = String(k.default || Object.values(k)[0] || ''); } catch (_e) { /* not set */ }
+  pub = pub || Deno.env.get('SUPABASE_ANON_KEY') || '';
+  const u = createClient(Deno.env.get('SUPABASE_URL')!, pub, { auth: { persistSession: false }, global: { headers: { Authorization: 'Bearer ' + jwt } } });
+  const { data: who } = await u.auth.getUser(jwt);
+  if (!who?.user) return { user: null, profile: null };
+  const { data: profile } = await u.from('nx_profiles').select('role, email').eq('user_id', who.user.id).maybeSingle();
+  return { user: who.user, profile: profile as { role: string; email: string } | null };
+}
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
   if (req.method !== 'POST') return out({ error: 'Method not allowed' }, 405);
   try {
-    const db = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, { auth: { persistSession: false } });
     const jwt = (req.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '');
-    const { data: who, error: whoErr } = await db.auth.getUser(jwt);
-    if (whoErr || !who?.user) return out({ error: 'Not signed in' }, 401);
-    const { data: me } = await db.from('nx_profiles').select('role, email').eq('user_id', who.user.id).maybeSingle();
-    if (!me) return out({ error: 'No Nexus profile' }, 403);
+    const { user, profile: me } = await myProfile(jwt);
+    if (!user) return out({ error: 'Not signed in' }, 401);
+    if (!me) return out({ error: 'No Nexus profile for ' + (user.email || 'this login') }, 403);
+    const db = createClient(Deno.env.get('SUPABASE_URL')!, adminKey(), { auth: { persistSession: false } });
+    { const { error: kErr } = await db.from('nx_docs').select('id').limit(1); if (kErr) return out({ error: 'Server key problem: ' + kErr.message }, 500); }
 
     const b = await req.json();
     const event = String(b.event || ''), id = String(b.id || ''), resend = b.resend === true;
