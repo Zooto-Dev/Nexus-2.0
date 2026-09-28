@@ -157,7 +157,7 @@ td input.right, input.right { text-align: right; }
 .ed label { margin-bottom: 8px; }
 .ed .sub { border-top: 1px solid var(--line2); padding-top: 8px; margin-top: 8px; }
 .cand { border: 1px solid var(--line2); border-radius: var(--r-s); padding: 6px; margin-bottom: 6px; }
-.chart-wrap { overflow: auto; background: #fff; border: 1px solid var(--line); border-radius: var(--r); max-height: 70vh; }
+.chart-wrap { overflow: auto; background: #f7f8fa; border: 1px solid var(--line); border-radius: var(--r); max-height: 80vh; text-align: center; }
 .chart-wrap svg text { font: 11px var(--font); }
 .val li { margin: 2px 0; } .val .e { color: var(--late); } .val .w { color: var(--pending); }
 

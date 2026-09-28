@@ -141,33 +141,68 @@ function bldChart(spec, order) {
   const L = FMSEngine.layout(spec);
   const fields = Object.assign({ created_at: new Date().toISOString(), delivery_date: ymdOf(new Date(Date.now() + 10 * 86400000)) }, B.pv);
   let res = null; try { res = FMSEngine.resolveInstance(Object.assign({}, spec, { calendar: calendar() }), { fields, actuals: {} }); } catch (e) { }
-  const W = 176, H = 50, GX = 214, GY = 68, LANEGAP = 26;
-  const laneNames = { main: 'Main chain', external: 'Other system dates', date: 'Counted back from a date' };
-  const lanesUsed = ['main', 'external', 'date'].filter(l => L.nodes.some(n => n.lane === l));
-  const laneTop = {}; let y = 10;
-  lanesUsed.forEach(l => { laneTop[l] = y + 18; const rows = Math.max(...L.nodes.filter(n => n.lane === l).map(n => n.row)) + 1; y += 18 + rows * GY + LANEGAP; });
-  const pos = {}; L.nodes.forEach(n => { pos[n.id] = { x: 12 + n.rank * GX, y: laneTop[n.lane] + n.row * GY }; });
-  const width = Math.max(...L.nodes.map(n => pos[n.id].x)) + W + 20, height = y;
+  const W = 172, H = 58, GX = 188, GY = 92, PILL = 30, PAD = 16;
+  const trig0 = st => (Array.isArray(st.trigger) ? st.trigger[0] : st.trigger) || {};
+  const byId = Object.fromEntries(spec.steps.map(s => [s.id, s]));
+  const lanes = ['main', 'external', 'date'].filter(l => L.nodes.some(n => n.lane === l));
+  const pillText = l => {
+    if (l === 'main') return 'Order punch';
+    const f = Array.from(new Set(L.nodes.filter(n => n.lane === l && n.rank === 0).map(n => trig0(byId[n.id]).field).filter(Boolean))).map(fieldLabel);
+    return (l === 'date' ? 'Counted back from ' : 'Starts on ') + (f.join(' / ') || 'a date');
+  };
+  // column counts per lane/rank → overall width
+  const cnt = {}; L.nodes.forEach(n => { const k = n.lane + ':' + n.rank; cnt[k] = (cnt[k] || 0) + 1; });
+  const maxCols = Math.max(...Object.values(cnt));
+  const width = Math.max(560, PAD * 2 + maxCols * GX - (GX - W));
+  const pos = {}; const pills = {}; let y = PAD;
+  lanes.forEach(l => {
+    pills[l] = { x: width / 2, y: y + PILL / 2 }; y += PILL + 34;
+    const ranks = Math.max(...L.nodes.filter(n => n.lane === l).map(n => n.rank)) + 1;
+    for (let r = 0; r < ranks; r++) {
+      const cx = n => { const ps = L.edges.filter(e => e.to === n.id && e.kind === 'primary' && pos[e.from]).map(e => pos[e.from].x); return ps.length ? ps.reduce((a, b) => a + b, 0) / ps.length : width / 2; };
+      const row = L.nodes.filter(n => n.lane === l && n.rank === r).sort((a, b) => cx(a) - cx(b)); const tw = row.length * GX - (GX - W);
+      row.forEach((n, i) => { pos[n.id] = { x: (width - tw) / 2 + i * GX, y }; });
+      y += GY;
+    }
+    y += 18;
+  });
+  const height = y;
+  const C = { line: '#aab2bd', blue: '#1f5fae', green: '#2e7d32', amber: '#b26a00', grey: '#c9ced6', txt: '#1c2430', sub: '#6b7482' };
   let s = '<svg xmlns="http://www.w3.org/2000/svg" width="' + width + '" height="' + height + '" viewBox="0 0 ' + width + ' ' + height + '">';
-  s += '<defs><marker id="ar" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#9aa3ad"/></marker></defs>';
-  lanesUsed.forEach(l => { s += '<text x="12" y="' + (laneTop[l] - 6) + '" fill="#6b7482" font-weight="600">' + laneNames[l].toUpperCase() + '</text>'; if (l !== lanesUsed[0]) s += '<line x1="0" x2="' + width + '" y1="' + (laneTop[l] - 22) + '" y2="' + (laneTop[l] - 22) + '" stroke="#eef0f3"/>'; });
+  s += '<defs><marker id="ar" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="' + C.line + '"/></marker>' +
+    '<filter id="sh" x="-5%" y="-5%" width="110%" height="120%"><feDropShadow dx="0" dy="1" stdDeviation="1.2" flood-color="#000" flood-opacity=".10"/></filter></defs>';
+  const vcurve = (x1, y1, x2, y2) => { const my = (y1 + y2) / 2; return 'M' + x1 + ',' + y1 + ' C' + x1 + ',' + my + ' ' + x2 + ',' + my + ' ' + x2 + ',' + y2; };
+  // pills + lines from pill to rank-0 steps
+  lanes.forEach(l => {
+    const p = pills[l]; const t = pillText(l); const pw = Math.max(120, t.length * 6.6 + 28);
+    L.nodes.filter(n => n.lane === l && n.rank === 0).forEach(n => { const b = pos[n.id]; s += '<path d="' + vcurve(p.x, p.y + PILL / 2, b.x + W / 2, b.y - 2) + '" fill="none" stroke="' + C.line + '" stroke-width="1.3" marker-end="url(#ar)"/>'; });
+    s += '<rect x="' + (p.x - pw / 2) + '" y="' + (p.y - PILL / 2) + '" width="' + pw + '" height="' + PILL + '" rx="15" fill="' + (l === 'main' ? '#0e6a73' : l === 'date' ? '#6a4fb3' : '#8a5a12') + '"/>' +
+      '<text x="' + p.x + '" y="' + (p.y + 4) + '" text-anchor="middle" fill="#fff" font-weight="600">' + esc(t) + '</text>';
+  });
   L.edges.forEach(e => {
     const a = pos[e.from], b = pos[e.to]; if (!a || !b) return;
-    const x1 = a.x + W, y1 = a.y + H / 2, x2 = b.x - 2, y2 = b.y + H / 2, mx = (x1 + x2) / 2;
     const dim = res && (!res.steps[e.from].applies || !res.steps[e.to].applies);
-    s += '<path d="M' + x1 + ',' + y1 + ' C' + mx + ',' + y1 + ' ' + mx + ',' + y2 + ' ' + x2 + ',' + y2 + '" fill="none" stroke="#9aa3ad" stroke-width="1.3"' + (e.kind === 'fallback' ? ' stroke-dasharray="4 3"' : '') + (dim ? ' opacity=".3"' : '') + ' marker-end="url(#ar)"/>';
+    const up = b.y <= a.y;
+    const d = up ? 'M' + (a.x + W) + ',' + (a.y + H / 2) + ' C' + (a.x + W + 40) + ',' + (a.y + H / 2) + ' ' + (b.x + W + 40) + ',' + (b.y + H / 2) + ' ' + (b.x + W + 2) + ',' + (b.y + H / 2) : vcurve(a.x + W / 2, a.y + H, b.x + W / 2, b.y - 2);
+    s += '<path d="' + d + '" fill="none" stroke="' + C.line + '" stroke-width="1.3"' + (e.kind === 'fallback' ? ' stroke-dasharray="4 3"' : '') + (dim ? ' opacity=".3"' : '') + ' marker-end="url(#ar)"/>';
   });
   L.nodes.forEach(n => {
-    const st = spec.steps.find(x => x.id === n.id); const p = pos[n.id]; const r = res && res.steps[n.id];
-    const on = n.id === B.sel; const applies = !r || r.applies;
-    const t0 = Array.isArray(st.trigger) ? st.trigger[0] : st.trigger;
-    const sub = (r && r.doer ? r.doer : doerText(st.doer) || '—') + ' · ' + (t0 && t0.type === 'beforeDate' ? 'T−' + ((t0.tat || st.tat || {}).value || 0) + 'd' : tatStr(t0 && t0.tat || st.tat).replace(' / urgent ', '/'));
-    s += '<g data-act="bld-sel" data-s="' + esc(n.id) + '" style="cursor:pointer" opacity="' + (applies ? 1 : .35) + '">' +
-      '<rect x="' + p.x + '" y="' + p.y + '" width="' + W + '" height="' + H + '" rx="4" fill="' + (on ? '#eaf1fa' : '#fff') + '" stroke="' + (on ? '#1f5fae' : '#c9ced6') + '" stroke-width="' + (on ? 1.6 : 1) + '"/>' +
-      '<text x="' + (p.x + 8) + '" y="' + (p.y + 19) + '" fill="#1c2430" font-weight="600">' + esc((st.name || '').length > 26 ? st.name.slice(0, 25) + '…' : st.name) + '</text>' +
-      '<text x="' + (p.x + 8) + '" y="' + (p.y + 37) + '" fill="#6b7482">' + esc(sub.length > 30 ? sub.slice(0, 29) + '…' : sub) + '</text>' +
-      (st.status && st.status.type === 'auto' ? '<text x="' + (p.x + W - 8) + '" y="' + (p.y + 37) + '" text-anchor="end" fill="#1f5fae">auto</text>' : '') +
-      (st.applies ? '<text x="' + (p.x + W - 8) + '" y="' + (p.y + 19) + '" text-anchor="end" fill="#a86200">if</text>' : '') + '</g>';
+    const st = byId[n.id]; const p = pos[n.id]; const r = res && res.steps[n.id];
+    const on = n.id === B.sel; const applies = !r || r.applies; const t0 = trig0(st);
+    const auto = st.status && st.status.type === 'auto';
+    const bar = !applies ? C.grey : auto ? C.green : st.applies ? C.amber : C.blue;
+    const who = (r && r.doer ? r.doer : doerText(st.doer)) || '—';
+    const time = t0.type === 'beforeDate' ? 'T−' + ((t0.tat || st.tat || {}).value || 0) + 'd' : t0.type === 'external' ? 'on date' : tatStr(t0.tat || st.tat).replace(' / urgent ', ' · U ');
+    const cut = (x, k) => x.length > k ? x.slice(0, k - 1) + '…' : x;
+    s += '<g data-act="bld-sel" data-s="' + esc(n.id) + '" style="cursor:pointer" opacity="' + (applies ? 1 : .45) + '">' +
+      '<rect x="' + p.x + '" y="' + p.y + '" width="' + W + '" height="' + H + '" rx="8" fill="' + (on ? '#eaf1fa' : '#fff') + '" stroke="' + (on ? C.blue : '#dde1e6') + '" stroke-width="' + (on ? 1.8 : 1) + '" filter="url(#sh)"/>' +
+      '<rect x="' + p.x + '" y="' + (p.y + 6) + '" width="4" height="' + (H - 12) + '" rx="2" fill="' + bar + '"/>' +
+      '<text x="' + (p.x + 13) + '" y="' + (p.y + 20) + '" fill="' + C.txt + '" font-weight="600">' + esc(cut(st.name || '', 25)) + '</text>' +
+      '<text x="' + (p.x + 13) + '" y="' + (p.y + 36) + '" fill="' + C.sub + '">' + esc(cut(who, 22)) + '</text>' +
+      '<text x="' + (p.x + 13) + '" y="' + (p.y + 50) + '" fill="' + C.sub + '">' + esc(time) + '</text>' +
+      (auto ? '<text x="' + (p.x + W - 8) + '" y="' + (p.y + 50) + '" text-anchor="end" fill="' + C.green + '" font-weight="600">auto</text>' : '') +
+      (st.applies ? '<text x="' + (p.x + W - 8) + '" y="' + (p.y + 20) + '" text-anchor="end" fill="' + C.amber + '" font-weight="600">if</text>' : '') +
+      (st.capture ? '<text x="' + (p.x + W - 8) + '" y="' + (p.y + 36) + '" text-anchor="end" fill="' + C.blue + '">asks date</text>' : '') + '</g>';
   });
   return s + '</svg>';
 }
