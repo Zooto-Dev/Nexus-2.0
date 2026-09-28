@@ -22,7 +22,7 @@ function defaultAccess() {
   };
   const map = { 'OPERATIONS': 'ops', 'MANAGEMENT': 'ops', 'MIS': 'ops', 'PURCHASE': 'purchase', 'MERCHANDISING': 'merchant', 'STORE': 'store', 'DEVELOPMENT': 'dev', 'PRODUCTION': 'production', 'PPC': 'production', 'PLANNING': 'production', 'ACCOUNTS': 'accounts', 'ACCOUNTS AND FINANCE': 'accounts', 'QUALITY': 'qc', 'DISPATCH': 'dispatch' };
   const dept = {}; const desig = {};
-  orgList().forEach(o => { dept[o.dept] = clone(T[map[o.dept] || 'view']); o.desigs.forEach(g => { if (/MANAGER|HEAD/.test(g)) desig[o.dept + '|' + g] = { approve: 'edit' }; }); });
+  orgList().forEach(o => { dept[o.dept] = clone(T[map[o.dept] || 'view']); o.desigs.forEach(g => { if (/MANAGER|HEAD/.test(g)) desig[o.dept + '|' + g] = Object.assign({ approve: 'edit' }, o.dept === 'STORE' ? { issue_approve: 'edit' } : {}); }); });
   return { dept, desig };
 }
 

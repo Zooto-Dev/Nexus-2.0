@@ -338,7 +338,7 @@ VIEWS.audit = {
     const q = norm(AUD_UI.q);
     const list = Store.all('audit').filter(a => !q || norm(a.user + ' ' + a.action + ' ' + a.ref + ' ' + a.detail).includes(q)).sort((a, b) => a.at < b.at ? 1 : -1);
     setMain('<div class="toolbar"><input id="audQ" placeholder="Search user / action / order…" value="' + esc(AUD_UI.q) + '"><span class="muted small">' + list.length + ' event(s)' + (list.length > 500 ? ', showing latest 500' : '') + '</span></div>' +
-      '<div class="tbl-wrap"><table><tr><th>When</th><th>User</th><th>Action</th><th>Ref</th><th>Detail</th></tr>' + list.slice(0, 500).map(a => '<tr><td class="nowrap">' + fmtDT(a.at) + '</td><td>' + esc(a.user) + '</td><td class="mono">' + esc(a.action) + '</td><td>' + esc(a.ref) + '</td><td>' + esc(a.detail) + '</td></tr>').join('') + '</table></div>');
+      '<div class="tbl-wrap"><table><tr><th>Date &amp; Time</th><th>User</th><th>Action</th><th>Ref</th><th>What changed</th></tr>' + list.slice(0, 500).map(a => '<tr><td class="nowrap">' + fmtD(a.at) + ' ' + new Date(a.at).toLocaleTimeString('en-IN', { hour12: false }) + '</td><td>' + esc(a.user) + '</td><td class="mono">' + esc(a.action) + '</td><td>' + esc(a.ref) + '</td><td>' + esc(a.detail) + '</td></tr>').join('') + '</table></div>');
     $('#audQ').addEventListener('input', e => { AUD_UI.q = e.target.value; clearTimeout(AUD_UI.t); AUD_UI.t = setTimeout(() => { VIEWS.audit.render(); const i = $('#audQ'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }, 250); });
   }
 };

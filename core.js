@@ -53,12 +53,56 @@ const CFG = window.NEXUS_CONFIG || {};
 const CLOUD = !!(CFG.SUPABASE_URL && CFG.SUPABASE_ANON_KEY && window.supabase);
 let SB = null;
 
+/* ---- change log: every create / edit / delete is written to the audit log with who, when and what changed ---- */
+const SNAP = new Map();                       // col|id -> JSON of the last saved copy
+const NOLOG = new Set(['audit', 'mail_queue']);
+const SKIP_KEYS = new Set(['updated_at', 'updated_by', 'created_at', 'created_by']);
+const SECRET_KEY = /pin|pwd|password|hash|secret/i;
+function snapAll() { SNAP.clear(); COLS.forEach(c => (DB[c] || []).forEach(d => SNAP.set(c + '|' + d.id, JSON.stringify(d)))); if (DB.settings) SNAP.set('settings|main', JSON.stringify(DB.settings)); }
+function shortVal(k, v) { if (SECRET_KEY.test(k)) return '•••'; if (v == null || v === '') return '—'; if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(v)) return fmtDT(v); const t = typeof v === 'object' ? JSON.stringify(v) : String(v); return t.length > 60 ? t.slice(0, 57) + '…' : t; }
+function docRef(col, d) { return d.no || d.code || d.email || d.name || d.article || d.jc_no || (col === 'settings' ? 'Settings' : d.id); }
+function changeLog(col, doc, isDelete) {
+  if (NOLOG.has(col)) return;
+  const key = col + '|' + doc.id; const prevS = SNAP.get(key);
+  if (isDelete) { SNAP.delete(key); writeLog(col + '.delete', docRef(col, doc), 'deleted'); return; }
+  const nowS = JSON.stringify(doc); SNAP.set(key, nowS);
+  if (prevS === nowS) return;
+  if (!prevS) { writeLog(col + '.create', docRef(col, doc), 'created'); return; }
+  let prev = {}; try { prev = JSON.parse(prevS); } catch (e) { }
+  const diffs = [];
+  new Set(Object.keys(prev).concat(Object.keys(doc))).forEach(k => {
+    if (SKIP_KEYS.has(k)) return;
+    const a = JSON.stringify(prev[k]), b = JSON.stringify(doc[k]); if (a === b) return;
+    if (Array.isArray(prev[k]) || Array.isArray(doc[k])) {
+      const pa = prev[k] || [], pb = doc[k] || [];
+      const rows = []; for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+        const x = pa[i], y = pb[i]; if (JSON.stringify(x) === JSON.stringify(y)) continue;
+        if (!x) { rows.push(k + '[' + (i + 1) + '] added'); continue; } if (!y) { rows.push(k + '[' + (i + 1) + '] removed'); continue; }
+        if (typeof x === 'object' && typeof y === 'object') Object.keys(Object.assign({}, x, y)).forEach(f => { if (JSON.stringify(x[f]) !== JSON.stringify(y[f])) rows.push(k + '[' + (i + 1) + '].' + f + ': ' + shortVal(f, x[f]) + ' → ' + shortVal(f, y[f])); });
+        else rows.push(k + '[' + (i + 1) + ']: ' + shortVal(k, x) + ' → ' + shortVal(k, y));
+      }
+      diffs.push(...rows.slice(0, 12)); if (rows.length > 12) diffs.push('+' + (rows.length - 12) + ' more');
+    } else if (prev[k] && doc[k] && typeof prev[k] === 'object' && typeof doc[k] === 'object') {
+      Object.keys(Object.assign({}, prev[k], doc[k])).forEach(f => { if (JSON.stringify(prev[k][f]) !== JSON.stringify(doc[k][f])) diffs.push(k + '.' + f + ': ' + shortVal(f, prev[k][f]) + ' → ' + shortVal(f, doc[k][f])); });
+    } else diffs.push(k + ': ' + shortVal(k, prev[k]) + ' → ' + shortVal(k, doc[k]));
+  });
+  if (diffs.length) writeLog(col + '.edit', docRef(col, doc), diffs.join(' · '));
+}
+function writeLog(action, ref, detail) {
+  if (!ME) return;
+  const a = { id: uid(), at: nowIso(), user: ME ? ME.name : 'System', user_email: ME ? ME.email : '', action, ref: String(ref || ''), detail: String(detail || '').slice(0, 2000), auto: true };
+  (DB.audit || (DB.audit = [])).push(a); Store.persist('audit', a);
+}
 const Store = {
   all(col) { return DB[col] || []; },
   get(col, id) { return (DB[col] || []).find(d => d.id === id) || null; },
   put(col, doc) {
     if (!doc.id) doc.id = uid();
-    doc.updated_at = nowIso();
+    const now = nowIso(); const who = ME ? ME.name : 'System';
+    if (!doc.created_at) doc.created_at = now;
+    if (!doc.created_by) doc.created_by = who;
+    doc.updated_at = now; doc.updated_by = who;
+    changeLog(col, doc, false);
     const list = DB[col] || (DB[col] = []);
     const i = list.findIndex(d => d.id === doc.id);
     if (i >= 0) list[i] = doc; else list.push(doc);
@@ -66,10 +110,11 @@ const Store = {
     return doc;
   },
   del(col, id) {
+    const gone = this.get(col, id); if (gone) changeLog(col, gone, true);
     DB[col] = (DB[col] || []).filter(d => d.id !== id);
     this.persist(col, { id }, true); RES_CACHE.clear();
   },
-  setSettings(s) { DB.settings = s; s.id = 'main'; s.updated_at = nowIso(); this.persist('settings', s); RES_CACHE.clear(); },
+  setSettings(s) { s.id = 'main'; changeLog('settings', s, false); DB.settings = s; s.updated_at = nowIso(); s.updated_by = ME ? ME.name : 'System'; this.persist('settings', s); RES_CACHE.clear(); },
   persist(col, doc, isDelete) {
     try { localStorage.setItem(DB_KEY, JSON.stringify(DB)); } catch (e) { flash('Browser storage full — export a backup from Settings.', 'err'); }
     if (CLOUD && SB) cloudWrite(col, doc, isDelete);
@@ -78,6 +123,7 @@ const Store = {
     try { DB = JSON.parse(localStorage.getItem(DB_KEY) || 'null'); } catch (e) { DB = null; }
     if (!DB || !DB.settings) { DB = seedData(); localStorage.setItem(DB_KEY, JSON.stringify(DB)); }
     COLS.forEach(c => { if (!DB[c]) DB[c] = []; });
+    snapAll();
   }
 };
 
@@ -122,13 +168,14 @@ async function cloudLoad() {
     await SB.from('nx_docs').upsert([{ collection: 'settings', id: 'main', data: seed.settings }]
       .concat(COLS.flatMap(c => seed[c].map(d => ({ collection: c, id: d.id, data: d })))));
   } else { DB = out; localStorage.setItem(DB_KEY, JSON.stringify(DB)); }
+  snapAll();
   SB.channel('nx_docs').on('postgres_changes', { event: '*', schema: 'public', table: 'nx_docs' }, p => {
     const r = p.new && p.new.collection ? p.new : p.old; if (!r || !r.collection) return;
-    if (r.collection === 'settings') DB.settings = p.new.data;
+    if (r.collection === 'settings') { DB.settings = p.new.data; SNAP.set('settings|main', JSON.stringify(p.new.data)); }
     else if (DB[r.collection]) {
       const list = DB[r.collection]; const i = list.findIndex(d => d.id === r.id);
-      if (p.eventType === 'DELETE') { if (i >= 0) list.splice(i, 1); }
-      else if (i >= 0) list[i] = p.new.data; else list.push(p.new.data);
+      if (p.eventType === 'DELETE') { if (i >= 0) list.splice(i, 1); SNAP.delete(r.collection + '|' + r.id); }
+      else { if (i >= 0) list[i] = p.new.data; else list.push(p.new.data); SNAP.set(r.collection + '|' + r.id, JSON.stringify(p.new.data)); }
     }
     RES_CACHE.clear();
     const a = document.activeElement;
@@ -191,6 +238,7 @@ const MODULES = [
   { key: 'masters', label: 'Brands, Articles & Materials' },
   { key: 'approve', label: 'Approvals (PO, requisition)' },
   { key: 'excess', label: 'Excess material approval' },
+  { key: 'issue_approve', label: 'Issue approval (Store Incharge)' },
   { key: 'users', label: 'Users' },
   { key: 'roles', label: 'Access' },
   { key: 'settings', label: 'Settings' },

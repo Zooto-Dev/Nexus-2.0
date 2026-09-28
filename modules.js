@@ -41,7 +41,7 @@ function stockMaps() {
   Store.all('grns').forEach(g => (g.lines || []).forEach(l => { add(stk, l.material, num(l.accepted) + (l.excess_status === 'Approved' ? num(l.excess) : 0)); add(rej, l.material, num(l.rejected)); if (l.excess_status === 'Rejected') add(rtvx, l.material, num(l.excess)); }));
   // only APPROVED issues deduct stock (a pending request does not); returns add back
   Store.all('issues').forEach(i => {
-    if (i.status === 'Pending' || i.status === 'Rejected') return;
+    if (i.status !== 'Approved' && i.status) return;
     if (i.type === 'line_reject') { add(i.returnable ? rejLine : rejScrap, i.material, num(i.qty)); return; }
     if (i.type === 'scrap') { add(rejScrap, i.material, -num(i.qty)); return; }
     add(stk, i.material, i.type === 'return' ? num(i.qty) : -num(i.qty));
@@ -244,25 +244,52 @@ ACTIONS['print-bom'] = el => {
     '</style></head><body>' + bomDocHtml(b) + '<script>window.print()</' + 'script></body></html>');
   w.document.close();
 };
+// Code 128 (set B) barcode as inline SVG
+const C128 = '212222 222122 222221 121223 121322 131222 122213 122312 132212 221213 221312 231212 112232 122132 122231 113222 123122 123221 223211 221132 221231 213212 223112 312131 311222 321122 321221 312212 322112 322211 212123 212321 232121 111323 131123 131321 112313 132113 132311 211313 231113 231311 112133 112331 132131 113123 113321 133121 313121 211331 231131 213113 213311 213131 311123 311321 331121 312113 312311 332111 314111 221411 431111 111224 111422 121124 121421 141122 141221 112214 112412 122114 122411 142112 142211 241211 221114 413111 241112 134111 111242 121142 121241 114212 124112 124211 411212 421112 421211 212141 214121 412121 111143 111341 131141 114113 114311 411113 411311 113141 114131 311141 411131 211412 211214 211232 2331112'.split(' ');
+function barcodeSvg(text, h) {
+  const vals = [104].concat(String(text).split('').map(c => Math.max(0, Math.min(94, c.charCodeAt(0) - 32))));
+  const chk = vals.reduce((s2, v, i) => s2 + (i === 0 ? v : v * i), 0) % 103;
+  const seq = vals.concat([chk, 106]).map(v => C128[v]).join('');
+  let x = 10, bars = '';
+  for (let i = 0; i < seq.length; i++) { const w = +seq[i]; if (i % 2 === 0) bars += '<rect x="' + x + '" y="0" width="' + w + '" height="' + h + '"/>'; x += w; }
+  return '<svg xmlns="http://www.w3.org/2000/svg" width="' + (x + 10) * 1.4 + '" height="' + (h * 1.4) + '" viewBox="0 0 ' + (x + 10) + ' ' + h + '" shape-rendering="crispEdges"><rect width="100%" height="100%" fill="#fff"/><g fill="#000">' + bars + '</g></svg>';
+}
+function slipWin(title, html) {
+  const w = window.open('');
+  w.document.write('<html><head><title>' + esc(title) + '</title><style>' +
+    'body{font:12px/1.45 "Segoe UI",system-ui,sans-serif;color:#111;margin:28px}' +
+    '.band{background:#0e6a73;color:#fff;display:flex;justify-content:space-between;align-items:center;padding:8px 12px;-webkit-print-color-adjust:exact;print-color-adjust:exact}.band b{font-size:15px;letter-spacing:.06em}' +
+    '.hd{display:flex;justify-content:space-between;align-items:flex-start;gap:14px;margin:10px 0}.hd h1{margin:0;font-size:17px}.hd small{color:#555}.bc{text-align:center;font:600 11px monospace}' +
+    '.box{border:1.5px solid #111;padding:8px 10px;margin:10px 0}.kv{display:grid;grid-template-columns:repeat(3,max-content max-content);gap:4px 12px}.kv span{color:#555}.kv b{white-space:nowrap}' +
+    'table{border-collapse:collapse;width:100%;margin-top:10px}th,td{border:1px solid #8a8f96;padding:5px 8px;text-align:left;white-space:nowrap}th{background:#eef1f5;font-size:11px;text-transform:uppercase;letter-spacing:.03em}.n{text-align:right}tfoot td{font-weight:700;background:#f6f8fa}' +
+    '.sig{display:flex;justify-content:space-between;margin-top:56px}.sig div{border-top:1px solid #333;padding:4px 30px 0;font-size:11.5px}' +
+    '@media print{body{margin:10mm}}</style></head><body>' + html + '<script>window.print()</' + 'script></body></html>');
+  w.document.close();
+}
+const kvHtml = pairs => '<div class="kv">' + pairs.map(([k, v]) => '<span>' + esc(k) + '</span><b>' + esc(v == null ? '' : v) + '</b>').join('') + '</div>';
+// Requisition Slip — format R5 (header band, boxed details, barcode, no footer)
 ACTIONS['print-req'] = el => {
   const r = Store.all('requisitions').find(x => x.id === el.dataset.id || norm(x.no) === norm(el.dataset.id)); if (!r) return;
-  printDoc({
-    title: 'Requisition Slip', ref: r.no, date: r.date, by: r.by,
-    meta: [['Job Card', r.jc_no], ['Department', r.dept], ['Requested By', r.by], ['Status', r.status], ['Issued By', r.issued_by || '']],
-    body: pTable([['#'], ['Item Name'], ['Code'], ['UOM'], ['Req Qty', 'n'], ['Issued Qty', 'n']],
-      r.lines.map((l, i) => { const m = matBy(l.material) || {}; const issued = Store.all('issues').filter(x => x.status === 'Approved' && norm(x.req_no || '') === norm(r.no) && norm(x.material) === norm(l.material)).reduce((a, x) => a + num(x.qty), 0); return [i + 1, esc(m.name || '') + (l.extra ? ' (extra)' : ''), esc(l.material), esc(m.uom || ''), qtyFmt(l.qty), qtyFmt(issued)]; }),
-      ['', 'Total', '', '', qtyFmt(r.lines.reduce((a, l) => a + num(l.qty), 0)), ''])
-  });
+  const j = r.jc_no ? jcBy(r.jc_no) : null;
+  const rows = r.lines.map((l, i) => { const m = matBy(l.material) || {}; return '<tr><td>' + (i + 1) + '</td><td>' + esc(m.name || '') + '</td><td>' + esc(l.material) + '</td><td>' + esc(m.uom || '') + '</td><td class="n">' + (l.req != null ? qtyFmt(l.req) : '') + '</td><td class="n">' + (l.stock != null ? qtyFmt(l.stock) : '') + '</td><td class="n">' + qtyFmt(l.qty) + '</td></tr>'; }).join('');
+  slipWin(r.no, '<div class="band"><b>REQUISITION SLIP</b><span>' + esc(r.no) + ' · ' + esc(r.at ? fmtDT(r.at) : fmtD(r.date)) + '</span></div>' +
+    '<div class="hd"><div><h1>' + esc(settings().company || 'Nexus 2.0') + '</h1><small>' + esc(settings().address || '') + '</small></div><div class="bc">' + barcodeSvg(r.no, 44) + '<br>' + esc(r.no) + '</div></div>' +
+    '<div class="box">' + kvHtml([['Method', r.method === 'cons' ? 'Consumable Items' : 'Job Card'], ['Job Card', r.jc_no || ''], ['Department', r.dept || ''], ['Brand', j ? j.brand || '' : ''], ['Article', j ? j.article || '' : ''], ['Line', r.line || ''], ['Picker Name', r.picker || ''], ['Requested By', r.by], ['Created At', r.at ? fmtDT(r.at) : fmtD(r.date)]]) + '</div>' +
+    '<table><thead><tr><th>#</th><th>Item Name</th><th>Item Code</th><th>UOM</th><th class="n">Req Qty</th><th class="n">Stock</th><th class="n">Requisition Qty</th></tr></thead><tbody>' + rows + '</tbody>' +
+    '<tfoot><tr><td></td><td>Total</td><td></td><td></td><td class="n">' + (r.lines.some(l => l.req != null) ? qtyFmt(r.lines.reduce((a, l) => a + num(l.req || 0), 0)) : '') + '</td><td></td><td class="n">' + qtyFmt(r.lines.reduce((a, l) => a + num(l.qty), 0)) + '</td></tr></tfoot></table>');
 };
+// Issue Slip — format I6 (barcode, Req Qty and Issue Qty); one slip per issue batch
 ACTIONS['print-iss'] = el => {
-  const i = Store.get('issues', el.dataset.id); if (!i) return;
-  const m = matBy(i.material) || {};
-  printDoc({
-    title: i.type === 'return' ? 'Material Return Slip' : 'Material Issuance Report', ref: i.no, date: i.date, by: i.by,
-    meta: [['Job Card', i.to_jc || ''], ['Issued To', i.to_dept || ''], ['Issue Type', i.issue_type || 'Regular'], ['Source', i.source || 'AUTO'], ['Requisition', i.req_no || ''], ['Status', i.status || 'Approved'], ['Approved By', i.approved_by || '']],
-    body: pTable([['#'], ['Item Name'], ['Code'], ['UOM'], ['Qty', 'n']], [[1, esc(m.name || ''), esc(i.material), esc(m.uom || ''), qtyFmt(i.qty)]], ['', 'Total', '', '', qtyFmt(i.qty)]),
-    note: i.remark ? 'Remark: ' + i.remark : ''
-  });
+  const i0 = Store.get('issues', el.dataset.id); if (!i0) return;
+  const list = i0.slip_no ? Store.all('issues').filter(x => x.slip_no === i0.slip_no) : [i0];
+  const ref = i0.slip_no || i0.no; const req = i0.req_no ? Store.all('requisitions').find(r => r.no === i0.req_no) : null;
+  const rows = list.map((i, k) => { const m = matBy(i.material) || {}; return '<tr><td>' + (k + 1) + '</td><td>' + esc(m.name || '') + '</td><td>' + esc(i.material) + '</td><td>' + esc(m.uom || '') + '</td><td class="n">' + (i.req_qty != null ? qtyFmt(i.req_qty) : '') + '</td><td class="n">' + qtyFmt(i.qty) + '</td><td>' + esc(i.status) + '</td></tr>'; }).join('');
+  const appr = list.find(i => i.approved_by);
+  slipWin(ref, '<div class="hd"><div><h1>' + esc(settings().company || 'Nexus 2.0') + '</h1><small>' + (i0.type === 'return' ? 'Material Return Slip' : 'Material Issue Slip') + '</small></div><div class="bc">' + barcodeSvg(ref, 44) + '<br>' + esc(ref) + '</div></div>' +
+    kvHtml([['Issued At', fmtDT(i0.at)], ['Req No', i0.req_no || ''], ['Job Card', i0.to_jc || (req ? req.dept : '')], ['Line', i0.line || ''], ['Picker Name', i0.picker || ''], ['Issued To', i0.to_dept || ''], ['Issue Type', i0.issue_type || 'Regular'], ['Issued By', i0.by], ['Approved By', appr ? appr.approved_by + ' · ' + fmtDT(appr.approved_at) : '']]) +
+    '<table><thead><tr><th>#</th><th>Item Name</th><th>Item Code</th><th>UOM</th><th class="n">Req Qty</th><th class="n">Issue Qty</th><th>Status</th></tr></thead><tbody>' + rows + '</tbody>' +
+    '<tfoot><tr><td></td><td>Total</td><td></td><td></td><td class="n">' + qtyFmt(list.reduce((a, i) => a + num(i.req_qty || 0), 0)) + '</td><td class="n">' + qtyFmt(list.reduce((a, i) => a + num(i.qty), 0)) + '</td><td></td></tr></tfoot></table>' +
+    '<div class="sig"><div>Issued By</div><div>Received By</div></div>');
 };
 
 function newBtn(label, act) { return '<button class="btn primary" data-act="' + act + '">+ ' + label + '</button>'; }
@@ -815,16 +842,16 @@ const ISS_UI = { form: false, ret: false };
 function pendingIssues() { return Store.all('issues').filter(i => i.status === 'Pending'); }
 VIEWS.issuance = {
   mod: 'store', render() {
-    const edit = can('store', 'edit'); const appr = canApprove(); const U = ISS_UI;
+    const edit = can('store', 'edit'); const appr = canApproveIssue(); const U = ISS_UI;
     const pend = pendingIssues();
     const open = Store.all('requisitions').filter(r => reqIsOpen(r)).sort((a, b) => String(a.no).localeCompare(String(b.no)));
     if (!U.tab || !['iss', 'approve', 'ret', 'lr', 'reg'].includes(U.tab)) U.tab = 'iss';
     let h = '<div class="tabs">' + [['iss', 'Issuance (' + open.length + ')'], ['approve', 'Issue Approvals (' + pend.length + ')'], ['ret', 'Material Return'], ['lr', 'Line Rejection'], ['reg', 'Issue Register']].map(([k, l]) => '<a data-act="iss-tab" data-t="' + k + '" class="' + (U.tab === k ? 'on' : '') + '">' + l + '</a>').join('') + '</div>';
 
     if (U.tab === 'approve') {
-      h += '<div class="tbl-wrap"><table class="bomflat"><tr><th>No</th><th>Date</th><th>Req No</th><th>JC / Dept</th><th>Line</th><th>Picker Name</th><th>Item Name</th><th>Item Code</th><th class="num">Qty</th><th>Issue Source</th><th>Issued To</th><th>Issue Type</th><th>Sent By</th>' + (appr ? '<th></th>' : '') + '</tr>' +
-        (pend.length ? pend.map(i => '<tr><td><b>' + esc(i.no) + '</b></td><td>' + fmtD(i.date) + '</td><td>' + esc(i.req_no || '') + '</td><td>' + esc(i.to_jc || '') + '</td><td>' + esc(i.line || '') + '</td><td>' + esc(i.picker || '') + '</td><td>' + esc((matBy(i.material) || {}).name || '') + '</td><td>' + esc(i.material) + '</td><td class="num">' + qtyFmt(i.qty) + '</td><td>' + esc(i.source || 'AUTO') + '</td><td>' + esc(i.to_dept || '') + '</td><td>' + esc(i.issue_type || 'Regular') + '</td><td>' + esc(i.by) + '</td>' +
-          (appr ? '<td class="right nowrap"><button class="btn sm primary" data-act="iss-approve" data-id="' + esc(i.id) + '">Approve</button> <button class="btn sm ghost danger" data-act="iss-deny" data-id="' + esc(i.id) + '" data-confirm="Reject?">Reject</button></td>' : '') + '</tr>').join('') : '<tr><td colspan="14" class="empty">No issue approvals pending</td></tr>') + '</table></div>';
+      h += '<div class="tbl-wrap"><table class="bomflat"><tr><th>No</th><th>Date</th><th>Req No</th><th>JC / Dept</th><th>Line</th><th>Picker Name</th><th>Item Name</th><th>Item Code</th><th class="num">Req Qty</th><th class="num">Issue Qty</th><th>Issue Source</th><th>Issued To</th><th>Issue Type</th><th>Sent By</th><th>Sent At</th>' + (appr ? '<th></th>' : '') + '</tr>' +
+        (pend.length ? pend.map(i => '<tr><td><b>' + esc(i.no) + '</b></td><td>' + fmtD(i.date) + '</td><td>' + esc(i.req_no || '') + '</td><td>' + esc(i.to_jc || '') + '</td><td>' + esc(i.line || '') + '</td><td>' + esc(i.picker || '') + '</td><td>' + esc((matBy(i.material) || {}).name || '') + '</td><td>' + esc(i.material) + '</td><td class="num">' + (i.req_qty != null ? qtyFmt(i.req_qty) : '') + '</td><td class="num">' + qtyFmt(i.qty) + '</td><td>' + esc(i.source || 'AUTO') + '</td><td>' + esc(i.to_dept || '') + '</td><td>' + esc(i.issue_type || 'Regular') + '</td><td>' + esc(i.by) + '</td><td class="nowrap">' + fmtDT(i.at) + '</td>' +
+          (appr ? '<td class="right nowrap"><button class="btn sm primary" data-act="iss-approve" data-id="' + esc(i.id) + '">Approve</button> <button class="btn sm" data-act="iss-amend" data-id="' + esc(i.id) + '">Amend</button> <button class="btn sm ghost danger" data-act="iss-deny" data-id="' + esc(i.id) + '">Reject</button></td>' : '') + '</tr>').join('') : '<tr><td colspan="16" class="empty">No issue approvals pending</td></tr>') + '</table></div>';
     }
 
     if (U.tab === 'iss') {
@@ -837,12 +864,13 @@ VIEWS.issuance = {
         '<label>Issue Type *<select id="irType">' + ['Regular', 'Sample'].map(x => '<option' + (x === (U.type || 'Regular') ? ' selected' : '') + '>' + x + '</option>').join('') + '</select></label></div>' +
         '<div class="tbl-wrap" style="margin-top:8px"><table class="bomflat nopage" id="irTable"><tr><th class="num">#</th><th>Item Name</th><th>UOM</th><th class="num">Req Qty</th><th>Rack</th><th class="num">RESERVED STOCK</th><th class="num">OPEN STOCK</th><th>Issue Source</th><th class="num">Issue Qty</th></tr>' +
         (!r0 ? '<tr><td colspan="9" class="empty">Select a Requisition Slip</td></tr>' : r0.lines.map((l, i) => {
-          const m = matBy(l.material) || {}; const left = Math.max(0, num(l.qty) - reqSent(r0.no, l.material));
+          const m = matBy(l.material) || {}; const left = lineLeft(r0, l);
           const rs = r0.jc_no ? reservedOf(l.material, r0.jc_no) : 0; const os = openStockOf(l.material);
           const rack = m.rack || ((Store.all('grns').slice().reverse().flatMap(g => g.lines || []).find(x => norm(x.material) === norm(l.material) && x.rack) || {}).rack || '');
           return '<tr data-irow data-mat="' + esc(l.material) + '" data-left="' + left + '" data-rs="' + rs + '" data-os="' + os + '"><td class="num">' + (i + 1) + '</td><td>' + esc(m.name || l.material) + '</td><td>' + esc(m.uom || '') + '</td><td class="num">' + qtyFmt(left) + '</td><td>' + esc(rack) + '</td><td class="num">' + qtyFmt(rs) + '</td><td class="num">' + qtyFmt(os) + '</td>' +
             '<td><select data-isrc' + (left <= 0 ? ' disabled' : '') + '><option value="AUTO">Auto</option>' + (r0.jc_no ? '<option value="RSJW">Reserved</option>' : '') + '<option value="OPEN">Open</option></select></td><td><input class="qty right" type="number" min="0" step="any" data-iq value="' + (left > 0 ? Math.min(left, rs + os) : '') + '"' + (left <= 0 ? ' disabled' : '') + '></td></tr>';
         }).join('')) + '</table></div></div>' +
+        (r0 ? amendRows(r0) : '') +
         (edit ? '<div class="card-f"><button class="btn primary" data-act="ir-save"' + (r0 ? '' : ' disabled') + '>Issue</button>' + (r0 ? '<button class="btn ghost danger" data-act="req-reject" data-id="' + esc(r0.id) + '" data-confirm="Reject this slip?">Reject slip</button>' : '') + '<span id="irMsg" class="small"></span></div>' : '') + '</div>';
     }
 
@@ -867,9 +895,15 @@ VIEWS.issuance = {
     mm.addEventListener('change', e => { const t = e.target; if (t.id === 'irReq') { ISS_UI.req = t.value; VIEWS.issuance.render(); } else if (t.id === 'irTo') ISS_UI.to = t.value; else if (t.id === 'irType') ISS_UI.type = t.value; });
   }
 };
+function amendRows(r) {
+  const a = Store.all('issues').filter(i => i.req_no === r.no && (i.status === 'Amend' || i.status === 'Rejected'));
+  if (!a.length) return '';
+  return '<div class="tbl-wrap" style="margin:8px 16px"><table class="bomflat nopage"><tr><th>Issue No</th><th>Item Name</th><th class="num">Issue Qty</th><th>Decision</th><th>Reason</th><th>By</th><th>At</th></tr>' +
+    a.map(i => '<tr><td>' + esc(i.no) + '</td><td>' + esc((matBy(i.material) || {}).name || i.material) + '</td><td class="num">' + qtyFmt(i.qty) + '</td><td><span class="st ' + (i.status === 'Amend' ? 'Pending' : 'Late') + '">' + (i.status === 'Amend' ? 'Amend' : 'Rejected') + '</span></td><td>' + esc(i.decision_note || '') + '</td><td>' + esc(i.decided_by || i.approved_by || '') + '</td><td class="nowrap">' + fmtDT(i.decided_at || '') + '</td></tr>').join('') + '</table></div>';
+}
 function issueTable(list) {
-  return '<div class="tbl-wrap"><table><tr><th>No</th><th>Date</th><th>Type</th><th>Req No</th><th>Job Card</th><th>Line</th><th>Picker Name</th><th>Item Name</th><th>Item Code</th><th class="num">Qty</th><th>Issue Source</th><th>Issued To</th><th>Issue Type</th><th>Status</th><th>Issued By</th><th>Approved By</th><th></th></tr>' +
-    (list.length ? list.map(i => '<tr><td><b>' + esc(i.no) + '</b></td><td class="nowrap">' + fmtD(i.date) + '</td><td>' + (i.type === 'return' ? 'Return' : i.type === 'line_reject' ? '<span class="late-txt">Line Reject</span>' : i.type === 'scrap' ? 'Write-off' : 'Issue') + '</td><td>' + esc(i.req_no || '') + '</td><td>' + esc(i.to_jc || '') + '</td><td>' + esc(i.line || '') + '</td><td>' + esc(i.picker || '') + '</td><td>' + esc((matBy(i.material) || {}).name || '') + '</td><td>' + esc(i.material) + '</td><td class="num">' + qtyFmt(i.qty) + '</td><td>' + esc(i.type ? '' : i.source || 'AUTO') + '</td><td>' + esc(i.to_dept || '') + '</td><td>' + esc(i.type ? '' : i.issue_type || 'Regular') + '</td><td><span class="st ' + (i.status === 'Approved' ? 'Done' : i.status === 'Pending' ? 'Pending' : 'Cancelled') + '">' + esc(i.status || 'Approved') + '</span></td><td>' + esc(i.by) + '</td><td>' + esc(i.approved_by || '') + '</td><td class="right"><button class="btn sm ghost" data-act="print-iss" data-id="' + esc(i.id) + '">Print</button></td></tr>').join('') : '<tr><td colspan="17" class="empty">No records</td></tr>') + '</table></div>';
+  return '<div class="tbl-wrap"><table><tr><th>No</th><th>Date</th><th>Type</th><th>Req No</th><th>Job Card</th><th>Line</th><th>Picker Name</th><th>Item Name</th><th>Item Code</th><th class="num">Req Qty</th><th class="num">Qty</th><th>Issue Source</th><th>Issued To</th><th>Issue Type</th><th>Status</th><th>Issued By</th><th>Issued At</th><th>Approved / Decided By</th><th>Approved / Decided At</th><th></th></tr>' +
+    (list.length ? list.map(i => '<tr><td><b>' + esc(i.no) + '</b></td><td class="nowrap">' + fmtD(i.date) + '</td><td>' + (i.type === 'return' ? 'Return' : i.type === 'line_reject' ? '<span class="late-txt">Line Reject</span>' : i.type === 'scrap' ? 'Write-off' : 'Issue') + '</td><td>' + esc(i.req_no || '') + '</td><td>' + esc(i.to_jc || '') + '</td><td>' + esc(i.line || '') + '</td><td>' + esc(i.picker || '') + '</td><td>' + esc((matBy(i.material) || {}).name || '') + '</td><td>' + esc(i.material) + '</td><td class="num">' + (i.req_qty != null ? qtyFmt(i.req_qty) : '') + '</td><td class="num">' + qtyFmt(i.qty) + '</td><td>' + esc(i.type ? '' : i.source || 'AUTO') + '</td><td>' + esc(i.to_dept || '') + '</td><td>' + esc(i.type ? '' : i.issue_type || 'Regular') + '</td><td><span class="st ' + (i.status === 'Approved' ? 'Done' : i.status === 'Pending' || i.status === 'Amend' ? 'Pending' : 'Cancelled') + '">' + esc(i.status || 'Approved') + '</span></td><td>' + esc(i.by) + '</td><td class="nowrap">' + fmtDT(i.at) + '</td><td>' + esc(i.approved_by || i.decided_by || '') + '</td><td class="nowrap">' + fmtDT(i.approved_at || i.decided_at || '') + '</td><td class="right"><button class="btn sm ghost" data-act="print-iss" data-id="' + esc(i.id) + '">Print</button></td></tr>').join('') : '<tr><td colspan="21" class="empty">No records</td></tr>') + '</table></div>';
 }
 ACTIONS['iss-tab'] = el => { ISS_UI.tab = el.dataset.t; VIEWS.issuance.render(); };
 ACTIONS['lr-save'] = () => {
@@ -895,6 +929,7 @@ ACTIONS['ir-save'] = () => {
   if (!to) { msg('Select Issued To.'); return; }
   const out = []; let bad = '';
   $$('#irTable tr[data-irow]').forEach(tr => {
+    if (!$('[data-iq]', tr) || $('[data-iq]', tr).disabled) return;
     const q = num(($('[data-iq]', tr) || {}).value); if (q <= 0) return;
     const src = $('[data-isrc]', tr).value; const left = num(tr.dataset.left); const rs = num(tr.dataset.rs); const os = num(tr.dataset.os);
     const avail = src === 'RSJW' ? rs : src === 'OPEN' ? os : rs + os;
@@ -904,18 +939,26 @@ ACTIONS['ir-save'] = () => {
   });
   if (bad) { msg(esc(bad)); return; }
   if (!out.length) { msg('Enter an Issue Qty.'); return; }
-  out.forEach(x => Store.put('issues', { id: uid(), no: nextNo('issues', 'ISS'), date: todayYmd(), material: x.material, qty: x.qty, source: x.source, to_jc: r.jc_no || '', to_dept: to, line: r.line || '', picker: r.picker || '', issue_type: typ, req_no: r.no, status: 'Pending', by: ME.name, at: nowIso() }));
-  r.status = r.lines.every(l => reqSent(r.no, l.material) >= num(l.qty) - 1e-9) ? 'Sent for Approval' : 'Part Sent'; Store.put('requisitions', r);
+  const slipNo = r.no + '/' + (new Set(Store.all('issues').filter(i => i.req_no === r.no && i.slip_no).map(i => i.slip_no)).size + 1);
+  out.forEach(x => Store.put('issues', { id: uid(), no: nextNo('issues', 'ISS'), slip_no: slipNo, req_qty: num((r.lines.find(l => norm(l.material) === norm(x.material)) || {}).qty), date: todayYmd(), material: x.material, qty: x.qty, source: x.source, to_jc: r.jc_no || '', to_dept: to, line: r.line || '', picker: r.picker || '', issue_type: typ, req_no: r.no, status: 'Pending', by: ME.name, at: nowIso() }));
+  r.status = r.lines.every(l => lineLeft(r, l) <= 1e-9) ? 'Sent for Approval' : 'Part Sent'; Store.put('requisitions', r);
   audit('req.issue', r.no, out.map(x => x.material + '×' + x.qty).join(', ') + ' → ' + to);
   ISS_UI.req = ''; flash(esc(r.no) + ': ' + out.length + ' item(s) sent for issue approval.'); VIEWS.issuance.render();
 };
+function canApproveIssue() { return isAdminRole() || can('issue_approve', 'edit'); }
+function reqRefresh(reqNo) {
+  const req = Store.all('requisitions').find(r => norm(r.no) === norm(reqNo)); if (!req || !reqIsOpen(req)) return;
+  if (Store.all('issues').some(x => x.req_no === req.no && x.status === 'Pending')) return;
+  const done = req.lines.every(l => lineOpen(req, l) <= 1e-9);
+  req.status = done ? 'Issued' : req.lines.some(l => reqIssued(req.no, l.material) > 0) ? 'Part Issued' : 'Pending';
+  if (done) { req.issued_by = ME.name; req.issued_at = nowIso(); }
+  Store.put('requisitions', req);
+}
 ACTIONS['iss-approve'] = el => {
-  if (!canApprove()) { flash('Only Admin/Manager can approve.', 'err'); return; }
+  if (!canApproveIssue()) { flash('Only the Store Incharge can approve an issue.', 'err'); return; }
   const i = Store.get('issues', el.dataset.id); if (i.status !== 'Pending') return;
-  // final stock check at approval time
   const avail = i.source === 'OPEN' ? openStockOf(i.material) : i.source === 'RSJW' ? reservedOf(i.material, i.to_jc) : (openStockOf(i.material) + (i.to_jc ? reservedOf(i.material, i.to_jc) : 0));
-  if (num(i.qty) > avail) { flash('Stock is now insufficient (' + qtyFmt(avail) + ') — reject or wait for stock.', 'err'); return; }
-  // consume reservation first (AUTO/RSJW)
+  if (num(i.qty) > avail) { flash('Stock is now only ' + qtyFmt(avail) + ' — send it back for amendment or reject.', 'err'); return; }
   if (i.to_jc && i.source !== 'OPEN') {
     let need = num(i.qty);
     Store.all('rsjw').filter(r => norm(r.jc_no) === norm(i.to_jc) && norm(r.material) === norm(i.material)).forEach(r => {
@@ -924,19 +967,31 @@ ACTIONS['iss-approve'] = el => {
     });
   }
   i.status = 'Approved'; i.approved_by = ME.name; i.approved_at = nowIso(); Store.put('issues', i);
-  // requisition close when all its issues resolved
-  if (i.req_no) {
-    const req = Store.all('requisitions').find(r => norm(r.no) === norm(i.req_no));
-    if (req && !Store.all('issues').some(x => x.req_no === i.req_no && x.status === 'Pending')) { const full = req.lines.every(l => reqIssued(req.no, l.material) >= num(l.qty) - 1e-9); req.status = full ? 'Issued' : 'Part Issued'; req.issued_by = ME.name; Store.put('requisitions', req); }
-  }
+  if (i.req_no) reqRefresh(i.req_no);
   audit('issue.approve', i.no, i.material + ' × ' + qtyFmt(i.qty)); flash(esc(i.no) + ' approved — stock deducted.'); VIEWS.issuance.render();
 };
-ACTIONS['iss-deny'] = el => {
-  if (!canApprove()) { flash('Only Admin/Manager can reject.', 'err'); return; }
-  const i = Store.get('issues', el.dataset.id); i.status = 'Rejected'; i.approved_by = ME.name; Store.put('issues', i);
-  if (i.req_no) { const req = Store.all('requisitions').find(r => norm(r.no) === norm(i.req_no)); if (req && reqIsOpen(req)) { req.status = req.lines.some(l => reqIssued(req.no, l.material) > 0) ? 'Part Issued' : 'Pending'; Store.put('requisitions', req); } }
-  audit('issue.reject', i.no, ''); VIEWS.issuance.render();
-};
+// Amend = back to store to correct and issue again; Reject = this item will not be issued on the slip
+function issDecide(id, kind) {
+  if (!canApproveIssue()) { flash('Only the Store Incharge can do this.', 'err'); return; }
+  const i = Store.get('issues', id); if (!i || i.status !== 'Pending') return;
+  const old = $('#idDlg'); if (old) old.remove();
+  const d = document.createElement('div'); d.id = 'idDlg'; d.className = 'dlg-back';
+  d.innerHTML = '<div class="dlg"><div class="dlg-h">' + (kind === 'amend' ? 'Send for amendment' : 'Reject') + ' · ' + esc(i.no) + '</div><table class="jckv"><tr><td class="k">Item</td><td class="v">' + esc((matBy(i.material) || {}).name || i.material) + ' · ' + qtyFmt(i.qty) + '</td></tr><tr><td class="k">Reason *</td><td class="v"><textarea id="idWhy" rows="3"></textarea></td></tr></table>' +
+    '<div class="dlg-f"><span id="idMsg" class="small late-txt"></span><span class="grow"></span><button class="btn" data-id-cancel>Cancel</button><button class="btn ' + (kind === 'amend' ? 'primary' : 'danger') + '" data-id-ok>' + (kind === 'amend' ? 'Send for amendment' : 'Reject') + '</button></div></div>';
+  document.body.appendChild(d); $('#idWhy').focus();
+  d.addEventListener('click', ev => {
+    if (ev.target.closest('[data-id-cancel]')) { d.remove(); return; }
+    if (!ev.target.closest('[data-id-ok]')) return;
+    const why = $('#idWhy').value.trim(); if (!why) { $('#idMsg').textContent = 'Write the reason.'; return; }
+    i.status = kind === 'amend' ? 'Amend' : 'Rejected'; i.decision_note = why; i.decided_by = ME.name; i.decided_at = nowIso(); Store.put('issues', i);
+    if (kind === 'reject' && i.req_no) { const req = Store.all('requisitions').find(r => norm(r.no) === norm(i.req_no)); const l = req && req.lines.find(x => norm(x.material) === norm(i.material)); if (l && reqSent(req.no, l.material) <= reqIssued(req.no, l.material) + 1e-9) { l.closed = true; l.closed_note = why; l.closed_by = ME.name; l.closed_at = nowIso(); Store.put('requisitions', req); } }
+    if (i.req_no) reqRefresh(i.req_no);
+    audit(kind === 'amend' ? 'issue.amend' : 'issue.reject', i.no, why); d.remove();
+    flash(esc(i.no) + (kind === 'amend' ? ' sent back to Store for amendment.' : ' rejected.')); VIEWS.issuance.render();
+  });
+}
+ACTIONS['iss-amend'] = el => issDecide(el.dataset.id, 'amend');
+ACTIONS['iss-deny'] = el => issDecide(el.dataset.id, 'reject');
 ACTIONS['ret-save'] = () => {
   if (!requirePerm('store', 'edit')) return;
   const jc = $('#rtJc').value.trim(); const m = matBy($('#rtMat').value); const qty = num($('#rtQty').value);
@@ -1223,13 +1278,15 @@ function reqSent(reqNo, code) { return Store.all('issues').filter(i => i.req_no 
 // stock already held by open slips (not yet issued) and by pending direct issues
 function reqHeld(code) {
   let q = 0;
-  Store.all('requisitions').filter(reqIsOpen).forEach(r => (r.lines || []).forEach(l => { if (norm(l.material) === norm(code)) q += Math.max(0, num(l.qty) - reqIssued(r.no, l.material)); }));
+  Store.all('requisitions').filter(reqIsOpen).forEach(r => (r.lines || []).forEach(l => { if (norm(l.material) === norm(code)) q += lineOpen(r, l); }));
   Store.all('issues').filter(i => i.status === 'Pending' && !i.req_no && norm(i.material) === norm(code)).forEach(i => { q += num(i.qty); });
   return q;
 }
+function lineOpen(r, l) { return l.closed ? 0 : Math.max(0, num(l.qty) - reqIssued(r.no, l.material)); }
+function lineLeft(r, l) { return l.closed ? 0 : Math.max(0, num(l.qty) - reqSent(r.no, l.material)); }
 function freeStock(code) { return Math.max(0, stockOf(code) - reqHeld(code)); }
 // JC qty still to be asked for: required − issued − already on an open slip
-function jcOpenReqQty(jc, code) { return Store.all('requisitions').filter(r => reqIsOpen(r) && norm(r.jc_no) === norm(jc)).reduce((s2, r) => s2 + (r.lines || []).filter(l => norm(l.material) === norm(code)).reduce((a, l) => a + Math.max(0, num(l.qty) - reqIssued(r.no, l.material)), 0), 0); }
+function jcOpenReqQty(jc, code) { return Store.all('requisitions').filter(r => reqIsOpen(r) && norm(r.jc_no) === norm(jc)).reduce((s2, r) => s2 + (r.lines || []).filter(l => norm(l.material) === norm(code)).reduce((a, l) => a + lineOpen(r, l), 0), 0); }
 function reqJcRows(jc) {
   const j = jcBy(jc); if (!j) return [];
   return (j.lines || []).map(l => {
@@ -1267,7 +1324,7 @@ VIEWS.requisition = {
     }
     const rows = Store.all('requisitions').slice().sort((a2, b2) => b2.no < a2.no ? -1 : 1);
     h += '<div class="tbl-wrap"><table class="bomflat"><tr><th>Req No</th><th>Date</th><th>Method</th><th>JC / Dept</th><th>Line</th><th>Picker Name</th><th class="num">Sr</th><th>Item Name</th><th>Item Code</th><th class="num">Qty</th><th class="num">Issued</th><th>Status</th><th>Raised By</th><th>Issued By</th><th></th></tr>' +
-      (rows.length ? rows.map(r => r.lines.map((l, i) => '<tr' + (i === 0 ? ' class="bomfirst"' : '') + '><td><b>' + esc(r.no) + '</b></td><td>' + fmtD(r.date) + '</td><td>' + (r.method === 'cons' ? 'Consumable Items' : 'Job Card') + '</td><td>' + esc(r.jc_no || r.dept) + '</td><td class="num">' + (i + 1) + '</td><td>' + esc((matBy(l.material) || {}).name || '') + '</td><td>' + esc(l.material) + '</td><td class="num">' + qtyFmt(l.qty) + '</td><td class="num">' + qtyFmt(reqIssued(r.no, l.material)) + '</td><td><span class="st ' + (r.status === 'Issued' ? 'Done' : r.status === 'Rejected' ? 'Late' : 'Pending') + '">' + esc(r.status) + '</span></td><td>' + esc(r.by) + '</td><td>' + esc(r.issued_by || '') + '</td><td class="right">' + (i === 0 ? '<button class="btn sm ghost" data-act="print-req" data-id="' + esc(r.id) + '">Print Slip</button>' : '') + '</td></tr>').join('')).join('') : '<tr><td colspan="15" class="empty">No requisitions</td></tr>') + '</table></div>';
+      (rows.length ? rows.map(r => r.lines.map((l, i) => '<tr' + (i === 0 ? ' class="bomfirst"' : '') + '><td><b>' + esc(r.no) + '</b></td><td>' + fmtD(r.date) + '</td><td>' + (r.method === 'cons' ? 'Consumable Items' : 'Job Card') + '</td><td>' + esc(r.jc_no || r.dept) + '</td><td>' + esc(r.line || '') + '</td><td>' + esc(r.picker || '') + '</td><td class="num">' + (i + 1) + '</td><td>' + esc((matBy(l.material) || {}).name || '') + '</td><td>' + esc(l.material) + '</td><td class="num">' + qtyFmt(l.qty) + '</td><td class="num">' + qtyFmt(reqIssued(r.no, l.material)) + '</td><td><span class="st ' + (r.status === 'Issued' ? 'Done' : r.status === 'Rejected' ? 'Late' : 'Pending') + '">' + esc(r.status) + '</span></td><td>' + esc(r.by) + '</td><td>' + esc(r.issued_by || '') + '</td><td class="right">' + (i === 0 ? '<button class="btn sm ghost" data-act="print-req" data-id="' + esc(r.id) + '">Print Slip</button>' : '') + '</td></tr>').join('')).join('') : '<tr><td colspan="15" class="empty">No requisitions</td></tr>') + '</table></div>';
     setMain(h);
     const m = $('#main');
     m.addEventListener('change', e => {
@@ -1302,12 +1359,12 @@ ACTIONS['req-save'] = () => {
       const x = fresh[norm(tr.dataset.mat)];
       if (!x || x.free <= 0) { bad = bad || tr.dataset.mat + ': no stock.'; return; }
       if (q > x.cap + 1e-9) { bad = bad || tr.dataset.mat + ': max ' + qtyFmt(x.cap) + '.'; return; }
-      lines.push({ material: x.material, qty: q });
+      lines.push({ material: x.material, qty: q, req: x.pend, stock: x.free });
     });
   } else {
     const dept = $('#nrDept').value; if (!dept) { msg('Select the department.'); return; }
     U.dept = dept;
-    U.cons.forEach(c => { const m = matBy(c.material); const q = num(c.qty); if (!m || q <= 0) return; const free = freeStock(m.code); if (free <= 0) { bad = bad || m.name + ': no stock.'; return; } if (q > free + 1e-9) { bad = bad || m.name + ': only ' + qtyFmt(free) + ' free.'; return; } lines.push({ material: m.code, qty: q }); });
+    U.cons.forEach(c => { const m = matBy(c.material); const q = num(c.qty); if (!m || q <= 0) return; const free = freeStock(m.code); if (free <= 0) { bad = bad || m.name + ': no stock.'; return; } if (q > free + 1e-9) { bad = bad || m.name + ': only ' + qtyFmt(free) + ' free.'; return; } lines.push({ material: m.code, qty: q, stock: free }); });
   }
   if (bad) { msg(esc(bad)); return; }
   if (!lines.length) { msg('Enter a requisition qty for at least one item.'); return; }
