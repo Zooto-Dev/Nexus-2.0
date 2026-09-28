@@ -349,3 +349,10 @@ label.attach{flex-direction:row!important;width:auto}
 .ed .condrow .qline { flex-wrap: nowrap; }
 
 .bldbar { position: sticky; top: 44px; z-index: 9; background: var(--bg, #f5f6f8); padding-top: 4px; }
+
+/* Home task tiles */
+.ht-tiles a { cursor: pointer; }
+.ht-tiles a.on { outline: 2px solid var(--accent, #0d7377); outline-offset: -2px; }
+.pend-txt { color: var(--pending); }
+.done-txt { color: var(--done); }
+.ht-tiles b.late-txt { color: var(--late); } .ht-tiles b.pend-txt { color: var(--pending); } .ht-tiles b.done-txt { color: var(--done); }

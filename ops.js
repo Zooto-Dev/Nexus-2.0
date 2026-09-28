@@ -45,7 +45,8 @@ VIEWS.home = {
     const payPend = Store.all('dispatches').filter(d => !d.cancelled && d.payment !== 'Received');
     const chkDue = myChecklistDue();
 
-    let h = '<div class="dash-head"><div><h1 style="margin:0">Good ' + (new Date().getHours() < 12 ? 'morning' : 'day') + ', ' + esc(ME.name.split(' ')[0]) + '</h1><div class="muted small">' + new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' }) + ' · ' + esc(settings().company || '') + '</div></div></div>';
+    let h = '<div class="dash-head"><div><h1 style="margin:0">Good ' + (new Date().getHours() < 12 ? 'morning' : 'day') + ', ' + esc(ME.name.split(' ')[0]) + '</h1><div class="muted small">' + new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) + ' · ' + esc(settings().company || '') + '</div></div></div>';
+    h += homeTasks();
     h += '<div class="kpis">' +
       '<a href="#/orders"><b>' + openOrders.length + '</b><span>Open orders</span></a>' +
       '<a href="#/orders/late"><b class="' + (late.length ? 'late-txt' : '') + '">' + late.length + '</b><span>Late steps</span></a>' +
@@ -85,8 +86,75 @@ VIEWS.home = {
     h += '<h2>Open orders by stage</h2><div class="tbl-wrap"><table><tr><th>Stage</th><th class="num">Orders</th></tr>' +
       Object.entries(stage).sort((a, b2) => b2[1] - a[1]).map(([k, n]) => '<tr><td>' + esc(k) + '</td><td class="num">' + n + '</td></tr>').join('') + '</table></div>';
     h += '</div></div>';
-    setMain(h);
+    const m = setMain(h);
+    const w = $('#htWho'); if (w) w.addEventListener('change', () => { HT_UI.who = w.value; VIEWS.home.render(); });
+    return m;
   }
+};
+
+// Home, top: every task of one person (FMS steps + checklist) as Delayed / Pending / Upcoming / Completed
+const HT_UI = { who: '', f: 'all' };
+function personTasks(doer) {
+  const now = new Date(), today = todayYmd(), since = new Date(Date.now() - 30 * 86400000), cal = calInfo();
+  const late = (p, a) => { if (!p || !a || a <= p) return 0; try { return cal.workMinutesBetween(p, a); } catch (e) { return Math.round((a - p) / 60000); } };
+  const openSt = p => p && p < now ? 'Delayed' : p && ymdOf(p) === today ? 'Pending' : 'Upcoming';
+  const out = [];
+  Store.all('orders').forEach(o => {
+    if (o.priority === 'Cancelled') return;
+    const r = resolveOrder(o); if (!r) return;
+    r.order.forEach(id => {
+      const s = r.steps[id]; if (!s || norm(s.doer) !== norm(doer)) return;
+      const def = r.spec.steps.find(x => x.id === id);
+      const base = { task: s.name, ref: o.no, party: o.customer_name, src: 'FMS', planned: s.planned || null };
+      if (s.status === 'Pending' || s.status === 'Late') out.push(Object.assign(base, { status: s.status === 'Late' ? 'Delayed' : openSt(s.planned), delay: s.status === 'Late' ? s.delayMinutes : 0, btn: stepDoneBtn(o, s, def, r.spec) }));
+      else if (s.actual && new Date(s.actual) >= since) out.push(Object.assign(base, { status: 'Completed', done: new Date(s.actual), delay: s.delayMinutes || 0 }));
+    });
+  });
+  Store.all('checklist').filter(t => t.active !== false && norm(t.doer) === norm(doer)).forEach(t => {
+    const base = { task: t.title, ref: t.ref || (t.freq === 'Once' ? '' : t.freq), party: t.party || '', src: t.demo ? 'Demo' : 'Checklist', id: t.id };
+    const canDo = isMyDoer(t.doer) || can('tracker', 'edit');
+    if (t.freq === 'Once') {
+      const p = t.planned ? new Date(t.planned) : t.due ? new Date(t.due + 'T18:00:00') : null;
+      const doneAt = (t.done || {}).once ? new Date(t.done_at || String(t.done.once).split(' · ')[1] + 'T18:00:00') : null;
+      if (doneAt) { if (doneAt >= since) out.push(Object.assign(base, { planned: p, status: 'Completed', done: doneAt, delay: late(p, doneAt) })); }
+      else out.push(Object.assign(base, { planned: p, status: openSt(p), delay: p && p < now ? late(p, now) : 0, btn: canDo ? '<button class="btn sm primary" data-act="ht-done" data-id="' + esc(t.id) + '">Done</button>' : '' }));
+    } else if ((t.done || {})[today]) out.push(Object.assign(base, { planned: new Date(today + 'T18:00:00'), status: 'Completed', done: new Date(t.done_at && t.done_at.slice(0, 10) === today ? t.done_at : today + 'T12:00:00'), delay: 0 }));
+    else if (checklistDueToday(t)) { const p = new Date(today + 'T18:00:00'); out.push(Object.assign(base, { planned: p, status: openSt(p), delay: p < now ? late(p, now) : 0, btn: canDo ? '<button class="btn sm primary" data-act="ht-done" data-id="' + esc(t.id) + '">Done</button>' : '' })); }
+  });
+  return out;
+}
+function homeTasks() {
+  const pick = isAdminRole() || can('tracker', 'view');
+  if (!HT_UI.who || !pick) HT_UI.who = ME.doer || '';
+  const doers = Array.from(new Set(Store.all('users').filter(u => u.active !== false && u.doer).map(u => u.doer).concat(HT_UI.who ? [HT_UI.who] : []))).sort();
+  const all = personTasks(HT_UI.who);
+  const order = { Delayed: 0, Pending: 1, Upcoming: 2, Completed: 3 };
+  const cnt = k => all.filter(t => t.status === k).length;
+  const list = all.filter(t => HT_UI.f === 'all' || t.status === HT_UI.f).sort((a, b) => order[a.status] - order[b.status] ||
+    (a.status === 'Delayed' ? b.delay - a.delay : a.status === 'Completed' ? b.done - a.done : (a.planned || 0) - (b.planned || 0)));
+  const cls = { Delayed: 'Late', Pending: 'Pending', Upcoming: 'Waiting', Completed: 'Done' };
+  const tile = (k, l, c) => '<a data-act="ht-f" data-f="' + k + '" class="' + (HT_UI.f === k ? 'on' : '') + '"><b class="' + c + '">' + (k === 'all' ? all.length : cnt(k)) + '</b><span>' + l + '</span></a>';
+  let h = '<div class="toolbar">' + (pick ? '<select id="htWho">' + doers.map(d => '<option' + (norm(d) === norm(HT_UI.who) ? ' selected' : '') + '>' + esc(d) + '</option>').join('') + '</select>' : '<b>' + esc(HT_UI.who || ME.name) + '</b>') +
+    '<span class="grow"></span>' + (isSuperAdmin() && Store.all('checklist').some(t => t.demo) ? '<button class="btn sm danger" data-act="ht-demo-del" data-confirm="Remove all demo tasks?">Remove demo tasks</button>' : '') + '</div>';
+  h += '<div class="kpis ht-tiles">' + tile('all', 'All tasks', '') + tile('Delayed', 'Delayed', 'late-txt') + tile('Pending', 'Pending today', 'pend-txt') + tile('Upcoming', 'Upcoming', '') + tile('Completed', 'Completed (30 days)', 'done-txt') + '</div>';
+  h += '<div class="tbl-wrap"><table><tr><th class="num">#</th><th>Task</th><th>Reference</th><th>Party</th><th>Source</th><th>Planned</th><th>Completed</th><th>Status</th><th class="num">Delay</th><th></th></tr>' +
+    (list.length ? list.map((t, i) => '<tr><td class="num">' + (i + 1) + '</td><td>' + esc(t.task) + '</td><td><b>' + esc(t.ref || '') + '</b></td><td>' + esc(t.party || '') + '</td><td>' + esc(t.src) + '</td><td class="nowrap">' + (t.planned ? fmtDT(t.planned) : '') + '</td><td class="nowrap">' + (t.done ? fmtDT(t.done) : '') + '</td>' +
+      '<td><span class="st ' + cls[t.status] + '">' + t.status + '</span></td><td class="num' + (t.delay ? ' late-txt' : '') + '">' + (t.delay ? fmtDelay(t.delay) : '') + '</td><td class="right">' + (t.btn || '') + '</td></tr>').join('')
+      : '<tr><td colspan="10" class="empty">No tasks</td></tr>') + '</table></div>';
+  return h;
+}
+ACTIONS['ht-f'] = el => { HT_UI.f = el.dataset.f; VIEWS.home.render(); };
+ACTIONS['ht-done'] = el => {
+  const t = Store.get('checklist', el.dataset.id); if (!t) return;
+  if (!(isMyDoer(t.doer) || can('tracker', 'edit'))) { flash('Only ' + esc(t.doer) + ' can mark this done.', 'err'); return; }
+  t.done = t.done || {};
+  if (t.freq === 'Once') t.done.once = ME.name + ' · ' + todayYmd(); else t.done[todayYmd()] = ME.name;
+  t.done_at = nowIso(); Store.put('checklist', t); audit('checklist.done', t.title, t.doer); renderNav(); VIEWS.home.render();
+};
+ACTIONS['ht-demo-del'] = () => {
+  if (!isSuperAdmin()) return;
+  const d = Store.all('checklist').filter(t => t.demo); d.forEach(t => Store.del('checklist', t.id));
+  audit('checklist.demo_removed', String(d.length), ''); flash(d.length + ' demo tasks removed.'); VIEWS.home.render();
 };
 
 // Home: my score, my open work, what is held up because of me; Super Admin sees everyone
