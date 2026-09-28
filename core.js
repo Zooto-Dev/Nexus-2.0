@@ -162,7 +162,9 @@ const DEF_OPTS = {
   category: ['Shoes', 'Slider', 'Clogs', 'V Shape', 'Eva Slider'],
   channel: ['Online', 'Offline', 'Export'],
   gender: ['Gents', 'Ladies', 'Kids', 'Unisex'],
-  packing: ['Assortment', 'Solid']
+  packing: ['Assortment', 'Solid'],
+  prod_line: ['ASSEMBLY LINE 1', 'ASSEMBLY LINE 2', 'CUTTING', 'PACKING LINE 1', 'STITCHING'],
+  picker: []
 };
 function optList(key) {
   const o = (settings().options || {})[key];
