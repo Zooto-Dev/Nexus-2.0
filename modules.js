@@ -816,9 +816,7 @@ function pendingIssues() { return Store.all('issues').filter(i => i.status === '
 VIEWS.issuance = {
   mod: 'store', render() {
     const edit = can('store', 'edit'); const appr = canApprove();
-    const reqs = Store.all('requisitions').filter(r => r.status === 'Pending');
-    const { stk } = stockMaps();
-    let h = subTitle('Issuance', 'request → approval → stock deducted');
+    let h = '';
 
     // 1) approvals
     const pend = pendingIssues();
@@ -827,13 +825,22 @@ VIEWS.issuance = {
         (appr ? '<td class="right nowrap"><button class="btn sm primary" data-act="iss-approve" data-id="' + esc(i.id) + '">Approve</button> <button class="btn sm ghost danger" data-act="iss-deny" data-id="' + esc(i.id) + '" data-confirm="Reject?">Reject</button></td>' : '') + '</tr>').join('') : '<tr><td colspan="8" class="empty">No issue approvals pending</td></tr>') + '</table></div>' +
       (appr ? '' : '');
 
-    // 2) pending requisitions
-    h += '<h2>Pending requisitions</h2><div class="tbl-wrap"><table class="bomflat"><tr><th>Req No</th><th>Date</th><th>JC / Dept</th><th class="num">Sr</th><th>Item Name</th><th>Item Code</th><th class="num">Qty</th><th class="num">In Stock</th><th>Stock Check</th><th>Raised By</th>' + (edit ? '<th></th>' : '') + '</tr>' +
-      (reqs.length ? reqs.map(r => {
-        const short = r.lines.filter(l => (stk[norm(l.material)] || 0) < num(l.qty));
-        return r.lines.map((l, i) => { const have = stk[norm(l.material)] || 0; return '<tr' + (i === 0 ? ' class="bomfirst"' : '') + '><td><b>' + esc(r.no) + '</b></td><td>' + fmtD(r.date) + '</td><td>' + esc(r.jc_no || r.dept) + '</td><td class="num">' + (i + 1) + '</td><td>' + esc((matBy(l.material) || {}).name || '') + '</td><td>' + esc(l.material) + '</td><td class="num">' + qtyFmt(l.qty) + '</td><td class="num">' + qtyFmt(have) + '</td><td>' + (have < num(l.qty) ? '<span class="st Late">Short</span>' : '<span class="st Done">OK</span>') + '</td><td>' + esc(r.by) + '</td>' +
-          (edit ? '<td class="right">' + (i === 0 ? '<button class="btn sm primary" data-act="iss-req" data-id="' + esc(r.id) + '"' + (short.length ? ' disabled title="stock short"' : '') + '>Send for issue</button> <button class="btn sm ghost danger" data-act="req-reject" data-id="' + esc(r.id) + '" data-confirm="Reject?">Reject</button>' : '') + '</td>' : '') + '</tr>'; }).join('');
-      }).join('') : '<tr><td colspan="11" class="empty">No pending requisitions</td></tr>') + '</table></div>';
+    // 2) issue against a requisition slip
+    const U = ISS_UI; const open = Store.all('requisitions').filter(r => reqIsOpen(r)).sort((a, b) => String(a.no).localeCompare(String(b.no)));
+    if (U.req && !open.some(r => r.id === U.req)) U.req = '';
+    const r0 = U.req ? Store.get('requisitions', U.req) : null;
+    const people = Store.all('users').filter(u => u.active !== false).map(u => u.name).sort();
+    h += '<h2>Issue against requisition</h2>' + (edit ? '<div class="card"><div class="card-b"><div class="row"><label>Requisition Slip *<select id="irReq"><option value="">— select —</option>' + open.map(r => '<option value="' + esc(r.id) + '"' + (r.id === U.req ? ' selected' : '') + '>' + esc(r.no + ' · ' + (r.jc_no || r.dept) + ' · ' + r.by) + '</option>').join('') + '</select></label>' +
+      '<label>Issued To *<select id="irTo">' + selOpts(people, U.to || '') + '</select></label>' +
+      '<label>Issue Type *<select id="irType">' + ['Regular', 'Sample'].map(x => '<option' + (x === (U.type || 'Regular') ? ' selected' : '') + '>' + x + '</option>').join('') + '</select></label></div>' +
+      '<div class="tbl-wrap" style="margin-top:8px"><table class="bomflat nopage" id="irTable"><tr><th class="num">#</th><th>Item Name</th><th>UOM</th><th class="num">Req Qty</th><th>Rack</th><th class="num">RESERVED STOCK</th><th class="num">OPEN STOCK</th><th>Issue Source</th><th class="num">Issue Qty</th></tr>' +
+      (!r0 ? '<tr><td colspan="9" class="empty">Select a Requisition Slip</td></tr>' : r0.lines.map((l, i) => {
+        const m = matBy(l.material) || {}; const left = Math.max(0, num(l.qty) - reqSent(r0.no, l.material));
+        const rs = r0.jc_no ? reservedOf(l.material, r0.jc_no) : 0; const os = openStockOf(l.material);
+        const rack = m.rack || ((Store.all('grns').slice().reverse().flatMap(g => g.lines || []).find(x => norm(x.material) === norm(l.material) && x.rack) || {}).rack || '');
+        return '<tr data-irow data-mat="' + esc(l.material) + '" data-left="' + left + '" data-rs="' + rs + '" data-os="' + os + '"><td class="num">' + (i + 1) + '</td><td>' + esc(m.name || l.material) + '</td><td>' + esc(m.uom || '') + '</td><td class="num">' + qtyFmt(left) + '</td><td>' + esc(rack) + '</td><td class="num">' + qtyFmt(rs) + '</td><td class="num">' + qtyFmt(os) + '</td>' +
+          '<td><select data-isrc' + (left <= 0 ? ' disabled' : '') + '><option value="AUTO">Auto</option>' + (r0.jc_no ? '<option value="RSJW">Reserved</option>' : '') + '<option value="OPEN">Open</option></select></td><td><input class="qty right" type="number" min="0" step="any" data-iq value="' + (left > 0 ? Math.min(left, rs + os) : '') + '"' + (left <= 0 ? ' disabled' : '') + '></td></tr>';
+      }).join('')) + '</table></div></div><div class="card-f"><button class="btn primary" data-act="ir-save"' + (r0 ? '' : ' disabled') + '>Issue</button>' + (r0 ? '<button class="btn ghost danger" data-act="req-reject" data-id="' + esc(r0.id) + '" data-confirm="Reject this slip?">Reject slip</button>' : '') + '<span id="irMsg" class="small"></span></div></div>' : '');
 
     // 3) direct issue + return
     h += '<div class="toolbar" style="margin-top:14px"><h2 style="margin:0">Direct issue / return</h2>' +
@@ -858,7 +865,8 @@ VIEWS.issuance = {
     const iss = Store.all('issues').filter(i => i.status !== 'Pending').slice().sort((a2, b2) => (b2.at || '') < (a2.at || '') ? -1 : 1).slice(0, 15);
     h += '<div class="tbl-wrap"><table><tr><th>No</th><th>DATE</th><th>TYPE</th><th>ITEM</th><th class="num">QUANTITY</th><th>SOURCE TYPE</th><th>JOB CARD</th><th>ISSUED TO</th><th>ISSUE TYPE</th><th>REQ</th><th>STATUS</th><th>ISSUED BY</th><th></th></tr>' +
       (iss.length ? iss.map(i => '<tr><td><b>' + esc(i.no) + '</b></td><td class="nowrap">' + fmtD(i.date) + '</td><td>' + (i.type === 'return' ? 'Return' : i.type === 'line_reject' ? '<span class="late-txt">Line Reject</span>' : i.type === 'scrap' ? 'Write-off' : 'Issue') + '</td><td>' + esc(i.material) + '</td><td class="num">' + qtyFmt(i.qty) + '</td><td>' + esc(i.source || 'AUTO') + '</td><td>' + esc(i.to_jc || '') + '</td><td>' + esc(i.to_dept || '') + '</td><td>' + esc(i.issue_type || 'Regular') + '</td><td>' + esc(i.req_no || '') + '</td><td><span class="st ' + (i.status === 'Approved' ? 'Done' : 'Cancelled') + '">' + esc(i.status || 'Approved') + '</span></td><td class="small">' + esc(i.by) + (i.approved_by ? ' → ' + esc(i.approved_by) : '') + '</td><td class="right"><button class="btn sm ghost" data-act="print-iss" data-id="' + esc(i.id) + '">Print</button></td></tr>').join('') : '<tr><td colspan="13" class="empty">No issues yet</td></tr>') + '</table></div>';
-    setMain(h);
+    const mm = setMain(h);
+    mm.addEventListener('change', e => { const t = e.target; if (t.id === 'irReq') { ISS_UI.req = t.value; VIEWS.issuance.render(); } else if (t.id === 'irTo') ISS_UI.to = t.value; else if (t.id === 'irType') ISS_UI.type = t.value; });
   }
 };
 ACTIONS['iss-new'] = () => { ISS_UI.form = !ISS_UI.form; ISS_UI.ret = false; VIEWS.issuance.render(); };
@@ -892,13 +900,27 @@ ACTIONS['iss-save'] = () => {
   audit('issue.request', i.no, m.code + ' × ' + qty + ' (' + src + ')'); ISS_UI.form = false;
   flash(esc(i.no) + ' request sent — stock is deducted after approval.'); VIEWS.issuance.render();
 };
-ACTIONS['iss-req'] = el => {
+ACTIONS['ir-save'] = () => {
   if (!requirePerm('store', 'edit')) return;
-  const r = Store.get('requisitions', el.dataset.id); const { stk } = stockMaps();
-  if (r.lines.some(l => (stk[norm(l.material)] || 0) < num(l.qty))) { flash('Stock is short.', 'err'); return; }
-  r.lines.forEach(l => Store.put('issues', { id: uid(), no: nextNo('issues', 'ISS'), date: todayYmd(), material: l.material, qty: num(l.qty), source: 'AUTO', to_jc: r.jc_no, to_dept: r.dept, req_no: r.no, status: 'Pending', by: ME.name, at: nowIso() }));
-  r.status = 'Sent for Approval'; Store.put('requisitions', r);
-  audit('req.send', r.no, r.lines.map(l => l.material + '×' + l.qty).join(', ')); flash(esc(r.no) + ' sent for approval.'); VIEWS.issuance.render();
+  const msg = t => { $('#irMsg').innerHTML = '<span class="late-txt">' + t + '</span>'; };
+  const r = Store.get('requisitions', ISS_UI.req); if (!r || !reqIsOpen(r)) { msg('Select a Requisition Slip.'); return; }
+  const to = $('#irTo').value; const typ = $('#irType').value || 'Regular';
+  if (!to) { msg('Select Issued To.'); return; }
+  const out = []; let bad = '';
+  $$('#irTable tr[data-irow]').forEach(tr => {
+    const q = num(($('[data-iq]', tr) || {}).value); if (q <= 0) return;
+    const src = $('[data-isrc]', tr).value; const left = num(tr.dataset.left); const rs = num(tr.dataset.rs); const os = num(tr.dataset.os);
+    const avail = src === 'RSJW' ? rs : src === 'OPEN' ? os : rs + os;
+    if (q > left + 1e-9) bad = bad || tr.dataset.mat + ': more than Req Qty.';
+    else if (q > avail + 1e-9) bad = bad || tr.dataset.mat + ': stock is only ' + qtyFmt(avail) + '.';
+    else out.push({ material: tr.dataset.mat, qty: q, source: src });
+  });
+  if (bad) { msg(esc(bad)); return; }
+  if (!out.length) { msg('Enter an Issue Qty.'); return; }
+  out.forEach(x => Store.put('issues', { id: uid(), no: nextNo('issues', 'ISS'), date: todayYmd(), material: x.material, qty: x.qty, source: x.source, to_jc: r.jc_no || '', to_dept: to, issue_type: typ, req_no: r.no, status: 'Pending', by: ME.name, at: nowIso() }));
+  r.status = r.lines.every(l => reqSent(r.no, l.material) >= num(l.qty) - 1e-9) ? 'Sent for Approval' : 'Part Sent'; Store.put('requisitions', r);
+  audit('req.issue', r.no, out.map(x => x.material + '×' + x.qty).join(', ') + ' → ' + to);
+  ISS_UI.req = ''; flash(esc(r.no) + ': ' + out.length + ' item(s) sent for issue approval.'); VIEWS.issuance.render();
 };
 ACTIONS['iss-approve'] = el => {
   if (!canApprove()) { flash('Only Admin/Manager can approve.', 'err'); return; }
@@ -918,14 +940,14 @@ ACTIONS['iss-approve'] = el => {
   // requisition close when all its issues resolved
   if (i.req_no) {
     const req = Store.all('requisitions').find(r => norm(r.no) === norm(i.req_no));
-    if (req && !Store.all('issues').some(x => x.req_no === i.req_no && x.status === 'Pending')) { req.status = 'Issued'; req.issued_by = ME.name; Store.put('requisitions', req); }
+    if (req && !Store.all('issues').some(x => x.req_no === i.req_no && x.status === 'Pending')) { const full = req.lines.every(l => reqIssued(req.no, l.material) >= num(l.qty) - 1e-9); req.status = full ? 'Issued' : 'Part Issued'; req.issued_by = ME.name; Store.put('requisitions', req); }
   }
   audit('issue.approve', i.no, i.material + ' × ' + qtyFmt(i.qty)); flash(esc(i.no) + ' approved — stock deducted.'); VIEWS.issuance.render();
 };
 ACTIONS['iss-deny'] = el => {
   if (!canApprove()) { flash('Only Admin/Manager can reject.', 'err'); return; }
   const i = Store.get('issues', el.dataset.id); i.status = 'Rejected'; i.approved_by = ME.name; Store.put('issues', i);
-  if (i.req_no) { const req = Store.all('requisitions').find(r => norm(r.no) === norm(i.req_no)); if (req) { req.status = 'Pending'; Store.put('requisitions', req); } }
+  if (i.req_no) { const req = Store.all('requisitions').find(r => norm(r.no) === norm(i.req_no)); if (req && reqIsOpen(req)) { req.status = req.lines.some(l => reqIssued(req.no, l.material) > 0) ? 'Part Issued' : 'Pending'; Store.put('requisitions', req); } }
   audit('issue.reject', i.no, ''); VIEWS.issuance.render();
 };
 ACTIONS['ret-save'] = () => {
@@ -1205,66 +1227,101 @@ VIEWS.boms = {
 };
 
 /* ================= PRODUCTION ================= */
-const REQ_UI = { form: false };
+const REQ_UI = { form: false, method: 'jc', jc: '', dept: '', cons: [] };
+const reqIsOpen = r => !['Issued', 'Rejected', 'Closed'].includes(r.status);
 function staleReqs() { return Store.all('requisitions').filter(r => r.status === 'Pending' && (Date.now() - new Date(r.date + 'T00:00')) > 24 * 3600000); }
+// qty of a slip line issued (approved) / sent to store (pending + approved)
+function reqIssued(reqNo, code) { return Store.all('issues').filter(i => i.req_no === reqNo && norm(i.material) === norm(code) && i.status === 'Approved' && !i.type).reduce((s2, i) => s2 + num(i.qty), 0); }
+function reqSent(reqNo, code) { return Store.all('issues').filter(i => i.req_no === reqNo && norm(i.material) === norm(code) && (i.status === 'Pending' || i.status === 'Approved') && !i.type).reduce((s2, i) => s2 + num(i.qty), 0); }
+// stock already held by open slips (not yet issued) and by pending direct issues
+function reqHeld(code) {
+  let q = 0;
+  Store.all('requisitions').filter(reqIsOpen).forEach(r => (r.lines || []).forEach(l => { if (norm(l.material) === norm(code)) q += Math.max(0, num(l.qty) - reqIssued(r.no, l.material)); }));
+  Store.all('issues').filter(i => i.status === 'Pending' && !i.req_no && norm(i.material) === norm(code)).forEach(i => { q += num(i.qty); });
+  return q;
+}
+function freeStock(code) { return Math.max(0, stockOf(code) - reqHeld(code)); }
+// JC qty still to be asked for: required − issued − already on an open slip
+function jcOpenReqQty(jc, code) { return Store.all('requisitions').filter(r => reqIsOpen(r) && norm(r.jc_no) === norm(jc)).reduce((s2, r) => s2 + (r.lines || []).filter(l => norm(l.material) === norm(code)).reduce((a, l) => a + Math.max(0, num(l.qty) - reqIssued(r.no, l.material)), 0), 0); }
+function reqJcRows(jc) {
+  const j = jcBy(jc); if (!j) return [];
+  return (j.lines || []).map(l => {
+    const pend = Math.max(0, num(l.required) - issuedToJc(j.no, l.material) - jcOpenReqQty(j.no, l.material));
+    const free = freeStock(l.material);
+    return { material: l.material, uom: l.uom || (matBy(l.material) || {}).uom || '', pend, free, cap: Math.min(pend, free) };
+  }).filter(x => x.pend > 0.0001);
+}
+const consumables = () => Store.all('materials').filter(m => /consumable/i.test(m.group || '')).sort((a, b) => String(a.name).localeCompare(String(b.name)));
+function reqCoverage(reqQty, stock) { return stock >= reqQty ? '<span class="st Done">Covered</span>' : stock > 0 ? '<span class="st Pending">' + qtyFmt(stock) + ' only</span>' : '<span class="st Late">No stock</span>'; }
 VIEWS.requisition = {
   mod: 'production', render() {
-    const edit = can('production', 'edit');
-    let h = subTitle('Requisition Slip');
+    const edit = can('production', 'edit'); const U = REQ_UI;
+    let h = '';
     const stale = staleReqs();
-    if (stale.length) h += '<div class="panel" style="border-left:3px solid var(--late);margin-bottom:10px"><b>' + stale.length + ' slip(s) pending for 24h+</b> — new slips are blocked until Store issues/rejects them (Manager/Admin exempt). <a href="#/issuance">Issuance →</a></div>';
+    if (stale.length) h += '<div class="panel" style="border-left:3px solid var(--late);margin-bottom:10px"><b>' + stale.length + ' slip(s) pending for 24h+</b> <a href="#/issuance">Issuance →</a></div>';
     h += '<div class="toolbar"><span class="grow"></span>' + (edit ? newBtn('New requisition', 'req-new') : '') + '</div>';
-    if (REQ_UI.form && edit) {
-      h += '<div class="card"><div class="card-b">' + dlMat('dlMatR') + '<datalist id="dlJc">' + Store.all('job_cards').filter(j => j.status !== 'Closed').map(j => '<option value="' + esc(j.no) + '">' + esc(j.article) + '</option>').join('') + '</datalist>' +
-        '<div class="row"><label>Job Card *<input id="nrJc" list="dlJc"></label><label>Requested By<input value="' + esc(ME.name) + '" readonly></label><button class="btn sm" data-act="req-fill">Fill All Pending Qty</button></div>' +
-        '<div class="tbl-wrap" style="margin-top:8px"><table id="nrTable" style="max-width:820px"><tr><th>#</th><th>Item Name</th><th>UOM</th><th class="num">Req Qty</th><th class="num">Stock</th><th>Coverage</th><th class="num" style="width:120px">Requisition Qty</th><th style="width:30px"></th></tr></table></div>' +
-        '<a class="small" data-act="req-extra">+ Add Extra Item</a>' +
-        '</div><div class="card-f"><button class="btn primary" data-act="req-save">Generate Requisition Slip</button><span id="nrMsg" class="small"></span></div></div>';
+    if (U.form && edit) {
+      h += '<div class="card"><div class="card-b"><div class="row"><label>Method *<select id="nrMethod"><option value="jc">Job Card</option><option value="cons"' + (U.method === 'cons' ? ' selected' : '') + '>Consumable Items</option></select></label>';
+      if (U.method === 'jc') {
+        h += '<label>Job Card *<select id="nrJc"><option value="">— select —</option>' + Store.all('job_cards').filter(j => j.status !== 'Closed').sort((a, b) => String(a.no).localeCompare(String(b.no))).map(j => '<option value="' + esc(j.no) + '"' + (norm(j.no) === norm(U.jc) ? ' selected' : '') + '>' + esc(j.no + ' · ' + (j.brand || '') + ' · ' + (j.article || '')) + '</option>').join('') + '</select></label>';
+        h += '<label>Requested By<input value="' + esc(ME.name) + '" readonly></label></div>';
+        const rows = U.jc ? reqJcRows(U.jc) : [];
+        h += '<div class="tbl-wrap" style="margin-top:8px"><table class="bomflat nopage" id="nrTable"><tr><th>Item Name</th><th>UOM</th><th class="num">Req Qty</th><th class="num">Stock</th><th>Coverage</th><th class="num">Requisition Qty</th></tr>' +
+          (!U.jc ? '<tr><td colspan="6" class="empty">Select a Job Card</td></tr>' : rows.length ? rows.map(x => '<tr data-rrow data-mat="' + esc(x.material) + '" data-cap="' + x.cap + '"><td>' + esc((matBy(x.material) || {}).name || x.material) + '</td><td>' + esc(x.uom) + '</td><td class="num">' + qtyFmt(x.pend) + '</td><td class="num">' + qtyFmt(x.free) + '</td><td>' + reqCoverage(x.pend, x.free) + '</td><td><input class="qty right" type="number" min="0" max="' + x.cap + '" step="any" data-rq' + (x.free <= 0 ? ' disabled' : '') + '></td></tr>').join('') : '<tr><td colspan="6" class="empty">Nothing pending for this Job Card</td></tr>') + '</table></div>';
+        if (rows.some(x => x.cap > 0)) h += '<button class="btn sm" data-act="req-fill" style="margin-top:6px">Fill All Pending Qty</button>';
+      } else {
+        h += '<label>Department *<select id="nrDept">' + selOpts(deptList(), U.dept || ME.department || '') + '</select></label><label>Requested By<input value="' + esc(ME.name) + '" readonly></label></div>';
+        const cons = consumables();
+        h += '<div class="tbl-wrap" style="margin-top:8px"><table class="bomflat nopage" id="nrTable"><tr><th>Item Name</th><th>UOM</th><th class="num">Stock</th><th>Coverage</th><th class="num">Requisition Qty</th><th></th></tr>' +
+          (U.cons.length ? U.cons.map((c, i) => { const m = matBy(c.material); const free = m ? freeStock(m.code) : 0; return '<tr data-crow="' + i + '"><td><select data-cmat><option value="">— select —</option>' + cons.map(x => '<option value="' + esc(x.code) + '"' + (m && x.code === m.code ? ' selected' : '') + '>' + esc(x.name) + '</option>').join('') + '</select></td><td>' + esc(m ? m.uom : '') + '</td><td class="num">' + (m ? qtyFmt(free) : '') + '</td><td>' + (m ? reqCoverage(num(c.qty) || 0.0001, free) : '') + '</td><td><input class="qty right" type="number" min="0" step="any" data-cq value="' + esc(c.qty || '') + '"' + (m && free <= 0 ? ' disabled' : '') + '></td><td><button class="btn ghost sm" data-act="req-cdel" data-i="' + i + '">×</button></td></tr>'; }).join('') : '<tr><td colspan="6" class="empty">Add an item</td></tr>') + '</table></div><a class="small" data-act="req-cadd">+ Add item</a>';
+      }
+      h += '</div><div class="card-f"><button class="btn primary" data-act="req-save">Generate Requisition Slip</button><span id="nrMsg" class="small"></span></div></div>';
     }
     const rows = Store.all('requisitions').slice().sort((a2, b2) => b2.no < a2.no ? -1 : 1);
-    h += '<div class="tbl-wrap"><table class="bomflat"><tr><th>Req No</th><th>Date</th><th>JC / Dept</th><th class="num">Sr</th><th>Item Name</th><th>Item Code</th><th class="num">Qty</th><th>Extra</th><th>Status</th><th>Raised By</th><th>Issued By</th><th></th></tr>' +
-      (rows.length ? rows.map(r => r.lines.map((l, i) => '<tr' + (i === 0 ? ' class="bomfirst"' : '') + '><td><b>' + esc(r.no) + '</b></td><td>' + fmtD(r.date) + '</td><td>' + esc(r.jc_no || r.dept) + '</td><td class="num">' + (i + 1) + '</td><td>' + esc((matBy(l.material) || {}).name || '') + '</td><td>' + esc(l.material) + '</td><td class="num">' + qtyFmt(l.qty) + '</td><td>' + (l.extra ? 'Yes' : '') + '</td><td><span class="st ' + (r.status === 'Issued' ? 'Done' : r.status === 'Rejected' ? 'Late' : 'Pending') + '">' + r.status + '</span></td><td>' + esc(r.by) + '</td><td>' + esc(r.issued_by || '') + '</td><td class="right">' + (i === 0 ? '<button class="btn sm ghost" data-act="print-req" data-id="' + esc(r.id) + '">Print Slip</button>' : '') + '</td></tr>').join('')).join('') : '<tr><td colspan="12" class="empty">No requisitions</td></tr>') + '</table></div>';
+    h += '<div class="tbl-wrap"><table class="bomflat"><tr><th>Req No</th><th>Date</th><th>Method</th><th>JC / Dept</th><th class="num">Sr</th><th>Item Name</th><th>Item Code</th><th class="num">Qty</th><th class="num">Issued</th><th>Status</th><th>Raised By</th><th>Issued By</th><th></th></tr>' +
+      (rows.length ? rows.map(r => r.lines.map((l, i) => '<tr' + (i === 0 ? ' class="bomfirst"' : '') + '><td><b>' + esc(r.no) + '</b></td><td>' + fmtD(r.date) + '</td><td>' + (r.method === 'cons' ? 'Consumable Items' : 'Job Card') + '</td><td>' + esc(r.jc_no || r.dept) + '</td><td class="num">' + (i + 1) + '</td><td>' + esc((matBy(l.material) || {}).name || '') + '</td><td>' + esc(l.material) + '</td><td class="num">' + qtyFmt(l.qty) + '</td><td class="num">' + qtyFmt(reqIssued(r.no, l.material)) + '</td><td><span class="st ' + (r.status === 'Issued' ? 'Done' : r.status === 'Rejected' ? 'Late' : 'Pending') + '">' + esc(r.status) + '</span></td><td>' + esc(r.by) + '</td><td>' + esc(r.issued_by || '') + '</td><td class="right">' + (i === 0 ? '<button class="btn sm ghost" data-act="print-req" data-id="' + esc(r.id) + '">Print Slip</button>' : '') + '</td></tr>').join('')).join('') : '<tr><td colspan="13" class="empty">No requisitions</td></tr>') + '</table></div>';
     setMain(h);
     const m = $('#main');
-    m.addEventListener('change', e => { if (e.target.id === 'nrJc') reqFillJc(); if (e.target.dataset.nr === 'mat') { const mt = matBy(e.target.value); if (mt) { e.target.value = mt.code; const tr = e.target.closest('tr'); $('[data-nr-uom]', tr).textContent = mt.uom; } } });
+    m.addEventListener('change', e => {
+      const t = e.target;
+      if (t.id === 'nrMethod') { U.method = t.value; U.jc = ''; U.cons = []; VIEWS.requisition.render(); }
+      else if (t.id === 'nrJc') { U.jc = t.value; VIEWS.requisition.render(); }
+      else if (t.id === 'nrDept') U.dept = t.value;
+      else if (t.dataset.cmat != null) { const i = +t.closest('tr').dataset.crow; if (U.cons.some((c, k) => k !== i && c.material === t.value)) { flash('Item already added.', 'err'); t.value = U.cons[i].material || ''; return; } U.cons[i].material = t.value; VIEWS.requisition.render(); }
+    });
+    m.addEventListener('input', e => { if (e.target.dataset.cq != null) U.cons[+e.target.closest('tr').dataset.crow].qty = e.target.value; });
   }
 };
-function reqCoverage(reqQty, stock) { return stock >= reqQty ? '<span class="st Done">Covered</span>' : stock > 0 ? '<span class="st Pending">' + qtyFmt(stock) + ' only</span>' : '<span class="st Late">No stock</span>'; }
-function reqFillJc() {
-  const j = jcBy($('#nrJc').value); const t = $('#nrTable');
-  $$('#nrTable tr[data-rrow]').forEach(tr => tr.remove());
-  if (!j) return;
-  (j.lines || []).forEach((l, i) => {
-    const pend = Math.max(0, num(l.required) - issuedToJc(j.no, l.material));
-    if (pend <= 0.0001) return;
-    const stk = stockOf(l.material); const cap = Math.min(pend, stk);
-    t.insertAdjacentHTML('beforeend', '<tr data-rrow data-mat="' + esc(l.material) + '" data-cap="' + cap + '"><td class="muted">' + (i + 1) + '</td><td>' + esc((matBy(l.material) || {}).name || l.material) + ' <span class="muted small">' + esc(l.material) + '</span></td><td>' + esc(l.uom) + '</td><td class="num">' + qtyFmt(pend) + '</td><td class="num">' + qtyFmt(stk) + '</td><td>' + reqCoverage(pend, stk) + '</td><td><input class="qty right" type="number" min="0" max="' + cap + '" step="any" data-rq' + (stk <= 0 ? ' disabled' : '') + '></td><td></td></tr>');
-  });
-  if (!$$('#nrTable tr[data-rrow]').length) t.insertAdjacentHTML('beforeend', '<tr data-rrow><td colspan="8" class="empty">All material for this JC has been issued</td></tr>');
-}
-ACTIONS['req-fill'] = () => { $$('#nrTable tr[data-rrow] [data-rq]').forEach(inp => { inp.value = inp.closest('tr').dataset.cap; }); };
-ACTIONS['req-extra'] = () => { $('#nrTable').insertAdjacentHTML('beforeend', '<tr data-rrow data-extra="1"><td class="muted">+</td><td><input data-nr="mat" list="dlMatR" placeholder="Item"></td><td class="muted" data-nr-uom></td><td class="num muted">extra</td><td class="num muted">extra</td><td></td><td><input class="qty right" type="number" min="0" step="any" data-rq></td><td><button class="btn ghost sm" data-act="req-extra-del">×</button></td></tr>'); };
-ACTIONS['req-extra-del'] = el => el.closest('tr').remove();
-ACTIONS['req-new'] = () => { REQ_UI.form = !REQ_UI.form; VIEWS.requisition.render(); };
+ACTIONS['req-fill'] = () => { $$('#nrTable tr[data-rrow] [data-rq]').forEach(inp => { if (!inp.disabled) inp.value = inp.closest('tr').dataset.cap; }); };
+ACTIONS['req-cadd'] = () => { REQ_UI.cons.push({ material: '', qty: '' }); VIEWS.requisition.render(); };
+ACTIONS['req-cdel'] = el => { REQ_UI.cons.splice(+el.dataset.i, 1); VIEWS.requisition.render(); };
+ACTIONS['req-new'] = () => { REQ_UI.form = !REQ_UI.form; REQ_UI.jc = ''; REQ_UI.cons = []; VIEWS.requisition.render(); };
 ACTIONS['req-save'] = () => {
   if (!requirePerm('production', 'edit')) return;
+  const U = REQ_UI; const msg = t => { $('#nrMsg').innerHTML = '<span class="late-txt">' + t + '</span>'; };
   const stale = staleReqs();
-  if (stale.length && !canApprove()) { $('#nrMsg').innerHTML = '<span class="late-txt">' + esc(stale[0].no) + ' has been pending for 24h — Store must issue/reject it before a new slip can be created.</span>'; return; }
-  const jc = $('#nrJc').value.trim();
-  if (!jcBy(jc)) { $('#nrMsg').innerHTML = '<span class="late-txt">Select a valid Job Card.</span>'; return; }
-  const lines = [];
-  let overCap = '';
-  $$('#nrTable tr[data-rrow]').forEach(tr => {
-    const q = num(($('[data-rq]', tr) || {}).value); if (q <= 0) return;
-    if (tr.dataset.extra) { const mt = matBy($('[data-nr="mat"]', tr).value); if (mt) lines.push({ material: mt.code, qty: Math.min(q, stockOf(mt.code)), extra: true }); return; }
-    if (q > num(tr.dataset.cap) + 1e-9) overCap = tr.dataset.mat;
-    lines.push({ material: tr.dataset.mat, qty: Math.min(q, num(tr.dataset.cap)) });
-  });
-  if (overCap) { $('#nrMsg').innerHTML = '<span class="late-txt">' + esc(overCap) + ': qty exceeded the cap (pending/stock) — set to the cap.</span>'; }
-  if (!lines.length) { $('#nrMsg').innerHTML = '<span class="late-txt">Enter a requisition qty for at least one item.</span>'; return; }
-  const r = Store.put('requisitions', { id: uid(), no: nextNo('requisitions', 'REQ'), date: todayYmd(), jc_no: jc, dept: 'Production', lines, status: 'Pending', by: ME.name });
-  audit('req.create', r.no, jc + ' · ' + lines.map(l => l.material + '×' + l.qty).join(', ')); REQ_UI.form = false;
-  flash('<b>' + esc(r.no) + '</b> created — sent to the Store issuance screen.'); VIEWS.requisition.render();
+  if (stale.length && !canApprove()) { msg(esc(stale[0].no) + ' has been pending for 24h — Store must issue or reject it first.'); return; }
+  const lines = []; let bad = '';
+  if (U.method === 'jc') {
+    if (!jcBy(U.jc)) { msg('Select a Job Card.'); return; }
+    const fresh = Object.fromEntries(reqJcRows(U.jc).map(x => [norm(x.material), x]));
+    $$('#nrTable tr[data-rrow]').forEach(tr => {
+      const q = num(($('[data-rq]', tr) || {}).value); if (q <= 0) return;
+      const x = fresh[norm(tr.dataset.mat)];
+      if (!x || x.free <= 0) { bad = bad || tr.dataset.mat + ': no stock.'; return; }
+      if (q > x.cap + 1e-9) { bad = bad || tr.dataset.mat + ': max ' + qtyFmt(x.cap) + '.'; return; }
+      lines.push({ material: x.material, qty: q });
+    });
+  } else {
+    const dept = $('#nrDept').value; if (!dept) { msg('Select the department.'); return; }
+    U.dept = dept;
+    U.cons.forEach(c => { const m = matBy(c.material); const q = num(c.qty); if (!m || q <= 0) return; const free = freeStock(m.code); if (free <= 0) { bad = bad || m.name + ': no stock.'; return; } if (q > free + 1e-9) { bad = bad || m.name + ': only ' + qtyFmt(free) + ' free.'; return; } lines.push({ material: m.code, qty: q }); });
+  }
+  if (bad) { msg(esc(bad)); return; }
+  if (!lines.length) { msg('Enter a requisition qty for at least one item.'); return; }
+  const r = Store.put('requisitions', { id: uid(), no: nextNo('requisitions', 'REQ'), date: todayYmd(), method: U.method, jc_no: U.method === 'jc' ? U.jc : '', dept: U.method === 'jc' ? 'Production' : U.dept, lines, status: 'Pending', by: ME.name, at: nowIso() });
+  audit('req.create', r.no, (r.jc_no || r.dept) + ' · ' + lines.map(l => l.material + '×' + l.qty).join(', ')); U.form = false; U.jc = ''; U.cons = [];
+  flash('<b>' + esc(r.no) + '</b> created — sent to Store issuance.'); VIEWS.requisition.render();
 };
 
 VIEWS.prodtracker = {
