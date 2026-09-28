@@ -131,6 +131,7 @@ VIEWS.items = {
 /* ---------- users ---------- */
 const US_UI = { q: '' };
 const roleName = id => (Store.get('roles', id) || {}).name || '';
+const officialDomain = () => (settings().official_domain || 'zootofashion.com').toLowerCase();
 const deptList = () => orgList().map(o => o.dept);
 const desigList = dept => ((orgList().find(o => o.dept === dept) || {}).desigs || []);
 VIEWS.users = {
@@ -181,7 +182,7 @@ function usDialog(u) {
   const dept = u.department || '';
   d.innerHTML = '<div class="dlg"><div class="dlg-h">' + (isNew ? 'New user' : esc(u.name)) + '</div><table class="jckv">' +
     '<tr><td class="k">Name *</td><td class="v"><input data-us="name" value="' + esc(u.name || '') + '"></td></tr>' +
-    '<tr><td class="k">Email (login) *</td><td class="v"><input data-us="email" type="email" value="' + esc(u.email || '') + '"' + (isNew || !u.email ? '' : ' disabled') + '></td></tr>' +
+    '<tr><td class="k">Email (login)</td><td class="v"><input data-us="email" type="email" value="' + esc(u.email || '') + '"' + (isNew || !u.email ? '' : ' disabled') + '></td></tr>' +
     '<tr><td class="k">Department *</td><td class="v"><select data-us="department">' + selOpts(deptList(), dept) + '</select></td></tr>' +
     '<tr><td class="k">Designation *</td><td class="v"><select data-us="designation">' + selOpts(desigList(dept), u.designation) + '</select></td></tr>' +
     '<tr><td class="k">Role *</td><td class="v"><select data-us="role_id"' + (self ? ' disabled' : '') + '>' + usRoleOpts(u.role_id) + '</select></td></tr>' +
@@ -203,10 +204,10 @@ function usDialog(u) {
     if (!isNew && u.email) v.email = norm(u.email);
     const newLogin = !hadLogin && !!v.email;
     if (newLogin && !v.pin) v.pin = v.mobile;
-    // FMS doer name: first name, or the full name when the first name is already taken
-    const fn = v.name.split(/\s+/)[0].toUpperCase(); v.doer = u.doer || (Store.all('users').some(x => x.id !== u.id && norm(x.doer) === norm(fn)) ? v.name.toUpperCase() : fn);
+    v.doer = v.name.split(/\s+/)[0].toUpperCase();            // FMS doer name = first name
+    const dom = officialDomain();
     const minPin = CLOUD ? 6 : 4;
-    const bad = !v.name ? 'Enter the name.' : !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v.email) ? 'Enter a valid email.' :
+    const bad = !v.name ? 'Enter the name.' : v.email && v.email !== norm(u.email || '') && !(/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v.email) && (!CLOUD || v.email.endsWith('@' + dom))) ? 'Use the official email (@' + dom + ').' :
       Store.all('users').some(x => x.id !== u.id && v.email && norm(x.email) === v.email) ? 'This email already has a user.' :
       !/^[6-9][0-9]{9}$/.test(v.mobile) ? 'Mobile must be 10 digits.' :
       v.pin && v.pin.length < minPin ? 'Password must be at least ' + minPin + ' characters.' :
