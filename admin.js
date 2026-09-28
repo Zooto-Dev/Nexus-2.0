@@ -131,7 +131,6 @@ VIEWS.items = {
 /* ---------- users ---------- */
 const US_UI = { q: '' };
 const roleName = id => (Store.get('roles', id) || {}).name || '';
-const officialDomain = () => (settings().official_domain || 'zootofashion.com').toLowerCase();
 const deptList = () => orgList().map(o => o.dept);
 const desigList = dept => ((orgList().find(o => o.dept === dept) || {}).desigs || []);
 VIEWS.users = {
@@ -205,9 +204,8 @@ function usDialog(u) {
     const newLogin = !hadLogin && !!v.email;
     if (newLogin && !v.pin) v.pin = v.mobile;
     v.doer = v.name.split(/\s+/)[0].toUpperCase();            // FMS doer name = first name
-    const dom = officialDomain();
     const minPin = CLOUD ? 6 : 4;
-    const bad = !v.name ? 'Enter the name.' : v.email && v.email !== norm(u.email || '') && !(/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v.email) && (!CLOUD || v.email.endsWith('@' + dom))) ? 'Use the official email (@' + dom + ').' :
+    const bad = !v.name ? 'Enter the name.' : v.email && v.email !== norm(u.email || '') && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v.email) ? 'Enter a valid email.' :
       Store.all('users').some(x => x.id !== u.id && v.email && norm(x.email) === v.email) ? 'This email already has a user.' :
       !/^[6-9][0-9]{9}$/.test(v.mobile) ? 'Mobile must be 10 digits.' :
       v.pin && v.pin.length < minPin ? 'Password must be at least ' + minPin + ' characters.' :
