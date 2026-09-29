@@ -25,7 +25,9 @@ function typeAttrs(t) { return catAttrs(t.category).filter(a => usesAttr(t, a.na
 function attrOn(a, vals, t) { return !a.when_attr || (t && !usesAttr(t, a.when_attr)) || norm(vals[a.when_attr] || '') === norm(a.when_val || ''); }
 function activeAttrs(t, vals) { return typeAttrs(t).filter(a => attrOn(a, vals, t)); }
 function whenLabel(a) { return a.when_attr ? a.when_attr + ' = ' + a.when_val : ''; }
-function itemNameOf(t, vals) { return [t.name].concat(typeAttrs(t).map(a => vals[a.name] || '')).filter(Boolean).join(' ').replace(/\s+/g, ' ').trim().toUpperCase(); }
+// "nothing" values (NONE, NA, NO FOAM, WITHOUT …) stay in the item's attributes but are left out of its name
+const blankVal = v => /^(NONE|NA|N\/A|NIL|NO|NO .+|WITHOUT .+)$/.test(norm(v));
+function itemNameOf(t, vals) { return [t.name].concat(typeAttrs(t).map(a => vals[a.name] || '').filter(v => !blankVal(v))).filter(Boolean).join(' ').replace(/\s+/g, ' ').trim().toUpperCase(); }
 function itemKeyOf(cat, typeName, vals) {
   return norm(cat) + '|' + norm(typeName) + '|' + Object.keys(vals).filter(k => vals[k]).map(k => norm(k) + '=' + norm(vals[k])).sort().join(',');
 }
