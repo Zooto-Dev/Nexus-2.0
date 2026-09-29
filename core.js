@@ -47,7 +47,7 @@ function flash(msg, type) {
 
 /* ================= store ================= */
 const DB_KEY = 'nexus2_db_v8';
-const COLS = ['users', 'roles', 'customers', 'items', 'materials', 'processes', 'orders', 'samples', 'dispatches', 'purchase_orders', 'sourcing', 'grns', 'inwards', 'vendors', 'issues', 'rsjw', 'rtvs', 'boms', 'job_cards', 'requisitions', 'tickets', 'checklist', 'checklist_log', 'attributes', 'item_types', 'mail_queue', 'prod_reports', 'wa_log', 'audit'];
+const COLS = ['users', 'roles', 'customers', 'items', 'materials', 'processes', 'orders', 'samples', 'dispatches', 'purchase_orders', 'sourcing', 'grns', 'inwards', 'vendors', 'issues', 'rsjw', 'rtvs', 'boms', 'job_cards', 'requisitions', 'tickets', 'checklist', 'checklist_log', 'escalations', 'attributes', 'item_types', 'mail_queue', 'prod_reports', 'wa_log', 'audit'];
 let DB = null;
 const CFG = window.NEXUS_CONFIG || {};
 const CLOUD = !!(CFG.SUPABASE_URL && CFG.SUPABASE_ANON_KEY && window.supabase);
@@ -529,6 +529,9 @@ const NAV = [
   { menu: 'Accounts', items: [
     { v: 'invoices', l: 'Invoices', mod: 'accounts' }] },
   { menu: 'Operations', items: [
+    { v: 'alltasks', l: 'Task Tracker', mod: 'tasks' },
+    { v: 'escalations', l: 'Escalations', mod: 'tasks' },
+    { v: 'scorecard', l: 'Scorecard', mod: 'tasks' },
     { v: 'activity', l: 'Activity List', mod: 'audit' },
     { v: 'itemconfig', l: 'Item Category Configuration', mod: 'development' },
     { v: 'planactual', l: 'Plan vs Actual', mod: 'audit' },

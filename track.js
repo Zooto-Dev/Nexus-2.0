@@ -11,7 +11,8 @@ const PA_DEFS = [
   { k: 'grn', l: 'GRN', tat: { value: 4, unit: 'hours' }, grp: 'Store', next: 'Stock / Excess Approval', can: () => can('store', 'edit') },
   { k: 'excess', l: 'Excess Approval', tat: { value: 8, unit: 'hours' }, grp: 'CEO', next: 'GRN report / stock', can: () => canApproveExcess() },
   { k: 'issuance', l: 'Issuance', tat: { value: 2, unit: 'hours' }, grp: 'Store', next: 'Issuance Approval', can: () => can('store', 'edit') },
-  { k: 'issue_approval', l: 'Issuance Approval', tat: { value: 1, unit: 'hours' }, grp: 'Store Incharge', next: 'Production', can: () => canApproveIssue() }
+  { k: 'issue_approval', l: 'Issuance Approval', tat: { value: 1, unit: 'hours' }, grp: 'Store Incharge', next: 'Production', can: () => canApproveIssue() },
+  { k: 'rtv', l: 'RTV (Return to Vendor)', tat: { value: 7, unit: 'days' }, grp: 'Store', next: 'Debit note / vendor collection', can: () => can('store', 'edit') }
 ];
 const paDef = k => PA_DEFS.find(d => d.k === k);
 function paTat(k) { const t = (settings().act_tat || {})[k]; return t && t.value != null ? t : paDef(k).tat; }
@@ -75,6 +76,16 @@ function paRows() {
     const done = i.status !== 'Pending';
     add('issue_approval', { ref: i.no, party: i.req_no, start: ts(i.at), actual: done ? ts(i.approved_at || i.decided_at) : null, by: i.approved_by || i.decided_by || '', result: i.status });
   });
+  // RTV: rejected qty in a GRN goes back to the vendor (7-day collection); done when the returned qty covers it
+  const retd = {};
+  Store.all('rtvs').filter(x => !x.cancelled && (x.source || 'grn') === 'grn').sort((a, b) => (a.at || a.created_at || a.date || '') < (b.at || b.created_at || b.date || '') ? -1 : 1)
+    .forEach(x => { const k = norm(x.vendor + '|' + x.material); (retd[k] = retd[k] || []).push({ qty: num(x.qty), at: x.at || x.created_at || (x.date + 'T12:00:00'), by: x.by, no: x.no }); });
+  Store.all('grns').slice().sort((a, b) => (a.at || a.date || '') < (b.at || b.date || '') ? -1 : 1).forEach(g => (g.lines || []).forEach(l => {
+    let need = num(l.rejected); if (!(need > 0)) return;
+    const q = retd[norm(g.vendor + '|' + l.material)] || []; let last = null;
+    while (need > 1e-9 && q.length) { const x = q[0]; const take = Math.min(need, x.qty); need -= take; x.qty -= take; last = x; if (x.qty <= 1e-9) q.shift(); }
+    add('rtv', { ref: g.no + ' · ' + l.material, party: g.vendor, start: ts(g.at || g.date), actual: need <= 1e-9 && last ? ts(last.at) : null, by: need <= 1e-9 && last ? last.by : '', result: need <= 1e-9 && last ? last.no : '' });
+  }));
   // planned / status / delay
   const cal = calInfo(); const now = new Date();
   R.forEach(r => {
@@ -126,7 +137,7 @@ VIEWS.planactual = {
     });
   }
 };
-const PA_START = { po_raise: 'Job card created', po_approval: 'PO saved', inward: 'PO approved (plan = PO expected date)', invoice: 'Gate entry saved', qc: 'Invoice approved', swatch: 'QC mismatch', grn: 'Invoice, QC and swatch cleared', excess: 'GRN saved with excess', issuance: 'Requisition slip created', issue_approval: 'Items sent for issue approval' };
+const PA_START = { rtv: 'GRN saved with rejected qty', po_raise: 'Job card created', po_approval: 'PO saved', inward: 'PO approved (plan = PO expected date)', invoice: 'Gate entry saved', qc: 'Invoice approved', swatch: 'QC mismatch', grn: 'Invoice, QC and swatch cleared', excess: 'GRN saved with excess', issuance: 'Requisition slip created', issue_approval: 'Items sent for issue approval' };
 ACTIONS['pa-tab'] = el => { PAX_UI.tab = el.dataset.t; VIEWS.planactual.render(); };
 ACTIONS['pa-csv'] = () => downloadCsv('plan-vs-actual-' + todayYmd() + '.csv', [['Activity', 'Reference', 'Party', 'Responsible', 'Start', 'Planned', 'Actual', 'Status', 'Delay (min)', 'Done By', 'Result']].concat((VIEWS.planactual.rows || []).map(r => [r.act, r.ref, r.party, paDef(r.k).grp, fmtDT(r.start), fmtDT(r.planned), r.actual ? fmtDT(r.actual) : '', r.status, r.delay || 0, r.by || '', r.result || ''])));
 

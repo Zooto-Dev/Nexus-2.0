@@ -49,6 +49,11 @@ function personTasks(doer) {
     const st = r.status === 'Overdue' ? 'Delayed' : r.status;
     out.push(Object.assign(base, { status: st, delay: r.status === 'Overdue' ? r.delay : 0, btn: r.status === 'Upcoming' ? '' : clDoneBtn(r.t, r.ymd) }));
   });
+  allTasks().filter(x => x.src === 'Nexus' && norm(x.owner) === norm(doer)).forEach(x => {
+    const base = { task: x.task, ref: x.ref, party: x.party, src: 'Nexus', planned: x.planned };
+    if (x.done) { if (x.actual >= since) out.push(Object.assign(base, { status: 'Completed', done: x.actual, delay: x.delay })); return; }
+    out.push(Object.assign(base, { status: x.status === 'Delayed' ? 'Delayed' : x.status, delay: x.delay, btn: '<a class="btn sm" href="' + esc(x.link) + '">Open</a>' }));
+  });
   return out;
 }
 function homeData(who) {
@@ -64,11 +69,14 @@ function homeData(who) {
   const fmsNext = {};
   allOpenSteps().forEach(x => { if (norm(x.step.doer) === norm(who)) fmsNext[x.order.no + '|' + x.step.name] = nextStepsOf(x); });
   const held = tasks.filter(t => t.status === 'Delayed').map(t => ({ what: t.task, ref: t.ref, party: t.party, planned: t.planned, delay: t.delay, waits: t.src === 'FMS' ? fmsNext[t.ref + '|' + t.task] || '' : '' }))
-    .concat(paMine.filter(r => r.status === 'Late').map(r => ({ what: r.act, ref: r.ref, party: r.party, planned: r.planned, delay: r.delay, waits: paDef(r.k).next })))
+    .concat(paMine.filter(r => r.status === 'Late' && !actDoer(r)).map(r => ({ what: r.act, ref: r.ref, party: r.party, planned: r.planned, delay: r.delay, waits: paDef(r.k).next })))
     .sort((a, b) => b.delay - a.delay);
-  const tickets = Store.all('tickets').filter(ticketEscalated);
-  const esc8 = allOpenSteps().filter(x => x.step.status === 'Late' && x.step.delayMinutes > 8 * 60 && (sa && self ? true : norm(x.step.doer) === norm(who)));
-  return { tasks, done, doneN, onTime, score: doneN ? Math.round(onTime * 100 / doneN) : null, held, tickets, esc8, open: paMine.filter(r => r.status === 'Pending').sort((a, b) => a.planned - b.planned) };
+  // escalations: only the tickets this person is part of (doer, Level 1 or Level 2 owner)
+  try { escRun(); } catch (e) { console.error(e); }
+  const tickets = Store.all('tickets').filter(t => ticketEscalated(t) && names.has(t.by));
+  const escs = Store.all('escalations').filter(e => e.status === 'Open' && escInvolved(e, who)).sort((a, b) => b.level - a.level || (a.planned < b.planned ? -1 : 1));
+  const sc = scoreOf(who, 30);
+  return { tasks, done, doneN, onTime, score: sc ? Math.round(sc.quality) : null, sc, held, tickets, escs, open: paMine.filter(r => r.status === 'Pending').sort((a, b) => a.planned - b.planned) };
 }
 function homeTaskTable(tasks) {
   const order = { Delayed: 0, Pending: 1, Upcoming: 2, Completed: 3 };
@@ -103,7 +111,7 @@ VIEWS.home = {
     const ringCol = D.score == null ? 'var(--line)' : D.score >= 90 ? 'var(--done)' : D.score >= 70 ? 'var(--pending)' : 'var(--late)';
     const card = (f, v, l, sub, cls) => '<a class="dk-c' + (HT_UI.f === f ? ' on' : '') + '" data-act="ht-f" data-f="' + f + '"><span class="l">' + l + '</span><span class="v ' + (cls || '') + '">' + v + '</span><span class="s">' + sub + '</span></a>';
     h += '<div class="dk">' +
-      '<div class="dk-c dk-score"><div class="ring" style="background:conic-gradient(' + ringCol + ' ' + (D.score || 0) + '%, var(--line2) 0)"><b>' + ring + '</b></div><div><span class="l">Score · 30 days</span><span class="s">' + D.onTime + ' of ' + D.doneN + ' done on time</span></div></div>' +
+      '<div class="dk-c dk-score"><div class="ring" style="background:conic-gradient(' + ringCol + ' ' + (D.score || 0) + '%, var(--line2) 0)"><b>' + ring + '</b></div><div><span class="l">Score · 30 days</span><span class="v ' + (D.sc ? scoreCls(D.sc.score) : '') + '" style="font-size:20px">' + (D.sc ? D.sc.score.toFixed(2) : '—') + '</span><span class="s">' + (D.sc ? D.sc.completed + ' of ' + D.sc.total + ' done · ' + D.sc.onTime + ' on time' : 'no tasks yet') + '</span></div></div>' +
       card('Delayed', cnt('Delayed'), 'Delayed', 'past planned time', 'late-txt') +
       card('Pending', cnt('Pending'), 'Pending today', 'due before tonight', 'pend-txt') +
       card('Upcoming', cnt('Upcoming'), 'Upcoming', 'planned later', '') +
@@ -120,10 +128,12 @@ VIEWS.home = {
     h += '<div class="dcard" id="heldCard"><div class="dh3">' + (self ? 'Held up because of me' : 'Held up because of ' + esc(person)) + '<span class="n">' + D.held.length + '</span></div>' +
       (D.held.length ? heldShow.map(x => '<div class="dl"><div><div class="t">' + esc(x.what) + '</div><div class="m">' + esc([x.ref, x.party].filter(Boolean).join(' · ')) + (x.waits ? ' · waiting: ' + esc(x.waits) : '') + '</div><div class="m">Planned ' + fmtDT(x.planned) + '</div></div><div class="d">' + fmtDelay(x.delay) + '</div></div>').join('') +
         (D.held.length > 6 ? '<div class="dl-more"><a data-act="ht-held-all">' + (HT_UI.heldAll ? 'Show less' : 'Show all ' + D.held.length) + '</a></div>' : '') : '<div class="dl-empty">Nothing is held up</div>') + '</div>';
-    const escN = D.tickets.length + D.esc8.length;
-    h += '<div class="dcard"><div class="dh3">Escalations<span class="n' + (escN ? ' red' : '') + '">' + escN + '</span></div>' +
-      (escN ? D.tickets.slice(0, 5).map(t => '<a class="dl" href="#/tickets"><div><div class="t">' + esc(t.subject) + '</div><div class="m">Ticket ' + esc(t.no) + ' · ' + esc(t.dept) + ' · ' + esc(t.by) + '</div></div><div class="d">' + Math.floor((Date.now() - new Date(t.at)) / 3600000) + 'h</div></a>').join('') +
-        D.esc8.slice(0, 5).map(x => '<a class="dl" href="#/order/' + esc(x.order.id) + '"><div><div class="t">' + esc(x.step.name) + '</div><div class="m">' + esc(x.order.no) + ' · ' + esc(x.order.customer_name) + ' · ' + esc(x.step.doer || '') + '</div></div><div class="d">' + fmtDelay(x.step.delayMinutes) + '</div></a>').join('') : '<div class="dl-empty">No escalations</div>') + '</div>';
+    const escN = D.tickets.length + D.escs.length;
+    h += '<div class="dcard"><div class="dh3">Escalations<span class="n' + (escN ? ' red' : '') + '">' + escN + '</span><span class="grow"></span><a class="small" href="#/escalations">All</a></div>' +
+      (escN ? D.escs.slice(0, 6).map(e => { const role = norm(e.doer) === norm(who) ? 'Doer' : norm(e.l1) === norm(who) ? 'Level 1' : 'Level 2';
+        return '<a class="dl" href="#/escalations"><div><div class="t">' + esc(e.task) + '</div><div class="m">' + esc(e.no) + ' · ' + esc([e.ref, e.party].filter(Boolean).join(' · ')) + ' · ' + esc(e.doer) + '</div><div class="m">L' + e.level + ' · ' + role + (e.commit_at ? ' · new date ' + fmtDT(e.commit_at) : '') + '</div></div><div class="d">L' + e.level + '</div></a>'; }).join('') +
+        D.tickets.slice(0, 3).map(t => '<a class="dl" href="#/tickets"><div><div class="t">' + esc(t.subject) + '</div><div class="m">Ticket ' + esc(t.no) + ' · ' + esc(t.dept) + ' · ' + esc(t.by) + '</div></div><div class="d">' + Math.floor((Date.now() - new Date(t.at)) / 3600000) + 'h</div></a>').join('')
+        : '<div class="dl-empty">No escalations</div>') + '</div>';
     h += '</div></div>';
 
     // open activities (purchase / store / approvals)
@@ -164,9 +174,9 @@ VIEWS.home = {
         '<div class="dh3" style="border-top:1px solid var(--line2)">Open orders by stage</div><div class="tbl-wrap"><table class="nopage"><tr><th>Stage</th><th class="num">Orders</th></tr>' +
         (Object.keys(stage).length ? Object.entries(stage).sort((a2, b2) => b2[1] - a2[1]).map(([k, n2]) => '<tr><td>' + esc(k) + '</td><td class="num">' + n2 + '</td></tr>').join('') : '<tr><td colspan="2" class="empty">No open orders</td></tr>') + '</table></div></div></div>';
       if (sa) {
-        const board = scoreBoard();
-        h += '<div class="dcard"><div class="dh3">People score · last 30 days</div><div class="tbl-wrap"><table><tr><th>Name</th><th>Doer</th><th>Department</th><th>Designation</th><th class="num">Done</th><th class="num">On time</th><th class="num">Score</th><th class="num">Open tasks</th><th class="num">Late tasks</th></tr>' +
-          (board.length ? board.sort((a2, b2) => (a2.score == null ? 101 : a2.score) - (b2.score == null ? 101 : b2.score)).map(b2 => '<tr class="click" data-act="ht-who" data-d="' + esc(b2.u.doer || '') + '"><td>' + esc(b2.u.name) + '</td><td>' + esc(b2.u.doer || '') + '</td><td>' + esc(b2.u.department || '') + '</td><td>' + esc(b2.u.designation || '') + '</td><td class="num">' + b2.done + '</td><td class="num">' + b2.onTime + '</td><td class="num' + (b2.score != null && b2.score < 80 ? ' late-txt' : '') + '"><b>' + (b2.score == null ? '—' : b2.score + '%') + '</b></td><td class="num">' + b2.pending + '</td><td class="num' + (b2.lateOpen ? ' late-txt' : '') + '">' + b2.lateOpen + '</td></tr>').join('') : '<tr><td colspan="9" class="empty">No activity yet</td></tr>') + '</table></div></div>';
+        const board = scoreRows(ymdOf(new Date(Date.now() - 30 * 86400000)), todayYmd());
+        h += '<div class="dcard"><div class="dh3">People score · last 30 days<span class="grow"></span><a class="small" href="#/scorecard">Scorecard</a></div><div class="tbl-wrap"><table><tr><th>Doer</th><th>Department</th><th class="num">Total</th><th class="num">Done</th><th class="num">On time</th><th class="num">Overdue</th><th class="num">Score</th><th class="num">Level 2</th></tr>' +
+          (board.length ? board.map(r => '<tr class="click" data-act="ht-who" data-d="' + esc(r.doer) + '"><td>' + esc(r.doer) + '</td><td>' + esc(r.dept) + '</td><td class="num">' + r.total + '</td><td class="num">' + r.completed + '</td><td class="num">' + r.onTime + '</td><td class="num' + (r.overdue ? ' late-txt' : '') + '">' + r.overdue + '</td><td class="num"><b class="' + scoreCls(r.score) + '">' + r.score.toFixed(2) + '</b></td><td class="num' + (r.esc2 ? ' late-txt' : '') + '">' + r.esc2 + '</td></tr>').join('') : '<tr><td colspan="8" class="empty">No tasks yet</td></tr>') + '</table></div></div>';
       }
     }
     const m = setMain(h);

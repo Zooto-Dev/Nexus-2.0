@@ -102,6 +102,8 @@ function clPlanned(t, ymd) {
   const hm = t.time || CL_SHIFTS[t.shift || 'G'] || '17:30';
   return new Date(ymd + 'T' + hm + ':00');
 }
+// old records have no start date: pin one before the first save so their dates never move
+function clPin(t) { if (!t.start && t.freq !== 'Once' && t.type !== 'Delegation') { const d = new Date(); t.start = t.created_at ? String(t.created_at).slice(0, 10) : ymdOf(new Date(d.getFullYear(), d.getMonth(), 1)); } return t; }
 function clDoneKey(t, ymd) { return (t.freq === 'Once' || t.type === 'Delegation') ? 'once' : ymd; }
 function clDoneOf(t, ymd) {
   const v = (t.done || {})[clDoneKey(t, ymd)]; if (!v) return null;
@@ -154,7 +156,7 @@ ACTIONS['cl-done'] = el => {
     let log = '';
     if (photos.length) { log = uid(); Store.put('checklist_log', { id: log, task_id: t.id, ymd, doer: t.doer, task: t.title, photos, remark: rem, at, by: ME.name }); }
     t.done = t.done || {}; t.done[clDoneKey(t, ymd)] = { at, by: ME.name, remark: rem, photos: photos.length, log };
-    t.done_at = at; Store.put('checklist', t);
+    t.done_at = at; clPin(t); Store.put('checklist', t);
     audit('checklist.done', t.title, t.doer + ' · ' + ymd + (rem ? ' — ' + rem : '')); d.remove(); renderNav(); route();
   });
 };
@@ -162,7 +164,7 @@ ACTIONS['cl-photo'] = el => { const l = Store.get('checklist_log', el.dataset.lo
 ACTIONS['cl-undo'] = el => {
   const t = Store.get('checklist', el.dataset.id); if (!t) return; const k = clDoneKey(t, el.dataset.d); const dn = clDoneOf(t, el.dataset.d);
   if (!can('tracker', 'edit') && !(dn && dn.by === ME.name)) { flash('Undo needs tracker edit access.', 'err'); return; }
-  delete t.done[k]; Store.put('checklist', t); audit('checklist.undo', t.title, t.doer + ' · ' + el.dataset.d); route();
+  delete t.done[k]; clPin(t); Store.put('checklist', t); audit('checklist.undo', t.title, t.doer + ' · ' + el.dataset.d); route();
 };
 
 /* ---------- Checklist screen: All Tasks | New Task | Task List ---------- */
@@ -285,7 +287,7 @@ function clListHtml(all) {
       '<td class="nowrap">' + (edit ? '<button class="btn sm" data-act="cl-pause" data-id="' + esc(t.id) + '">' + (t.active === false ? 'Resume' : 'Pause') + '</button> <button class="btn ghost sm danger" data-act="cl-del" data-id="' + esc(t.id) + '" data-confirm="Delete this task and its history?">×</button>' : '') + '</td></tr>').join('')
       : '<tr><td colspan="14" class="empty">No tasks</td></tr>') + '</table></div>';
 }
-ACTIONS['cl-pause'] = el => { if (!clCanAdd()) return; const t = Store.get('checklist', el.dataset.id); t.active = t.active === false; Store.put('checklist', t); audit(t.active ? 'checklist.resume' : 'checklist.pause', t.title, t.doer); VIEWS.checklist.render(); };
+ACTIONS['cl-pause'] = el => { if (!clCanAdd()) return; const t = Store.get('checklist', el.dataset.id); t.active = t.active === false; clPin(t); Store.put('checklist', t); audit(t.active ? 'checklist.resume' : 'checklist.pause', t.title, t.doer); VIEWS.checklist.render(); };
 ACTIONS['cl-del'] = el => {
   if (!clCanAdd()) return; const t = Store.get('checklist', el.dataset.id); if (!t) return;
   Store.all('checklist_log').filter(l => l.task_id === t.id).forEach(l => Store.del('checklist_log', l.id));
