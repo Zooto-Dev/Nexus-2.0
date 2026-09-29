@@ -79,10 +79,10 @@ ACTIONS['sm-save'] = () => {
   let sn = smpSeq('SD-', all.map(x => x.no)); const batch = 'SB-' + String(smpSeq('SB-', all.map(x => x.batch_no)) + 1).padStart(4, '0');
   const now = nowIso(); const made = []; const leads = {};
   lines.forEach(l => {
-    sn += 1; const lead = leads[norm(l.article)];
+    sn += 1; const lead = leads.first;
     const s = { id: uid(), kind: 'sample', no: 'SD-' + String(sn).padStart(4, '0'), batch_no: batch, process_id: proc.id, brand: S.brand, customer_name: S.brand, category: S.category, gender: S.gender,
       article: l.article, colour: l.colour, size: l.size, image: l.image || '', status: '', priority: '', actuals: {}, done_by: {}, extra: {}, created_at: now, created_by: ME.name };
-    if (lead) s.lead_id = lead.id; else leads[norm(l.article)] = s;
+    if (lead) s.lead_id = lead.id; else leads.first = s;   // the batch's first sample leads; the rest wait for it
     Store.put('samples', s); made.push(s.no);
   });
   audit('sample.create', batch, S.brand + ' · ' + made.join(', '));
@@ -153,7 +153,7 @@ function smpLeadRow(s, st, edit) {
   const F = Store.all('samples').filter(x => x.lead_id === s.id);
   if (L) return '<tr><td class="k">Starts after</td><td class="v" colspan="5"><a href="#/sample/' + esc(L.id) + '">' + esc(L.no) + '</a> ' + esc(L.colour) + ' — ' + ((s.extra || {}).manual_release ? 'released by hand ' + fmtDT(s.extra.manual_release) : sampleLeadClearedAt(s) ? 'cleared ' + fmtDT(sampleLeadClearedAt(s)) : 'waiting') +
     (st.waitLead && edit ? ' <button class="btn sm" data-act="sm-release" data-id="' + esc(s.id) + '" data-confirm="Start now?">Start now</button>' : '') + '</td></tr>';
-  if (F.length) return '<tr><td class="k">Other colours</td><td class="v" colspan="5">' + F.map(x => '<a href="#/sample/' + esc(x.id) + '">' + esc(x.no) + '</a> ' + esc(x.colour)).join(', ') + ' <span class="muted">— start when this sample has no changes, or after its rework submission</span></td></tr>';
+  if (F.length) return '<tr><td class="k">Rest of batch</td><td class="v" colspan="5">' + F.map(x => '<a href="#/sample/' + esc(x.id) + '">' + esc(x.no) + '</a> ' + esc(x.colour)).join(', ') + ' <span class="muted">— start when this sample has no changes, or after its rework submission</span></td></tr>';
   return '';
 }
 ACTIONS['sm-release'] = el => {
