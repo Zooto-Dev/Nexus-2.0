@@ -65,17 +65,24 @@ function tasksOf(doer) { return allTasks().filter(t => norm(t.doer) === norm(doe
 /* ================= escalations ================= */
 const ESC_DEF = { after: 510 };   // working minutes of delay before Level 1 = 1 working day (09:00–17:30)
 function escCfg() { return Object.assign({}, ESC_DEF, settings().esc || {}); }
-function escL2() { const c = escCfg(); if (c.l2) return c.l2; const u = Store.all('users').find(x => x.active !== false && x.role_id === 'r_admin' && x.doer); return u ? u.doer.toUpperCase() : ''; }
+// Level 2 = every Super Admin; Level 1 = department override, else the common Level 1 owner (the PC), else the department head
+const ESC_L2 = 'SUPER ADMIN';
+function escL2() { return (escCfg().l2 || ESC_L2).toUpperCase(); }
+function isSuperDoer(d) { const u = userOfDoer(d); const r = u && Store.get('roles', u.role_id); return !!(r && r.system); }
+function escPc() { const u = Store.all('users').find(x => x.active !== false && x.doer && /^PC$/i.test(String(x.designation || '').trim())); return u ? u.doer.toUpperCase() : ''; }
 function escL1(doer) {
   const c = escCfg(); const dept = deptOfDoer(doer);
   if (dept && (c.l1 || {})[dept]) return c.l1[dept];
+  if (c.l1_all) return c.l1_all;
+  const pc = escPc(); if (pc && norm(pc) !== norm(doer)) return pc;
   const head = Store.all('users').find(u => u.active !== false && u.doer && norm(u.doer) !== norm(doer) && dept && u.department === dept && /HEAD|MANAGER|INCHARGE/i.test(u.designation || ''));
   return head ? head.doer.toUpperCase() : escL2();
 }
+function escIsL2(t, doer) { return t.level === 2 && !!doer && (norm(t.l2 || '') === norm(doer) || isSuperDoer(doer)); }
 function escHash(s) { let h = 5381; for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0; return h.toString(36).toUpperCase(); }
 // involved = the doer, the Level 1 owner, and the Level 2 owner once the ticket reaches Level 2
-function escInvolved(t, doer) { if (!doer) return false; const d = norm(doer); return norm(t.doer || '') === d || norm(t.l1 || '') === d || (t.level === 2 && norm(t.l2 || '') === d); }
-function escCanAct(t, level) { if (isSuperAdmin()) return true; const me = ME && ME.doer; return level === 1 ? escInvolved(t, me) : norm(t.l2) === norm(me || ''); }
+function escInvolved(t, doer) { if (!doer) return false; const d = norm(doer); return norm(t.doer || '') === d || norm(t.l1 || '') === d || (norm(t.l1 || '') === norm(ESC_L2) && isSuperDoer(doer)) || escIsL2(t, doer); }
+function escCanAct(t, level) { if (isSuperAdmin()) return true; const me = ME && ME.doer; return level === 1 ? escInvolved(t, me) : escIsL2(t, me || ''); }
 function escLog(t, what) { t.history = (t.history || []).concat([{ at: nowIso(), by: ME ? ME.name : 'System', what }]); }
 let ESC_T = 0;
 function escRun(force) {
@@ -125,7 +132,7 @@ ACTIONS['esc-date'] = el => {
 };
 ACTIONS['esc-resolve'] = el => {
   const e = Store.get('escalations', el.dataset.id); if (!e || e.status !== 'Open') return;
-  if (!(isSuperAdmin() || (e.level === 2 && norm(e.l2) === norm(ME.doer || '')))) { flash('Level 2 owner resolves this.', 'err'); return; }
+  if (!(isSuperAdmin() || escIsL2(e, ME.doer || ''))) { flash('Level 2 (Super Admin) resolves this.', 'err'); return; }
   formDialog(e.no + ' · Resolve', [{ k: 'why', l: 'Resolution', type: 'textarea', req: true }], 'Resolve', v => {
     e.status = 'Resolved'; e.resolved_at = nowIso(); e.result = 'Resolved by ' + ME.name; e.resolution = v.why; escLog(e, 'Resolved — ' + v.why);
     Store.put('escalations', e); audit('escalation.resolve', e.no, v.why); route();
@@ -257,7 +264,7 @@ VIEWS.escalations = {
       h += '<div class="tbl-wrap"><table class="bomflat"><tr><th>Ticket</th><th>Raised</th><th>Source</th><th>Task</th><th>Reference</th><th>Party</th><th>Doer</th><th>Planned</th><th class="num">Delay</th><th>Level</th><th>Level 1</th><th>New Date</th><th>Reason</th><th>Level 2</th><th>Status</th><th>Result</th><th></th></tr>' +
         (rows.length ? rows.map(e => {
           const end = e.resolved_at ? new Date(e.resolved_at) : now; let dl = 0; try { dl = cal.workMinutesBetween(new Date(e.planned), end); } catch (x) {}
-          const acts = e.status !== 'Open' ? '' : (e.level === 1 && !e.commit_at && escCanAct(e, 1) ? '<button class="btn sm" data-act="esc-date" data-id="' + esc(e.id) + '">New date</button> ' : '') + ((isSuperAdmin() || (e.level === 2 && norm(e.l2) === norm(me))) ? '<button class="btn sm primary" data-act="esc-resolve" data-id="' + esc(e.id) + '">Resolve</button>' : '');
+          const acts = e.status !== 'Open' ? '' : (e.level === 1 && !e.commit_at && escCanAct(e, 1) ? '<button class="btn sm" data-act="esc-date" data-id="' + esc(e.id) + '">New date</button> ' : '') + ((isSuperAdmin() || escIsL2(e, me)) ? '<button class="btn sm primary" data-act="esc-resolve" data-id="' + esc(e.id) + '">Resolve</button>' : '');
           return '<tr><td><b>' + esc(e.no) + '</b></td><td class="nowrap">' + fmtDT(e.raised_at) + '</td><td>' + esc(e.src) + '</td><td>' + esc(e.task) + '</td><td>' + (e.link ? '<a href="' + esc(e.link) + '">' + esc(e.ref) + '</a>' : esc(e.ref)) + '</td><td>' + esc(e.party) + '</td><td>' + esc(e.doer) + '</td>' +
             '<td class="nowrap">' + fmtDT(e.planned) + '</td><td class="num late-txt">' + (dl ? fmtDelay(dl) : '') + '</td><td><span class="st ' + (e.status !== 'Open' ? 'Done' : e.level === 2 ? 'Late' : 'Pending') + '">L' + e.level + '</span></td><td>' + esc(e.l1) + '</td>' +
             '<td class="nowrap">' + (e.commit_at ? fmtDT(e.commit_at) : '') + '</td><td>' + esc(e.commit_why || '') + '</td><td>' + esc(e.l2) + '</td><td>' + esc(e.status) + '</td><td>' + esc(e.result || '') + (e.resolution ? ' — ' + esc(e.resolution) : '') + '</td><td class="nowrap">' + acts + ' <a class="small" data-act="esc-hist" data-id="' + esc(e.id) + '">Log</a></td></tr>';
@@ -268,7 +275,7 @@ VIEWS.escalations = {
     $('#main').addEventListener('change', e => {
       const t = e.target; if (!isSuperAdmin()) return;
       const st = settings(); st.esc = Object.assign({}, st.esc || {});
-      if (t.id === 'escL2') { st.esc.l2 = t.value; audit('settings.escalation', 'Level 2', t.value || 'Super Admin'); }
+      if (t.id === 'escL1all') { st.esc.l1_all = t.value; audit('settings.escalation', 'Level 1', t.value || 'PC'); }
       else if (t.dataset.l1d) { st.esc.l1 = Object.assign({}, st.esc.l1 || {}); if (t.value) st.esc.l1[t.dataset.l1d] = t.value; else delete st.esc.l1[t.dataset.l1d]; audit('settings.escalation', 'Level 1 · ' + t.dataset.l1d, t.value || 'auto'); }
       else if (t.id === 'escAfter') { st.esc.after = Math.round(num(t.value) * 510); audit('settings.escalation', 'After', t.value + ' day'); }
       else return;
@@ -284,12 +291,13 @@ ACTIONS['esc-hist'] = el => {
 function escSetupHtml() {
   const c = escCfg(); const doers = allDoers();
   const depts = Array.from(new Set(Store.all('users').map(u => u.department).filter(Boolean))).sort();
+  const common = c.l1_all || escPc();
   return '<div class="panel" style="max-width:760px"><table class="jckv">' +
     '<tr><td class="k">Level 1 after delay of</td><td class="v"><select id="escAfter">' + [0.5, 1, 2, 3].map(x => '<option value="' + x + '"' + (Math.abs(c.after / 510 - x) < 0.01 ? ' selected' : '') + '>' + x + ' working day' + (x > 1 ? 's' : '') + '</option>').join('') + '</select></td></tr>' +
-    '<tr><td class="k">Level 2 owner</td><td class="v"><select id="escL2">' + selOpts(doers, (settings().esc || {}).l2 || '', 'Super Admin (' + escL2() + ')') + '</select></td></tr></table></div>' +
-    '<div class="tbl-wrap"><table class="nopage"><tr><th>Department</th><th>Level 1 owner</th><th>Auto (head / manager)</th></tr>' +
-    depts.map(d => { const auto = (Store.all('users').find(u => u.department === d && u.active !== false && u.doer && /HEAD|MANAGER|INCHARGE/i.test(u.designation || '')) || {}).doer || escL2();
-      return '<tr><td>' + esc(d) + '</td><td><select data-l1d="' + esc(d) + '">' + selOpts(doers, (c.l1 || {})[d] || '', 'Auto') + '</select></td><td class="muted">' + esc(String(auto).toUpperCase()) + '</td></tr>'; }).join('') + '</table></div>';
+    '<tr><td class="k">Level 1 owner</td><td class="v"><select id="escL1all">' + selOpts(doers, c.l1_all || '', 'PC (' + (escPc() || 'none') + ')') + '</select></td></tr>' +
+    '<tr><td class="k">Level 2 owner</td><td class="v">All Super Admins (' + esc(Store.all('users').filter(u => u.active !== false && u.doer && isSuperDoer(u.doer)).map(u => u.doer.toUpperCase()).join(', ')) + ')</td></tr></table></div>' +
+    '<div class="tbl-wrap"><table class="nopage"><tr><th>Department</th><th>Level 1 owner</th></tr>' +
+    depts.map(d => '<tr><td>' + esc(d) + '</td><td><select data-l1d="' + esc(d) + '">' + selOpts(doers, (c.l1 || {})[d] || '', 'Same as above (' + esc(common || escL2()) + ')') + '</select></td></tr>').join('') + '</table></div>';
 }
 
 /* ================= Scorecard screen ================= */
@@ -312,6 +320,54 @@ VIEWS.scorecard = {
     $('#main').addEventListener('change', e => { const k = { scFrom: 'from', scTo: 'to', scDept: 'dept' }[e.target.id]; if (k) { SC_UI[k] = e.target.value; VIEWS.scorecard.render(); } });
   }
 };
-ACTIONS['sc-open'] = el => { AT_UI.who = el.dataset.d; AT_UI.st = 'all'; AT_UI.from = SC_UI.from; AT_UI.to = SC_UI.to; AT_UI.tab = 'tasks'; go('alltasks'); };
+ACTIONS['sc-open'] = el => { AT_UI.who = el.dataset.d; AT_UI.st = 'all'; AT_UI.from = curView().v === 'home' ? SA_UI.from : SC_UI.from || AT_UI.from; AT_UI.to = curView().v === 'home' ? SA_UI.to : SC_UI.to || AT_UI.to; AT_UI.tab = 'tasks'; go('alltasks'); };
 ACTIONS['sc-csv'] = () => downloadCsv('scorecard-' + todayYmd() + '.csv', [['Doer', 'Department', 'Total', 'Done', 'On Time', 'Late', 'Pending', 'Overdue', 'Completion %', 'On-time %', 'Volume', 'Consistency', 'Score', 'Escalations', 'Level 2']]
   .concat((VIEWS.scorecard.rows || []).map(r => [r.doer, r.dept, r.total, r.completed, r.onTime, r.late, r.pending, r.overdue, r.completionPct.toFixed(1), r.onTimePct.toFixed(1), r.volumePct.toFixed(1), r.consistencyPct.toFixed(1), r.score.toFixed(2), r.esc1, r.esc2])));
+
+/* ================= Super Admin Home ================= */
+const SA_UI = { from: '', to: '' };
+function saHomeHtml() {
+  if (!SA_UI.from) { const d = new Date(); SA_UI.from = ymdOf(new Date(d.getFullYear(), d.getMonth(), 1)); SA_UI.to = todayYmd(); }
+  try { escRun(); } catch (e) { console.error(e); }
+  const pa = paRows(); const tasks = allTasks(); const now = new Date();
+  const exc = pa.filter(r => r.k === 'excess' && !r.actual).sort((a, b) => b.delay - a.delay);
+  const poa = pa.filter(r => r.k === 'po_approval' && !r.actual).sort((a, b) => b.delay - a.delay);
+  const escs = Store.all('escalations').filter(e => e.status === 'Open');
+  const l2 = escs.filter(e => e.level === 2).sort((a, b) => a.planned < b.planned ? -1 : 1); const l1n = escs.length - l2.length;
+  const delayed = tasks.filter(t => !t.done && !t.demo && t.status === 'Delayed' && t.doer !== 'SYSTEM');
+  const score = scoreRows(SA_UI.from, SA_UI.to);
+  const avg = score.length ? score.reduce((a, r) => a + r.score, 0) / score.length : null;
+  const card = (href, v, l, cls) => '<a class="dk-c" href="' + href + '"><span class="l">' + l + '</span><span class="v ' + (cls || '') + '">' + v + '</span></a>';
+  let h = '<div class="dk">' + card('#/excessapproval', exc.length, 'Excess approvals', exc.length ? 'late-txt' : '') + card('#/poapproval', poa.length, 'PO approvals', poa.length ? 'pend-txt' : '') +
+    card('#/escalations', l2.length, '2nd escalations', l2.length ? 'late-txt' : '') + card('#/escalations', l1n, '1st escalations', l1n ? 'pend-txt' : '') +
+    card('#/alltasks', delayed.length, 'Delayed tasks', delayed.length ? 'late-txt' : '') + card('#/scorecard', avg == null ? '—' : avg.toFixed(2), 'Team score', scoreCls(avg)) + '</div>';
+  const tbl = (pg, head, rows, cols) => '<div class="tbl-wrap"><table data-pg="' + pg + '"><tr>' + head.map(x => '<th' + (/^#|Delay|Total|Done|Late|Open|Avg|Score|On|Overdue|Level|%/.test(x) ? ' class="num"' : '') + '>' + x + '</th>').join('') + '</tr>' + (rows.length ? rows.join('') : '<tr><td colspan="' + cols + '" class="empty">Nothing pending</td></tr>') + '</table></div>';
+  const dl = m => m ? '<span class="late-txt">' + fmtDelay(m) + '</span>' : '';
+  // approvals only the Super Admin gives
+  h += '<div class="dgrid"><div>';
+  h += '<div class="dcard"><div class="dh3">Excess approvals<span class="n' + (exc.length ? ' red' : '') + '">' + exc.length + '</span><span class="grow"></span><a class="small" href="#/excessapproval">Open</a></div>' +
+    tbl('sa_excess', ['GRN · Material', 'Vendor', 'Since', 'Planned', 'Delay'], exc.map(r => '<tr class="click" data-act="go" data-v="excessapproval"><td><b>' + esc(r.ref) + '</b></td><td>' + esc(r.party) + '</td><td class="nowrap">' + fmtDT(r.start) + '</td><td class="nowrap">' + fmtDT(r.planned) + '</td><td class="num">' + dl(r.delay) + '</td></tr>'), 5) + '</div>';
+  h += '<div class="dcard"><div class="dh3">PO approvals<span class="n">' + poa.length + '</span><span class="grow"></span><a class="small" href="#/poapproval">Open</a></div>' +
+    tbl('sa_po', ['PO', 'Vendor', 'Since', 'Planned', 'Delay'], poa.map(r => '<tr class="click" data-act="go" data-v="poapproval"><td><b>' + esc(r.ref) + '</b></td><td>' + esc(r.party) + '</td><td class="nowrap">' + fmtDT(r.start) + '</td><td class="nowrap">' + fmtDT(r.planned) + '</td><td class="num">' + dl(r.delay) + '</td></tr>'), 5) + '</div>';
+  h += '</div><div>';
+  h += '<div class="dcard"><div class="dh3">2nd escalations<span class="n' + (l2.length ? ' red' : '') + '">' + l2.length + '</span><span class="grow"></span><a class="small" href="#/escalations">All</a></div>' +
+    tbl('sa_esc2', ['Ticket', 'Task', 'Reference', 'Doer', 'Planned', 'New date', ''], l2.map(e => '<tr><td><b>' + esc(e.no) + '</b></td><td>' + esc(e.task) + '<div class="muted small">' + esc(e.src) + '</div></td><td>' + (e.link ? '<a href="' + esc(e.link) + '">' + esc(e.ref) + '</a>' : esc(e.ref)) + '</td><td>' + esc(e.doer) + '</td><td class="nowrap">' + fmtDT(e.planned) + '</td><td class="nowrap">' + (e.commit_at ? fmtDT(e.commit_at) : '') + '</td><td><button class="btn sm primary" data-act="esc-resolve" data-id="' + esc(e.id) + '">Resolve</button></td></tr>'), 7) + '</div>';
+  h += '</div></div>';
+  // who is holding work up, which process is slow
+  const byDoer = {};
+  delayed.forEach(t => { const k = t.doer || 'NOT SET'; const x = byDoer[k] || (byDoer[k] = { doer: k, dept: t.dept, n: 0, sum: 0, max: 0, top: '' }); x.n++; x.sum += t.delay; if (t.delay > x.max) { x.max = t.delay; x.top = t.task + (t.ref ? ' · ' + t.ref : ''); } });
+  const dRows = Object.values(byDoer).sort((a, b) => b.sum - a.sum);
+  const f = new Date(SA_UI.from + 'T00:00:00'), tt = new Date(SA_UI.to + 'T23:59:59'); const byProc = {};
+  tasks.filter(t => !t.demo && t.doer !== 'SYSTEM' && t.planned && t.planned >= f && t.planned <= tt && (t.done || t.planned <= now)).forEach(t => {
+    const k = t.src + '|' + t.task; const x = byProc[k] || (byProc[k] = { src: t.src, task: t.task, total: 0, done: 0, late: 0, dsum: 0, open: 0, osum: 0 });
+    x.total++; if (t.done) { x.done++; if (t.late) { x.late++; x.dsum += t.delay; } } else if (t.late) { x.open++; x.osum += t.delay; }
+  });
+  const pRows = Object.values(byProc).filter(x => x.late || x.open).sort((a, b) => (b.osum + b.dsum) - (a.osum + a.dsum));
+  h += '<div class="dcard"><div class="dh3">MIS score<span class="grow"></span><input id="saFrom" type="date" value="' + esc(SA_UI.from) + '"> <input id="saTo" type="date" value="' + esc(SA_UI.to) + '"> <a class="small" href="#/scorecard">Scorecard</a></div>' +
+    tbl('sa_score', ['#', 'Doer', 'Department', 'Total', 'Done', 'On time', 'Overdue', 'Compl %', 'On-time %', 'Score', 'Level 2'], score.map((r, i) => '<tr class="click" data-act="sc-open" data-d="' + esc(r.doer) + '"><td class="num muted">' + (i + 1) + '</td><td><b>' + esc(r.doer) + '</b></td><td>' + esc(r.dept) + '</td><td class="num">' + r.total + '</td><td class="num">' + r.completed + '</td><td class="num">' + r.onTime + '</td><td class="num' + (r.overdue ? ' late-txt' : '') + '">' + r.overdue + '</td><td class="num">' + r.completionPct.toFixed(1) + '</td><td class="num">' + r.onTimePct.toFixed(1) + '</td><td class="num"><b class="' + scoreCls(r.score) + '">' + r.score.toFixed(2) + '</b></td><td class="num' + (r.esc2 ? ' late-txt' : '') + '">' + r.esc2 + '</td></tr>'), 11) + '</div>';
+  h += '<div class="dgrid"><div><div class="dcard"><div class="dh3">Held up by person<span class="n' + (dRows.length ? ' red' : '') + '">' + dRows.length + '</span></div>' +
+    tbl('sa_doer', ['Doer', 'Department', 'Delayed', 'Total delay', 'Longest', 'Longest task'], dRows.map(x => '<tr class="click" data-act="sc-open" data-d="' + esc(x.doer === 'NOT SET' ? '' : x.doer) + '"><td><b>' + (x.doer === 'NOT SET' ? '<span class="late-txt">Not set</span>' : esc(x.doer)) + '</b></td><td>' + esc(x.dept || '') + '</td><td class="num">' + x.n + '</td><td class="num late-txt">' + fmtDelay(x.sum) + '</td><td class="num">' + fmtDelay(x.max) + '</td><td>' + esc(x.top) + '</td></tr>'), 6) + '</div></div>' +
+    '<div><div class="dcard"><div class="dh3">Slow processes<span class="n">' + pRows.length + '</span></div>' +
+    tbl('sa_proc', ['Process', 'Source', 'Total', 'Late %', 'Avg delay (done)', 'Open late', 'Avg delay (open)'], pRows.map(x => '<tr><td><b>' + esc(x.task) + '</b></td><td>' + esc(x.src) + '</td><td class="num">' + x.total + '</td><td class="num">' + Math.round((x.late + x.open) * 100 / x.total) + '%</td><td class="num">' + (x.late ? fmtDelay(Math.round(x.dsum / x.late)) : '') + '</td><td class="num' + (x.open ? ' late-txt' : '') + '">' + x.open + '</td><td class="num">' + (x.open ? fmtDelay(Math.round(x.osum / x.open)) : '') + '</td></tr>'), 7) + '</div></div></div>';
+  return h;
+}

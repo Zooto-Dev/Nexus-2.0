@@ -86,7 +86,7 @@ function homeTaskTable(tasks) {
   const n = k => k === 'all' ? tasks.length : tasks.filter(t => t.status === k).length;
   return '<div class="dcard"><div class="dh3">My tasks<span class="grow"></span>' +
     seg('htf', ['all', 'Delayed', 'Pending', 'Upcoming', 'Completed'].map(k => ({ v: k, l: (k === 'all' ? 'All' : k) + ' ' + n(k) })), HT_UI.f) + '</div>' +
-    '<div class="tbl-wrap"><table><tr><th class="num">#</th><th>Task</th><th>Reference</th><th>Party</th><th>Planned</th><th>Completed</th><th>Status</th><th class="num">Delay</th><th></th></tr>' +
+    '<div class="tbl-wrap"><table data-pg="home_tasks"><tr><th class="num">#</th><th>Task</th><th>Reference</th><th>Party</th><th>Planned</th><th>Completed</th><th>Status</th><th class="num">Delay</th><th></th></tr>' +
     (list.length ? list.map((t, i) => '<tr><td class="num">' + (i + 1) + '</td><td>' + esc(t.task) + '<div class="muted small">' + esc(t.src) + '</div></td><td><b>' + esc(t.ref || '') + '</b></td><td>' + esc(t.party || '') + '</td><td class="nowrap">' + (t.planned ? fmtDT(t.planned) : '') + '</td><td class="nowrap">' + (t.done ? fmtDT(t.done) : '') + '</td>' +
       '<td><span class="st ' + cls[t.status] + '">' + t.status + '</span></td><td class="num' + (t.delay ? ' late-txt' : '') + '">' + (t.delay ? fmtDelay(t.delay) : '') + '</td><td class="right">' + (t.btn || '') + '</td></tr>').join('')
       : '<tr><td colspan="9" class="empty">No tasks</td></tr>') + '</table></div></div>';
@@ -106,6 +106,14 @@ VIEWS.home = {
       (pick ? '<label class="small muted">Showing <select id="htWho">' + doers.map(d => '<option' + (norm(d) === norm(who) ? ' selected' : '') + '>' + esc(d) + '</option>').join('') + '</select></label>' : '') +
       (sa && Store.all('checklist').some(t => t.demo) ? '<button class="btn sm danger" data-act="ht-demo-del" data-confirm="Remove all demo tasks?">Remove demo tasks</button>' : '') + '</div>';
 
+    // Super Admin looking at their own Home: approvals, 2nd escalations, MIS score, bottlenecks
+    if (sa && self) {
+      h += saHomeHtml();
+      setMain(h);
+      const w0 = $('#htWho'); if (w0) w0.addEventListener('change', () => { HT_UI.who = w0.value; VIEWS.home.render(); });
+      $('#main').addEventListener('change', e => { if (e.target.id === 'saFrom' || e.target.id === 'saTo') { SA_UI[e.target.id === 'saFrom' ? 'from' : 'to'] = e.target.value; VIEWS.home.render(); } });
+      return;
+    }
     // summary cards
     const ring = D.score == null ? '—' : D.score + '%';
     const ringCol = D.score == null ? 'var(--line)' : D.score >= 90 ? 'var(--done)' : D.score >= 70 ? 'var(--pending)' : 'var(--late)';

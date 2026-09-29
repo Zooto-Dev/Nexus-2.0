@@ -286,6 +286,14 @@ VIEWS.settings = {
       (edit ? '<label class="btn" style="flex-direction:row;color:var(--text)">Restore backup<input type="file" id="restoreFile" accept=".json,application/json" class="hidden"></label>' : '') +
       (edit && !CLOUD ? '<button class="btn danger" data-act="reset-demo" data-confirm="Erase all & reload demo?">Reset to demo data</button>' : '') + '</div>' +
       '<div class="muted small">Mode: <b>' + (CLOUD ? 'Cloud (Supabase) — data shared by all users' : 'Local — data is saved in this browser only. Fill config.js to go multi-user.') + '</b> · Build ' + NEXUS_BUILD + '</div></div>';
+    // rows per page for every table
+    const pgs = s.page_size || {}; const PG_OPTS = [['', 'Default'], ['10', '10'], ['15', '15'], ['20', '20'], ['25', '25'], ['50', '50'], ['100', '100'], ['0', 'All']];
+    const pgSel = k => '<select data-pgs="' + esc(k) + '"' + dis + '>' + PG_OPTS.filter(o => k !== '_default' || o[0]).map(([v, l]) => '<option value="' + v + '"' + (String(pgs[k] == null ? (k === '_default' ? '20' : '') : pgs[k]) === v ? ' selected' : '') + '>' + l + '</option>').join('') + '</select>';
+    const screens = []; NAV.forEach(g => (g.items || [g]).forEach(i => { if (i.v && !screens.some(x => x[0] === i.v)) screens.push([i.v, (g.menu ? g.menu + ' · ' : '') + i.l]); }));
+    h += '<div class="panel" style="margin-top:12px"><h2 style="margin-top:0">Rows per page</h2><div class="tbl-wrap"><table class="nopage"><tr><th>Table</th><th>Rows</th></tr>' +
+      '<tr><td><b>All tables (default)</b></td><td>' + pgSel('_default') + '</td></tr>' +
+      Object.entries(PG_NAMED).map(([k, l]) => '<tr><td>' + esc(l) + '</td><td>' + pgSel(k) + '</td></tr>').join('') +
+      screens.map(([k, l]) => '<tr><td>' + esc(l) + '</td><td>' + pgSel(k) + '</td></tr>').join('') + '</table></div></div>';
     h += '</div><div><div class="panel"><h2 style="margin-top:0">Holidays</h2><div class="tbl-wrap"><table><tr><th>Date</th><th>Name</th><th></th></tr>' +
       (s.holidays || []).slice().sort((a, b) => a.date < b.date ? -1 : 1).map(x => '<tr><td>' + esc(fmtD(x.date)) + ' <span class="muted small">' + esc(days[new Date(x.date + 'T00:00').getDay()]) + '</span></td><td>' + esc(x.name) + '</td><td class="right">' + (edit ? '<button class="btn ghost sm danger" data-act="hol-del" data-d="' + esc(x.date) + '">×</button>' : '') + '</td></tr>').join('') + '</table></div>' +
       (edit ? '<div class="row" style="margin-top:8px"><label>Date<input id="holD" type="date"></label><label style="flex:1">Name<input id="holN" placeholder="Diwali"></label><button class="btn" data-act="hol-add">Add</button></div>' : '') + '</div></div></div>';
@@ -293,6 +301,7 @@ VIEWS.settings = {
     if (!edit) return;
     m.addEventListener('change', e => {
       const t = e.target; const st = settings();
+      if (t.dataset.pgs) { st.page_size = Object.assign({}, st.page_size || {}); if (t.value === '') delete st.page_size[t.dataset.pgs]; else st.page_size[t.dataset.pgs] = t.value; Store.setSettings(st); audit('settings.page_size', t.dataset.pgs, t.value || 'default'); flash('Saved.'); return; }
       if (t.dataset.s) { st[t.dataset.s] = t.dataset.s === 'po_terms' ? t.value.split('\n').map(x => x.trim()).filter(Boolean).join('\n') : t.value.trim(); }
       else if (t.dataset.qccat != null) { st.qc_categories = $$('[data-qccat]').filter(x => x.checked).map(x => x.dataset.qccat); }
       else if (t.dataset.cal) { if (!/^\d\d:\d\d$/.test(t.value)) return; st.calendar[t.dataset.cal] = t.value; }
