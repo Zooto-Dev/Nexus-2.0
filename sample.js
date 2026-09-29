@@ -20,6 +20,7 @@ function smpState(s) {
   const r = resolveOrder(s); if (!r) return { label: 'No flow', cls: 'NA', open: true };
   const open = r.order.map(id => r.steps[id]).filter(x => x.status === 'Pending' || x.status === 'Late').sort((a, b) => a.planned - b.planned);
   const cur = open.find(x => x.status === 'Late') || open[0];
+  if (!cur && s.lead_id && !r.steps.decode.actual) { const L = Store.get('samples', s.lead_id); return { label: 'Waiting for ' + (L ? L.no : 'lead'), cls: 'Waiting', open: true, waitLead: true }; }
   if (!cur) return { label: r.order.some(id => r.steps[id].status === 'Waiting') ? 'Waiting' : 'Completed', cls: 'Done', open: false };
   return { label: cur.name, cls: cur.status === 'Late' ? 'Late' : 'Pending', open: true, cur };
 }
@@ -76,11 +77,12 @@ ACTIONS['sm-save'] = () => {
   if (dup && !ACTIONS['sm-save'].ok) { ACTIONS['sm-save'].ok = true; return msg('Already entered: ' + dup.article + ' ' + dup.colour + ' ' + dup.size + ' — press Save again to add anyway'); }
   ACTIONS['sm-save'].ok = false;
   let sn = smpSeq('SD-', all.map(x => x.no)); const batch = 'SB-' + String(smpSeq('SB-', all.map(x => x.batch_no)) + 1).padStart(4, '0');
-  const now = nowIso(); const made = [];
+  const now = nowIso(); const made = []; const leads = {};
   lines.forEach(l => {
-    sn += 1;
+    sn += 1; const lead = leads[norm(l.article)];
     const s = { id: uid(), kind: 'sample', no: 'SD-' + String(sn).padStart(4, '0'), batch_no: batch, process_id: proc.id, brand: S.brand, customer_name: S.brand, category: S.category, gender: S.gender,
       article: l.article, colour: l.colour, size: l.size, image: l.image || '', status: '', priority: '', actuals: {}, done_by: {}, extra: {}, created_at: now, created_by: ME.name };
+    if (lead) s.lead_id = lead.id; else leads[norm(l.article)] = s;
     Store.put('samples', s); made.push(s.no);
   });
   audit('sample.create', batch, S.brand + ' · ' + made.join(', '));
@@ -127,7 +129,8 @@ VIEWS.sample = {
     h += '<div class="panel"><table class="jckv"><tr><td class="k">Sample ID</td><td class="v"><b>' + esc(s.no) + '</b></td><td class="k">Batch ID</td><td class="v">' + esc(s.batch_no || '') + '</td><td class="k">Time Stamp</td><td class="v">' + fmtDT(s.created_at) + '</td><td rowspan="4" class="c">' + (s.image ? '<a data-act="img-view" data-src="' + esc(s.image) + '"><img src="' + esc(s.image) + '" style="max-height:120px;border-radius:4px"></a>' : '') + '</td></tr>' +
       '<tr><td class="k">Brand</td><td class="v">' + esc(s.brand) + '</td><td class="k">Article</td><td class="v"><b>' + esc(s.article) + '</b></td><td class="k">Colour</td><td class="v">' + esc(s.colour) + '</td></tr>' +
       '<tr><td class="k">Size</td><td class="v">' + esc(s.size) + '</td><td class="k">Gender</td><td class="v">' + esc(s.gender) + '</td><td class="k">Category</td><td class="v">' + esc(s.category) + '</td></tr>' +
-      '<tr><td class="k">Remarks</td><td class="v">' + (edit ? '<select id="smRemark">' + ['', 'Hold', 'Rejected', 'Duplicate Entry'].map(v => '<option' + (v === (s.status || '') ? ' selected' : '') + ' value="' + esc(v) + '">' + esc(v || 'Running') + '</option>').join('') + '</select>' : esc(s.status || 'Running')) + '</td><td class="k">Status</td><td class="v"><span class="st ' + stCls(st.cls) + '">' + esc(st.label) + '</span></td><td class="k">Entered by</td><td class="v">' + esc(s.created_by || '') + '</td></tr></table></div>';
+      '<tr><td class="k">Remarks</td><td class="v">' + (edit ? '<select id="smRemark">' + ['', 'Hold', 'Rejected', 'Duplicate Entry'].map(v => '<option' + (v === (s.status || '') ? ' selected' : '') + ' value="' + esc(v) + '">' + esc(v || 'Running') + '</option>').join('') + '</select>' : esc(s.status || 'Running')) + '</td><td class="k">Status</td><td class="v"><span class="st ' + stCls(st.cls) + '">' + esc(st.label) + '</span></td><td class="k">Entered by</td><td class="v">' + esc(s.created_by || '') + '</td></tr>' +
+      smpLeadRow(s, st, edit) + '</table></div>';
     h += '<div class="tbl-wrap"><table><tr><th>#</th><th>Step</th><th>Doer</th><th>Planned</th><th>Actual</th><th>Status</th><th class="num">Delay</th><th>Done by</th><th>Result</th><th></th></tr>' +
       (r ? r.order.map((sid, i) => {
         const x = r.steps[sid]; const def = r.spec.steps.find(d => d.id === sid);
@@ -144,6 +147,18 @@ VIEWS.sample = {
       if (v) sel.value = was;
     });
   }
+};
+function smpLeadRow(s, st, edit) {
+  const L = s.lead_id && Store.get('samples', s.lead_id);
+  const F = Store.all('samples').filter(x => x.lead_id === s.id);
+  if (L) return '<tr><td class="k">Starts after</td><td class="v" colspan="5"><a href="#/sample/' + esc(L.id) + '">' + esc(L.no) + '</a> ' + esc(L.colour) + ' — ' + ((s.extra || {}).manual_release ? 'released by hand ' + fmtDT(s.extra.manual_release) : sampleLeadClearedAt(s) ? 'cleared ' + fmtDT(sampleLeadClearedAt(s)) : 'waiting') +
+    (st.waitLead && edit ? ' <button class="btn sm" data-act="sm-release" data-id="' + esc(s.id) + '" data-confirm="Start now?">Start now</button>' : '') + '</td></tr>';
+  if (F.length) return '<tr><td class="k">Other colours</td><td class="v" colspan="5">' + F.map(x => '<a href="#/sample/' + esc(x.id) + '">' + esc(x.no) + '</a> ' + esc(x.colour)).join(', ') + ' <span class="muted">— start when this sample has no changes, or after its rework submission</span></td></tr>';
+  return '';
+}
+ACTIONS['sm-release'] = el => {
+  const s = Store.get('samples', el.dataset.id); if (!s || !requirePerm('development', 'edit')) return;
+  s.extra = s.extra || {}; s.extra.manual_release = nowIso(); Store.put('samples', s); RES_CACHE.clear(); audit('sample.release', s.no, 'started before lead sample cleared'); VIEWS.sample.render(s.id);
 };
 ACTIONS['sm-edit'] = el => {
   const s = Store.get('samples', el.dataset.id); if (!s || !requirePerm('development', 'edit')) return;

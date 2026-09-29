@@ -323,11 +323,22 @@ function orderFields(o) {
 function fmsDocs() { return Store.all('orders').concat(Store.all('samples')); }
 function fmsGet(id) { return Store.get('orders', id) || Store.get('samples', id); }
 function fmsPut(o) { Store.put(o.kind === 'sample' ? 'samples' : 'orders', o); }
+// Other colours of an article wait for its first (lead) sample: they start when the lead passes without
+// rework (Changes Required = No), after the lead's rework submission, or when someone releases them by hand.
+function sampleLeadClearedAt(o) {
+  if ((o.extra || {}).manual_release) return o.extra.manual_release;
+  const L = o.lead_id && Store.get('samples', o.lead_id); if (!L) return '';
+  const a = L.actuals || {}; const ch = (L.extra || {}).changes_required;
+  if (ch === 'No') return a.changes || ''; if (ch === 'Yes') return a.r_submission || '';
+  return '';
+}
 function sampleFields(o) {
-  return Object.assign({}, o.extra || {}, { created_at: o.created_at, order_no: o.no, sample_no: o.no, batch_no: o.batch_no, brand: o.brand, article: o.article, colour: o.colour, size: o.size, gender: o.gender, category: o.category, status: o.status || '' });
+  const L = o.lead_id && Store.get('samples', o.lead_id);
+  return Object.assign({}, o.extra || {}, { follows: L ? L.no : '', lead_cleared_at: sampleLeadClearedAt(o), created_at: o.created_at, order_no: o.no, sample_no: o.no, batch_no: o.batch_no, brand: o.brand, article: o.article, colour: o.colour, size: o.size, gender: o.gender, category: o.category, status: o.status || '' });
 }
 function resolveOrder(o) {
-  const key = o.id + '|' + o.updated_at;
+  const lead = o.lead_id && Store.get('samples', o.lead_id);
+  const key = o.id + '|' + o.updated_at + (lead ? '|' + lead.updated_at + '|' + JSON.stringify([lead.actuals, lead.extra, lead.status]) : '');
   if (RES_CACHE.has(key)) return RES_CACHE.get(key);
   const proc = Store.get('processes', o.process_id); const spec = specOf(proc);
   let res = null;
