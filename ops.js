@@ -43,16 +43,11 @@ function personTasks(doer) {
       else if (s.actual && new Date(s.actual) >= since) out.push(Object.assign(base, { status: 'Completed', done: new Date(s.actual), delay: s.delayMinutes || 0 }));
     });
   });
-  Store.all('checklist').filter(t => t.active !== false && norm(t.doer) === norm(doer)).forEach(t => {
-    const base = { task: t.title, ref: t.ref || (t.freq === 'Once' ? '' : t.freq), party: t.party || '', src: t.demo ? 'Demo' : 'Checklist', id: t.id };
-    const canDo = isMyDoer(t.doer) || can('tracker', 'edit');
-    if (t.freq === 'Once') {
-      const p = t.planned ? new Date(t.planned) : t.due ? new Date(t.due + 'T18:00:00') : null;
-      const doneAt = (t.done || {}).once ? new Date(t.done_at || String(t.done.once).split(' · ')[1] + 'T18:00:00') : null;
-      if (doneAt) { if (doneAt >= since) out.push(Object.assign(base, { planned: p, status: 'Completed', done: doneAt, delay: late(p, doneAt) })); }
-      else out.push(Object.assign(base, { planned: p, status: openSt(p), delay: p && p < now ? late(p, now) : 0, btn: canDo ? '<button class="btn sm primary" data-act="ht-done" data-id="' + esc(t.id) + '">Done</button>' : '' }));
-    } else if ((t.done || {})[today]) out.push(Object.assign(base, { planned: new Date(today + 'T18:00:00'), status: 'Completed', done: new Date(t.done_at && t.done_at.slice(0, 10) === today ? t.done_at : today + 'T12:00:00'), delay: 0 }));
-    else if (checklistDueToday(t)) { const p = new Date(today + 'T18:00:00'); out.push(Object.assign(base, { planned: p, status: openSt(p), delay: p < now ? late(p, now) : 0, btn: canDo ? '<button class="btn sm primary" data-act="ht-done" data-id="' + esc(t.id) + '">Done</button>' : '' })); }
+  clRows(ymdOf(since), ymdOf(new Date(Date.now() + 7 * 86400000)), t => norm(t.doer) === norm(doer)).forEach(r => {
+    const base = { task: r.task, ref: r.t.ref || (r.type === 'Delegation' ? '' : r.freq), party: r.t.party || '', src: r.t.demo ? 'Demo' : r.type, id: r.t.id, planned: r.planned };
+    if (r.status === 'Done') { if (r.actual >= since) out.push(Object.assign(base, { status: 'Completed', done: r.actual, delay: r.delay })); return; }
+    const st = r.status === 'Overdue' ? 'Delayed' : r.status;
+    out.push(Object.assign(base, { status: st, delay: r.status === 'Overdue' ? r.delay : 0, btn: r.status === 'Upcoming' ? '' : clDoneBtn(r.t, r.ymd) }));
   });
   return out;
 }
@@ -184,13 +179,6 @@ ACTIONS['ht-f'] = el => { HT_UI.f = HT_UI.f === el.dataset.f ? 'all' : el.datase
 ACTIONS['ht-held'] = () => { const c = $('#heldCard'); if (c) c.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
 ACTIONS['ht-held-all'] = () => { HT_UI.heldAll = !HT_UI.heldAll; VIEWS.home.render(); const c = $('#heldCard'); if (c) c.scrollIntoView({ block: 'start' }); };
 ACTIONS['ht-who'] = el => { if (!el.dataset.d) return; HT_UI.who = el.dataset.d; HT_UI.f = 'all'; VIEWS.home.render(); window.scrollTo(0, 0); };
-ACTIONS['ht-done'] = el => {
-  const t = Store.get('checklist', el.dataset.id); if (!t) return;
-  if (!(isMyDoer(t.doer) || can('tracker', 'edit'))) { flash('Only ' + esc(t.doer) + ' can mark this done.', 'err'); return; }
-  t.done = t.done || {};
-  if (t.freq === 'Once') t.done.once = ME.name + ' · ' + todayYmd(); else t.done[todayYmd()] = ME.name;
-  t.done_at = nowIso(); Store.put('checklist', t); audit('checklist.done', t.title, t.doer); renderNav(); VIEWS.home.render();
-};
 ACTIONS['ht-demo-del'] = () => {
   if (!isSuperAdmin()) return;
   const d = Store.all('checklist').filter(t => t.demo); d.forEach(t => Store.del('checklist', t.id));

@@ -47,7 +47,7 @@ function flash(msg, type) {
 
 /* ================= store ================= */
 const DB_KEY = 'nexus2_db_v8';
-const COLS = ['users', 'roles', 'customers', 'items', 'materials', 'processes', 'orders', 'samples', 'dispatches', 'purchase_orders', 'sourcing', 'grns', 'inwards', 'vendors', 'issues', 'rsjw', 'rtvs', 'boms', 'job_cards', 'requisitions', 'tickets', 'checklist', 'attributes', 'item_types', 'mail_queue', 'prod_reports', 'wa_log', 'audit'];
+const COLS = ['users', 'roles', 'customers', 'items', 'materials', 'processes', 'orders', 'samples', 'dispatches', 'purchase_orders', 'sourcing', 'grns', 'inwards', 'vendors', 'issues', 'rsjw', 'rtvs', 'boms', 'job_cards', 'requisitions', 'tickets', 'checklist', 'checklist_log', 'attributes', 'item_types', 'mail_queue', 'prod_reports', 'wa_log', 'audit'];
 let DB = null;
 const CFG = window.NEXUS_CONFIG || {};
 const CLOUD = !!(CFG.SUPABASE_URL && CFG.SUPABASE_ANON_KEY && window.supabase);
@@ -76,7 +76,7 @@ const reasonDialog = (title, okLabel, cb, danger) => formDialog(title, [{ k: 'wh
 
 /* ---- change log: every create / edit / delete is written to the audit log with who, when and what changed ---- */
 const SNAP = new Map();                       // col|id -> JSON of the last saved copy
-const NOLOG = new Set(['audit', 'mail_queue', 'wa_log']);
+const NOLOG = new Set(['audit', 'mail_queue', 'wa_log', 'checklist_log']);
 const SKIP_KEYS = new Set(['updated_at', 'updated_by', 'created_at', 'created_by']);
 const SECRET_KEY = /pin|pwd|password|hash|secret/i;
 function snapAll() { SNAP.clear(); COLS.forEach(c => (DB[c] || []).forEach(d => SNAP.set(c + '|' + d.id, JSON.stringify(d)))); if (DB.settings) SNAP.set('settings|main', JSON.stringify(DB.settings)); }

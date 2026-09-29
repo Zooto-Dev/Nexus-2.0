@@ -1519,56 +1519,6 @@ ACTIONS['tkt-save'] = () => {
 ACTIONS['tkt-comment'] = el => { const note = $('[data-tk-note]', el.closest('tr')).value.trim(); if (!note) return; const t = Store.get('tickets', el.dataset.id); t.comments = t.comments || []; t.comments.push({ at: nowIso(), by: ME.name, note }); Store.put('tickets', t); VIEWS.tickets.render(); };
 ACTIONS['tkt-status'] = el => { const t = Store.get('tickets', el.dataset.id); t.status = el.dataset.s; if (el.dataset.s === 'Closed') { t.closed_by = ME.name; t.closed_at = nowIso(); } Store.put('tickets', t); audit('ticket.' + el.dataset.s.toLowerCase().replace(' ', ''), t.no, ''); VIEWS.tickets.render(); };
 
-/* ================= TASK: checklist ================= */
-function checklistDueToday(t) {
-  if (t.active === false) return false;
-  const d = new Date();
-  if (t.freq === 'Daily') return !(t.done || {})[todayYmd()];
-  if (t.freq === 'Weekly') return d.getDay() === num(t.wday) && !(t.done || {})[todayYmd()];
-  return !(t.done || {}).once && (!t.due || t.due <= todayYmd());
-}
-function myChecklistDue() { return Store.all('checklist').filter(t => isMyDoer(t.doer) && checklistDueToday(t)); }
-const CHK_UI = { who: 'mine', form: false };
-VIEWS.checklist = {
-  mod: 'checklist', render() {
-    const edit = can('checklist', 'edit');
-    const all = can('tracker', 'edit') || myRole().system;
-    if (!all) CHK_UI.who = 'mine';
-    let rows = Store.all('checklist').filter(t => t.active !== false);
-    if (CHK_UI.who === 'mine') rows = rows.filter(t => isMyDoer(t.doer));
-    rows = rows.slice().sort((a, b) => (checklistDueToday(b) ? 1 : 0) - (checklistDueToday(a) ? 1 : 0));
-    let h = subTitle('Checklist', 'recurring daily / weekly tasks') + '<div class="toolbar">' + (all ? seg('who', [{ v: 'mine', l: 'Mine' }, { v: 'all', l: 'Everyone' }], CHK_UI.who) : '') + '<span class="grow"></span>' + (edit ? newBtn('Add task', 'chk-new') : '') + '</div>';
-    if (CHK_UI.form && edit) h += '<div class="panel" style="margin-bottom:12px"><div class="row"><label style="flex:2">Task *<input id="ncTitle"></label><label>Doer *<input id="ncDoer" list="dlDoers2" value="' + esc(ME.doer || '') + '"><datalist id="dlDoers2">' + Array.from(new Set(Store.all('users').map(u => u.doer).filter(Boolean))).map(d => '<option>' + esc(d) + '</option>').join('') + '</datalist></label>' +
-      '<label>Repeat' + seg('ncFreq', ['Once', 'Daily', 'Weekly'], 'Daily') + '</label><label>Due / Weekday<input id="ncDue" placeholder="date or 0-6"></label><button class="btn primary" data-act="chk-save">Add</button><span id="ncMsg" class="small"></span></div></div>';
-    h += '<div class="tbl-wrap"><table class="bomflat"><tr><th>Task</th><th>Doer</th><th>Repeat</th><th>Weekday</th><th>Due Date</th><th>Today</th><th>Last Done</th><th>Done By</th><th></th></tr>' +
-      (rows.length ? rows.map(t => {
-        const due = checklistDueToday(t); const doneKeys = Object.keys(t.done || {});
-        const lastK = doneKeys.sort().slice(-1)[0];
-        const canMark = due && (isMyDoer(t.doer) || can('tracker', 'edit'));
-        return '<tr><td>' + esc(t.title) + '</td><td>' + esc(t.doer) + '</td><td>' + esc(t.freq) + '</td><td>' + (t.freq === 'Weekly' ? ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][num(t.wday)] : '') + '</td><td>' + (t.freq === 'Once' && t.due ? fmtD(t.due) : '') + '</td>' +
-          '<td>' + (due ? '<span class="st Pending">Due</span>' : '<span class="st Done">' + (t.freq === 'Once' && (t.done || {}).once ? 'Done' : 'OK') + '</span>') + '</td><td>' + (lastK ? (lastK === 'once' ? esc(String(t.done.once || '').split(' · ')[1] || '') : fmtD(lastK)) : '') + '</td><td>' + (lastK ? esc(lastK === 'once' ? String(t.done.once || '').split(' · ')[0] : t.done[lastK]) : '') + '</td>' +
-          '<td class="right nowrap">' + (canMark ? '<button class="btn sm primary" data-act="chk-done" data-id="' + esc(t.id) + '">Done</button> ' : '') + (edit && (t.by === ME.name || myRole().system) ? '<button class="btn ghost sm danger" data-act="chk-del" data-id="' + esc(t.id) + '" data-confirm="Delete?">×</button>' : '') + '</td></tr>';
-      }).join('') : '<tr><td colspan="9" class="empty">Checklist is empty</td></tr>') + '</table></div>';
-    setMain(h);
-    onSeg(e => { if (e.target.dataset.seg === 'who') { CHK_UI.who = e.detail; VIEWS.checklist.render(); } });
-  }
-};
-ACTIONS['chk-new'] = () => { CHK_UI.form = !CHK_UI.form; VIEWS.checklist.render(); };
-ACTIONS['chk-save'] = () => {
-  if (!requirePerm('checklist', 'edit')) return;
-  const title = $('#ncTitle').value.trim(); const doer = $('#ncDoer').value.trim().toUpperCase(); const freq = segVal($('[data-seg="ncFreq"]')) || 'Daily';
-  if (!title || !doer) { $('#ncMsg').innerHTML = '<span class="late-txt">Task and doer are required.</span>'; return; }
-  const due = $('#ncDue').value.trim();
-  const t = Store.put('checklist', { id: uid(), title, doer, freq, due: freq === 'Once' ? due : '', wday: freq === 'Weekly' ? num(due) : null, done: {}, active: true, by: ME.name });
-  audit('checklist.create', title, doer + ' · ' + freq); CHK_UI.form = false; flash('Task added.'); VIEWS.checklist.render(); renderNav();
-};
-ACTIONS['chk-done'] = el => {
-  const t = Store.get('checklist', el.dataset.id); t.done = t.done || {};
-  if (t.freq === 'Once') t.done.once = ME.name + ' · ' + todayYmd(); else t.done[todayYmd()] = ME.name;
-  Store.put('checklist', t); audit('checklist.done', t.title, ''); VIEWS.checklist.render(); renderNav();
-};
-ACTIONS['chk-del'] = el => { const t = Store.get('checklist', el.dataset.id); Store.del('checklist', t.id); audit('checklist.delete', t.title, ''); VIEWS.checklist.render(); };
-
 /* ================= Vendors master ================= */
 VIEWS.vendors = {
   mod: 'purchase', render() {
