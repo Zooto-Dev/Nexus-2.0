@@ -25,75 +25,8 @@ ACTIONS['step-done'] = el => {
 };
 function dueToday(s) { const d = s.planned; return d && ymdOf(d) === todayYmd(); }
 
-/* ---------------- Home ---------------- */
-VIEWS.home = {
-  mod: 'dashboard', render() {
-    const orders = Store.all('orders'); const states = orders.map(o => ({ o, st: orderState(o) }));
-    const open = allOpenSteps(); const late = open.filter(x => x.step.status === 'Late');
-    const mine = open.filter(x => isMyDoer(x.step.doer));
-    const month = todayYmd().slice(0, 7);
-    const dspQty = Store.all('dispatches').filter(d => !d.cancelled && (d.date || '').startsWith(month)).reduce((s, d) => s + d.lines.reduce((a, l) => a + num(l.qty), 0), 0);
-    const openOrders = states.filter(x => x.st.open);
-    const tickets = Store.all('tickets'); const tOpen = tickets.filter(t => t.status !== 'Closed');
-    const escT = tOpen.filter(ticketEscalated);
-    const escSteps = late.filter(x => x.step.delayMinutes > 8 * 60);
-    const pos = openPOs(); const poOver = pos.filter(p => p.expected && p.expected < todayYmd());
-    const reqs = Store.all('requisitions').filter(r => r.status === 'Pending');
-    const swPend = Store.all('job_cards').filter(j => j.swatch_status === 'Pending' && j.status !== 'Closed');
-    const jcCorr = Store.all('job_cards').filter(j => (j.corrections || []).some(c => !c.resolved));
-    const smPend = Store.all('inwards').filter(i => i.status === 'Pending GRN' && i.inv_status === 'Approved' && (i.qc || []).some(q => !q.result));
-    const payPend = Store.all('dispatches').filter(d => !d.cancelled && d.payment !== 'Received');
-    const chkDue = myChecklistDue();
-
-    let h = '<div class="dash-head"><div><h1 style="margin:0">Good ' + (new Date().getHours() < 12 ? 'morning' : 'day') + ', ' + esc(ME.name.split(' ')[0]) + '</h1><div class="muted small">' + new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) + ' · ' + esc(settings().company || '') + '</div></div></div>';
-    h += homeTasks();
-    h += '<div class="kpis">' +
-      '<a href="#/orders"><b>' + openOrders.length + '</b><span>Open orders</span></a>' +
-      '<a href="#/orders/late"><b class="' + (late.length ? 'late-txt' : '') + '">' + late.length + '</b><span>Late steps</span></a>' +
-      '<a href="#/tasks"><b>' + mine.length + '</b><span>My tasks</span></a>' +
-      '<a href="#/checklist"><b>' + chkDue.length + '</b><span>Checklist due</span></a>' +
-      '<a href="#/dispatch"><b>' + readyForDispatch().length + '</b><span>Ready to dispatch</span></a>' +
-      '<a href="#/tickets"><b class="' + (escT.length ? 'late-txt' : '') + '">' + escT.length + '</b><span>Escalations</span></a>' +
-      '<a href="#/tickets"><b>' + tOpen.length + '</b><span>Open tickets</span></a>' +
-      '<div><b>' + qtyFmt(dspQty) + '</b><span>Dispatched this month</span></div></div>';
-
-    h += homeWork();
-    // Escalations & tickets
-    h += '<div class="grid2"><div><h2>Escalations</h2>';
-    if (!escT.length && !escSteps.length) h += '<div class="panel empty">No escalations</div>';
-    else {
-      h += '<div class="tbl-wrap"><table class="bomflat"><tr><th>Type</th><th>Ref</th><th>Subject / Step</th><th>Brand / Dept</th><th>Owner</th><th class="num">Since</th></tr>' +
-        escT.map(t => '<tr class="click" data-act="go" data-v="tickets"><td>Ticket</td><td>' + esc(t.no) + '</td><td>' + esc(t.subject) + '</td><td>' + esc(t.dept) + '</td><td>' + esc(t.by) + '</td><td class="num">' + Math.floor((Date.now() - new Date(t.at)) / 3600000) + 'h</td></tr>').join('') +
-        escSteps.slice(0, 6).map(x => '<tr class="click" data-act="go" data-v="order" data-p="' + esc(x.order.id) + '"><td>Late step</td><td>' + esc(x.order.no) + '</td><td>' + esc(x.step.name) + '</td><td>' + esc(x.order.customer_name) + '</td><td>' + esc(x.step.doer || '') + '</td><td class="num late-txt">' + fmtDelay(x.step.delayMinutes) + '</td></tr>').join('') + '</table></div>';
-    }
-    h += '<h2>My tasks</h2>' + taskTable(mine.slice(0, 6), true) + (mine.length > 6 ? '<div class="small" style="margin-top:6px"><a href="#/tasks">All ' + mine.length + ' →</a></div>' : '');
-    h += '</div><div>';
-    // Department snapshot
-    const dep = (name, view, items) => '<tr class="click" data-act="go" data-v="' + view + '"><td>' + name + '</td>' + [0, 1].map(k => items[k] ? '<td>' + esc(items[k][0]) + '</td><td class="num' + (items[k][2] ? ' late-txt' : '') + '">' + items[k][1] + '</td>' : '<td></td><td></td>').join('') + '</tr>';
-    h += '<h2>Departments</h2><div class="tbl-wrap"><table><tr><th>Department</th><th>Item</th><th class="num">Count</th><th>Item</th><th class="num">Count</th></tr>' +
-      dep('Purchase', 'purchasedash', [['open PO', pos.length, false], ['overdue', poOver.length, poOver.length > 0]]) +
-      dep('Merchant', 'swatch', [['swatch pending', swPend.length, false], ['corrections', jcCorr.length, jcCorr.length > 0]]) +
-      dep('Store', 'issuance', [['req to issue', reqs.length, false], ['QC pending', smPend.length, false]]) +
-      dep('Production', 'prodtracker', [['orders in flow', openOrders.length, false], ['late steps', late.length, late.length > 0]]) +
-      dep('Accounts', 'invoices', [['payment pending', payPend.length, false]]) +
-      dep('Dispatch', 'dispatch', [['ready', readyForDispatch().length, false]]) + '</table></div>';
-    const byDoer = {};
-    late.forEach(x => { const k = x.step.doer || '—'; const b2 = byDoer[k] || (byDoer[k] = { n: 0, d: 0 }); b2.n++; b2.d += x.step.delayMinutes; });
-    const rows = Object.entries(byDoer).sort((a, b2) => b2[1].n - a[1].n);
-    h += '<h2>Late by doer</h2><div class="tbl-wrap"><table><tr><th>Doer</th><th class="num">Late</th><th class="num">Avg delay</th></tr>' +
-      (rows.length ? rows.map(([k, b2]) => '<tr><td>' + esc(k) + '</td><td class="num late-txt">' + b2.n + '</td><td class="num">' + fmtDelay(Math.round(b2.d / b2.n)) + '</td></tr>').join('') : '<tr><td colspan="3" class="empty">Nothing late</td></tr>') + '</table></div>';
-    const stage = {}; openOrders.forEach(x => { stage[x.st.label] = (stage[x.st.label] || 0) + 1; });
-    h += '<h2>Open orders by stage</h2><div class="tbl-wrap"><table><tr><th>Stage</th><th class="num">Orders</th></tr>' +
-      Object.entries(stage).sort((a, b2) => b2[1] - a[1]).map(([k, n]) => '<tr><td>' + esc(k) + '</td><td class="num">' + n + '</td></tr>').join('') + '</table></div>';
-    h += '</div></div>';
-    const m = setMain(h);
-    const w = $('#htWho'); if (w) w.addEventListener('change', () => { HT_UI.who = w.value; VIEWS.home.render(); });
-    return m;
-  }
-};
-
-// Home, top: every task of one person (FMS steps + checklist) as Delayed / Pending / Upcoming / Completed
-const HT_UI = { who: '', f: 'all' };
+/* ---------------- Home: one person's dashboard (Admin can pick anyone) ---------------- */
+const HT_UI = { who: '', f: 'all', heldAll: false };
 function personTasks(doer) {
   const now = new Date(), today = todayYmd(), since = new Date(Date.now() - 30 * 86400000), cal = calInfo();
   const late = (p, a) => { if (!p || !a || a <= p) return 0; try { return cal.workMinutesBetween(p, a); } catch (e) { return Math.round((a - p) / 60000); } };
@@ -123,27 +56,134 @@ function personTasks(doer) {
   });
   return out;
 }
-function homeTasks() {
-  const pick = isAdminRole() || can('tracker', 'view');
-  if (!HT_UI.who || !pick) HT_UI.who = ME.doer || '';
-  const doers = Array.from(new Set(Store.all('users').filter(u => u.active !== false && u.doer).map(u => u.doer).concat(HT_UI.who ? [HT_UI.who] : []))).sort();
-  const all = personTasks(HT_UI.who);
+function homeData(who) {
+  const sa = isSuperAdmin(); const self = norm(who) === norm(ME.doer);
+  const since = new Date(Date.now() - 30 * 86400000);
+  const tasks = personTasks(who);
+  const names = new Set(Store.all('users').filter(u => u.doer && norm(u.doer) === norm(who)).map(u => u.name));
+  const pa = paRows();
+  const paDone = pa.filter(r => r.actual && r.actual >= since && names.has(r.by));
+  const paMine = self || sa ? pa.filter(r => paOpen(r) && (sa || paDef(r.k).can(r))) : [];
+  const done = tasks.filter(t => t.status === 'Completed');
+  const doneN = done.length + paDone.length, onTime = done.filter(t => !t.delay).length + paDone.filter(r => !(r.delay > 0)).length;
+  const fmsNext = {};
+  allOpenSteps().forEach(x => { if (norm(x.step.doer) === norm(who)) fmsNext[x.order.no + '|' + x.step.name] = nextStepsOf(x); });
+  const held = tasks.filter(t => t.status === 'Delayed').map(t => ({ what: t.task, ref: t.ref, party: t.party, planned: t.planned, delay: t.delay, waits: t.src === 'FMS' ? fmsNext[t.ref + '|' + t.task] || '' : '' }))
+    .concat(paMine.filter(r => r.status === 'Late').map(r => ({ what: r.act, ref: r.ref, party: r.party, planned: r.planned, delay: r.delay, waits: paDef(r.k).next })))
+    .sort((a, b) => b.delay - a.delay);
+  const tickets = Store.all('tickets').filter(ticketEscalated);
+  const esc8 = allOpenSteps().filter(x => x.step.status === 'Late' && x.step.delayMinutes > 8 * 60 && (sa && self ? true : norm(x.step.doer) === norm(who)));
+  return { tasks, done, doneN, onTime, score: doneN ? Math.round(onTime * 100 / doneN) : null, held, tickets, esc8, open: paMine.filter(r => r.status === 'Pending').sort((a, b) => a.planned - b.planned) };
+}
+function homeTaskTable(tasks) {
   const order = { Delayed: 0, Pending: 1, Upcoming: 2, Completed: 3 };
-  const cnt = k => all.filter(t => t.status === k).length;
-  const list = all.filter(t => HT_UI.f === 'all' || t.status === HT_UI.f).sort((a, b) => order[a.status] - order[b.status] ||
+  const list = tasks.filter(t => HT_UI.f === 'all' || t.status === HT_UI.f).sort((a, b) => order[a.status] - order[b.status] ||
     (a.status === 'Delayed' ? b.delay - a.delay : a.status === 'Completed' ? b.done - a.done : (a.planned || 0) - (b.planned || 0)));
   const cls = { Delayed: 'Late', Pending: 'Pending', Upcoming: 'Waiting', Completed: 'Done' };
-  const tile = (k, l, c) => '<a data-act="ht-f" data-f="' + k + '" class="' + (HT_UI.f === k ? 'on' : '') + '"><b class="' + c + '">' + (k === 'all' ? all.length : cnt(k)) + '</b><span>' + l + '</span></a>';
-  let h = '<div class="toolbar">' + (pick ? '<select id="htWho">' + doers.map(d => '<option' + (norm(d) === norm(HT_UI.who) ? ' selected' : '') + '>' + esc(d) + '</option>').join('') + '</select>' : '<b>' + esc(HT_UI.who || ME.name) + '</b>') +
-    '<span class="grow"></span>' + (isSuperAdmin() && Store.all('checklist').some(t => t.demo) ? '<button class="btn sm danger" data-act="ht-demo-del" data-confirm="Remove all demo tasks?">Remove demo tasks</button>' : '') + '</div>';
-  h += '<div class="kpis ht-tiles">' + tile('all', 'All tasks', '') + tile('Delayed', 'Delayed', 'late-txt') + tile('Pending', 'Pending today', 'pend-txt') + tile('Upcoming', 'Upcoming', '') + tile('Completed', 'Completed (30 days)', 'done-txt') + '</div>';
-  h += '<div class="tbl-wrap"><table><tr><th class="num">#</th><th>Task</th><th>Reference</th><th>Party</th><th>Source</th><th>Planned</th><th>Completed</th><th>Status</th><th class="num">Delay</th><th></th></tr>' +
-    (list.length ? list.map((t, i) => '<tr><td class="num">' + (i + 1) + '</td><td>' + esc(t.task) + '</td><td><b>' + esc(t.ref || '') + '</b></td><td>' + esc(t.party || '') + '</td><td>' + esc(t.src) + '</td><td class="nowrap">' + (t.planned ? fmtDT(t.planned) : '') + '</td><td class="nowrap">' + (t.done ? fmtDT(t.done) : '') + '</td>' +
+  const n = k => k === 'all' ? tasks.length : tasks.filter(t => t.status === k).length;
+  return '<div class="dcard"><div class="dh3">My tasks<span class="grow"></span>' +
+    seg('htf', ['all', 'Delayed', 'Pending', 'Upcoming', 'Completed'].map(k => ({ v: k, l: (k === 'all' ? 'All' : k) + ' ' + n(k) })), HT_UI.f) + '</div>' +
+    '<div class="tbl-wrap"><table><tr><th class="num">#</th><th>Task</th><th>Reference</th><th>Party</th><th>Planned</th><th>Completed</th><th>Status</th><th class="num">Delay</th><th></th></tr>' +
+    (list.length ? list.map((t, i) => '<tr><td class="num">' + (i + 1) + '</td><td>' + esc(t.task) + '<div class="muted small">' + esc(t.src) + '</div></td><td><b>' + esc(t.ref || '') + '</b></td><td>' + esc(t.party || '') + '</td><td class="nowrap">' + (t.planned ? fmtDT(t.planned) : '') + '</td><td class="nowrap">' + (t.done ? fmtDT(t.done) : '') + '</td>' +
       '<td><span class="st ' + cls[t.status] + '">' + t.status + '</span></td><td class="num' + (t.delay ? ' late-txt' : '') + '">' + (t.delay ? fmtDelay(t.delay) : '') + '</td><td class="right">' + (t.btn || '') + '</td></tr>').join('')
-      : '<tr><td colspan="10" class="empty">No tasks</td></tr>') + '</table></div>';
-  return h;
+      : '<tr><td colspan="9" class="empty">No tasks</td></tr>') + '</table></div></div>';
 }
-ACTIONS['ht-f'] = el => { HT_UI.f = el.dataset.f; VIEWS.home.render(); };
+VIEWS.home = {
+  mod: 'dashboard', render() {
+    const pick = isAdminRole() || can('tracker', 'view');
+    if (!HT_UI.who || !pick) HT_UI.who = ME.doer || '';
+    const who = HT_UI.who; const self = norm(who) === norm(ME.doer); const sa = isSuperAdmin();
+    const doers = Array.from(new Set(Store.all('users').filter(u => u.active !== false && u.doer).map(u => u.doer).concat(who ? [who] : []))).sort();
+    const D = homeData(who); const T = D.tasks;
+    const cnt = k => T.filter(t => t.status === k).length;
+    const person = self ? ME.name : (Store.all('users').find(u => norm(u.doer) === norm(who)) || {}).name || who;
+
+    // header
+    let h = '<div class="dhd"><div><h1>Good ' + (new Date().getHours() < 12 ? 'morning' : new Date().getHours() < 17 ? 'afternoon' : 'evening') + ', ' + esc(ME.name.split(' ')[0]) + '</h1><div class="muted small">' + new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) + ' · ' + esc(settings().company || '') + '</div></div><span class="grow"></span>' +
+      (pick ? '<label class="small muted">Showing <select id="htWho">' + doers.map(d => '<option' + (norm(d) === norm(who) ? ' selected' : '') + '>' + esc(d) + '</option>').join('') + '</select></label>' : '') +
+      (sa && Store.all('checklist').some(t => t.demo) ? '<button class="btn sm danger" data-act="ht-demo-del" data-confirm="Remove all demo tasks?">Remove demo tasks</button>' : '') + '</div>';
+
+    // summary cards
+    const ring = D.score == null ? '—' : D.score + '%';
+    const ringCol = D.score == null ? 'var(--line)' : D.score >= 90 ? 'var(--done)' : D.score >= 70 ? 'var(--pending)' : 'var(--late)';
+    const card = (f, v, l, sub, cls) => '<a class="dk-c' + (HT_UI.f === f ? ' on' : '') + '" data-act="ht-f" data-f="' + f + '"><span class="l">' + l + '</span><span class="v ' + (cls || '') + '">' + v + '</span><span class="s">' + sub + '</span></a>';
+    h += '<div class="dk">' +
+      '<div class="dk-c dk-score"><div class="ring" style="background:conic-gradient(' + ringCol + ' ' + (D.score || 0) + '%, var(--line2) 0)"><b>' + ring + '</b></div><div><span class="l">Score · 30 days</span><span class="s">' + D.onTime + ' of ' + D.doneN + ' done on time</span></div></div>' +
+      card('Delayed', cnt('Delayed'), 'Delayed', 'past planned time', 'late-txt') +
+      card('Pending', cnt('Pending'), 'Pending today', 'due before tonight', 'pend-txt') +
+      card('Upcoming', cnt('Upcoming'), 'Upcoming', 'planned later', '') +
+      card('Completed', cnt('Completed'), 'Completed', 'last 30 days', 'done-txt') +
+      '<a class="dk-c" data-act="ht-held"><span class="l">Held up</span><span class="v ' + (D.held.length ? 'late-txt' : '') + '">' + D.held.length + '</span><span class="s">others waiting on ' + (self ? 'you' : esc(who)) + '</span></a></div>';
+
+    // main grid: tasks | score, held up, escalations
+    h += '<div class="dgrid"><div>' + homeTaskTable(T) + '</div><div>';
+    const tot = T.length || 1; const seg4 = [['Delayed', 'var(--late)'], ['Pending', 'var(--pending)'], ['Upcoming', 'var(--accent)'], ['Completed', 'var(--done)']];
+    h += '<div class="dcard"><div class="dh3">Task mix<span class="grow"></span><span class="muted small">' + T.length + ' tasks</span></div><div class="dbar">' +
+      seg4.map(([k, c]) => cnt(k) ? '<i style="width:' + (cnt(k) * 100 / tot) + '%;background:' + c + '" title="' + k + ' ' + cnt(k) + '"></i>' : '').join('') + '</div><div class="dleg">' +
+      seg4.map(([k, c]) => '<span><i style="background:' + c + '"></i>' + k + ' <b>' + cnt(k) + '</b></span>').join('') + '</div></div>';
+    const heldShow = HT_UI.heldAll ? D.held : D.held.slice(0, 6);
+    h += '<div class="dcard" id="heldCard"><div class="dh3">' + (self ? 'Held up because of me' : 'Held up because of ' + esc(person)) + '<span class="n">' + D.held.length + '</span></div>' +
+      (D.held.length ? heldShow.map(x => '<div class="dl"><div><div class="t">' + esc(x.what) + '</div><div class="m">' + esc([x.ref, x.party].filter(Boolean).join(' · ')) + (x.waits ? ' · waiting: ' + esc(x.waits) : '') + '</div><div class="m">Planned ' + fmtDT(x.planned) + '</div></div><div class="d">' + fmtDelay(x.delay) + '</div></div>').join('') +
+        (D.held.length > 6 ? '<div class="dl-more"><a data-act="ht-held-all">' + (HT_UI.heldAll ? 'Show less' : 'Show all ' + D.held.length) + '</a></div>' : '') : '<div class="dl-empty">Nothing is held up</div>') + '</div>';
+    const escN = D.tickets.length + D.esc8.length;
+    h += '<div class="dcard"><div class="dh3">Escalations<span class="n' + (escN ? ' red' : '') + '">' + escN + '</span></div>' +
+      (escN ? D.tickets.slice(0, 5).map(t => '<a class="dl" href="#/tickets"><div><div class="t">' + esc(t.subject) + '</div><div class="m">Ticket ' + esc(t.no) + ' · ' + esc(t.dept) + ' · ' + esc(t.by) + '</div></div><div class="d">' + Math.floor((Date.now() - new Date(t.at)) / 3600000) + 'h</div></a>').join('') +
+        D.esc8.slice(0, 5).map(x => '<a class="dl" href="#/order/' + esc(x.order.id) + '"><div><div class="t">' + esc(x.step.name) + '</div><div class="m">' + esc(x.order.no) + ' · ' + esc(x.order.customer_name) + ' · ' + esc(x.step.doer || '') + '</div></div><div class="d">' + fmtDelay(x.step.delayMinutes) + '</div></a>').join('') : '<div class="dl-empty">No escalations</div>') + '</div>';
+    h += '</div></div>';
+
+    // open activities (purchase / store / approvals)
+    if (self || sa) h += '<div class="dcard"><div class="dh3">' + (sa ? 'Open activities (everyone)' : 'My open activities') + '<span class="n">' + D.open.length + '</span></div><div class="tbl-wrap"><table><tr><th>Activity</th><th>Reference</th><th>Party</th><th>Responsible</th><th>Planned</th><th>Status</th></tr>' +
+      (D.open.length ? D.open.slice(0, 60).map(r => '<tr><td>' + esc(r.act) + '</td><td><b>' + esc(r.ref) + '</b></td><td>' + esc(r.party) + '</td><td>' + esc(paDef(r.k).grp) + '</td><td class="nowrap">' + fmtDT(r.planned) + '</td><td><span class="st Pending">Pending</span></td></tr>').join('') : '<tr><td colspan="6" class="empty">Nothing open</td></tr>') + '</table></div></div>';
+
+    // company overview for Admin
+    if (isAdminRole()) {
+      const orders = Store.all('orders'); const openOrders = orders.map(o => ({ o, st: orderState(o) })).filter(x => x.st.open);
+      const late = allOpenSteps().filter(x => x.step.status === 'Late');
+      const pos = openPOs(); const poOver = pos.filter(p => p.expected && p.expected < todayYmd());
+      const reqs = Store.all('requisitions').filter(r => r.status === 'Pending');
+      const swPend = Store.all('job_cards').filter(j => j.swatch_status === 'Pending' && j.status !== 'Closed');
+      const jcCorr = Store.all('job_cards').filter(j => (j.corrections || []).some(c => !c.resolved));
+      const smPend = Store.all('inwards').filter(i => i.status === 'Pending GRN' && i.inv_status === 'Approved' && (i.qc || []).some(q => !q.result));
+      const payPend = Store.all('dispatches').filter(d => !d.cancelled && d.payment !== 'Received');
+      const month = todayYmd().slice(0, 7);
+      const dspQty = Store.all('dispatches').filter(d => !d.cancelled && (d.date || '').startsWith(month)).reduce((s2, d) => s2 + d.lines.reduce((a2, l) => a2 + num(l.qty), 0), 0);
+      h += '<div class="dsec">Company</div><div class="dk dk-co">' +
+        '<a class="dk-c" href="#/orders"><span class="l">Open orders</span><span class="v">' + openOrders.length + '</span></a>' +
+        '<a class="dk-c" href="#/orders/late"><span class="l">Late steps</span><span class="v ' + (late.length ? 'late-txt' : '') + '">' + late.length + '</span></a>' +
+        '<a class="dk-c" href="#/dispatch"><span class="l">Ready to dispatch</span><span class="v">' + readyForDispatch().length + '</span></a>' +
+        '<div class="dk-c"><span class="l">Dispatched this month</span><span class="v">' + qtyFmt(dspQty) + '</span></div>' +
+        '<a class="dk-c" href="#/tickets"><span class="l">Open tickets</span><span class="v">' + Store.all('tickets').filter(t => t.status !== 'Closed').length + '</span></a></div>';
+      const dep = (name, view, items) => '<tr class="click" data-act="go" data-v="' + view + '"><td><b>' + name + '</b></td>' + [0, 1].map(k => items[k] ? '<td>' + esc(items[k][0]) + '</td><td class="num' + (items[k][2] ? ' late-txt' : '') + '">' + items[k][1] + '</td>' : '<td></td><td></td>').join('') + '</tr>';
+      const byDoer = {}; late.forEach(x => { const k = x.step.doer || '—'; const b2 = byDoer[k] || (byDoer[k] = { n: 0, d: 0 }); b2.n++; b2.d += x.step.delayMinutes; });
+      const lateRows = Object.entries(byDoer).sort((a2, b2) => b2[1].n - a2[1].n);
+      const stage = {}; openOrders.forEach(x => { stage[x.st.label] = (stage[x.st.label] || 0) + 1; });
+      h += '<div class="grid2"><div class="dcard"><div class="dh3">Departments</div><div class="tbl-wrap"><table class="nopage"><tr><th>Department</th><th>Item</th><th class="num">Count</th><th>Item</th><th class="num">Count</th></tr>' +
+        dep('Purchase', 'purchasedash', [['open PO', pos.length, false], ['overdue', poOver.length, poOver.length > 0]]) +
+        dep('Merchant', 'swatch', [['swatch pending', swPend.length, false], ['corrections', jcCorr.length, jcCorr.length > 0]]) +
+        dep('Store', 'issuance', [['req to issue', reqs.length, false], ['QC pending', smPend.length, false]]) +
+        dep('Production', 'prodtracker', [['orders in flow', openOrders.length, false], ['late steps', late.length, late.length > 0]]) +
+        dep('Accounts', 'invoices', [['payment pending', payPend.length, false]]) +
+        dep('Dispatch', 'dispatch', [['ready', readyForDispatch().length, false]]) + '</table></div></div>' +
+        '<div class="dcard"><div class="dh3">Late by doer</div><div class="tbl-wrap"><table class="nopage"><tr><th>Doer</th><th class="num">Late</th><th class="num">Avg delay</th></tr>' +
+        (lateRows.length ? lateRows.map(([k, b2]) => '<tr><td>' + esc(k) + '</td><td class="num late-txt">' + b2.n + '</td><td class="num">' + fmtDelay(Math.round(b2.d / b2.n)) + '</td></tr>').join('') : '<tr><td colspan="3" class="empty">Nothing late</td></tr>') + '</table></div>' +
+        '<div class="dh3" style="border-top:1px solid var(--line2)">Open orders by stage</div><div class="tbl-wrap"><table class="nopage"><tr><th>Stage</th><th class="num">Orders</th></tr>' +
+        (Object.keys(stage).length ? Object.entries(stage).sort((a2, b2) => b2[1] - a2[1]).map(([k, n2]) => '<tr><td>' + esc(k) + '</td><td class="num">' + n2 + '</td></tr>').join('') : '<tr><td colspan="2" class="empty">No open orders</td></tr>') + '</table></div></div></div>';
+      if (sa) {
+        const board = scoreBoard();
+        h += '<div class="dcard"><div class="dh3">People score · last 30 days</div><div class="tbl-wrap"><table><tr><th>Name</th><th>Doer</th><th>Department</th><th>Designation</th><th class="num">Done</th><th class="num">On time</th><th class="num">Score</th><th class="num">Open tasks</th><th class="num">Late tasks</th></tr>' +
+          (board.length ? board.sort((a2, b2) => (a2.score == null ? 101 : a2.score) - (b2.score == null ? 101 : b2.score)).map(b2 => '<tr class="click" data-act="ht-who" data-d="' + esc(b2.u.doer || '') + '"><td>' + esc(b2.u.name) + '</td><td>' + esc(b2.u.doer || '') + '</td><td>' + esc(b2.u.department || '') + '</td><td>' + esc(b2.u.designation || '') + '</td><td class="num">' + b2.done + '</td><td class="num">' + b2.onTime + '</td><td class="num' + (b2.score != null && b2.score < 80 ? ' late-txt' : '') + '"><b>' + (b2.score == null ? '—' : b2.score + '%') + '</b></td><td class="num">' + b2.pending + '</td><td class="num' + (b2.lateOpen ? ' late-txt' : '') + '">' + b2.lateOpen + '</td></tr>').join('') : '<tr><td colspan="9" class="empty">No activity yet</td></tr>') + '</table></div></div>';
+      }
+    }
+    const m = setMain(h);
+    const w = $('#htWho'); if (w) w.addEventListener('change', () => { HT_UI.who = w.value; HT_UI.heldAll = false; VIEWS.home.render(); });
+    onSeg(e => { if (e.target.dataset.seg === 'htf') { HT_UI.f = e.detail; VIEWS.home.render(); } });
+    return m;
+  }
+};
+ACTIONS['ht-f'] = el => { HT_UI.f = HT_UI.f === el.dataset.f ? 'all' : el.dataset.f; VIEWS.home.render(); };
+ACTIONS['ht-held'] = () => { const c = $('#heldCard'); if (c) c.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
+ACTIONS['ht-held-all'] = () => { HT_UI.heldAll = !HT_UI.heldAll; VIEWS.home.render(); const c = $('#heldCard'); if (c) c.scrollIntoView({ block: 'start' }); };
+ACTIONS['ht-who'] = el => { if (!el.dataset.d) return; HT_UI.who = el.dataset.d; HT_UI.f = 'all'; VIEWS.home.render(); window.scrollTo(0, 0); };
 ACTIONS['ht-done'] = el => {
   const t = Store.get('checklist', el.dataset.id); if (!t) return;
   if (!(isMyDoer(t.doer) || can('tracker', 'edit'))) { flash('Only ' + esc(t.doer) + ' can mark this done.', 'err'); return; }
@@ -157,29 +197,6 @@ ACTIONS['ht-demo-del'] = () => {
   audit('checklist.demo_removed', String(d.length), ''); flash(d.length + ' demo tasks removed.'); VIEWS.home.render();
 };
 
-// Home: my score, my open work, what is held up because of me; Super Admin sees everyone
-function homeWork() {
-  const sa = isSuperAdmin(); const pa = paRows();
-  const mineOpen = pa.filter(r => paOpen(r) && (sa || paDef(r.k).can(r)));
-  const fLate = allOpenSteps().filter(x => x.step.status === 'Late' && (sa || isMyDoer(x.step.doer)));
-  const board = scoreBoard(); const me = board.find(b => b.u.id === ME.id);
-  let h = '<div class="kpis">' +
-    '<div><b>' + (me && me.score != null ? me.score + '%' : '—') + '</b><span>My score (30 days)</span></div>' +
-    '<div><b>' + (me ? me.onTime + ' / ' + me.done : '0 / 0') + '</b><span>Done on time</span></div>' +
-    '<div><b>' + mineOpen.length + '</b><span>' + (sa ? 'Open activities' : 'My open activities') + '</span></div>' +
-    '<div><b class="' + (mineOpen.filter(r => r.status === 'Late').length + fLate.length ? 'late-txt' : '') + '">' + (mineOpen.filter(r => r.status === 'Late').length + fLate.length) + '</b><span>Held up</span></div></div>';
-  const held = mineOpen.filter(r => r.status === 'Late').map(r => ({ what: r.act, ref: r.ref, party: r.party, resp: paDef(r.k).grp, planned: r.planned, delay: r.delay, waits: paDef(r.k).next }))
-    .concat(fLate.map(x => ({ what: x.step.name, ref: x.order.no, party: x.order.customer_name, resp: x.step.doer || '', planned: x.step.planned, delay: x.step.delayMinutes, waits: nextStepsOf(x) })))
-    .sort((a, b) => b.delay - a.delay);
-  h += '<h2>' + (sa ? 'Held up (everyone)' : 'Held up because of me') + '</h2><div class="tbl-wrap"><table><tr><th>Activity / Step</th><th>Reference</th><th>Party</th><th>Responsible</th><th>Planned</th><th class="num">Delay</th><th>Waiting on this</th></tr>' +
-    (held.length ? held.slice(0, 40).map(x => '<tr><td>' + esc(x.what) + '</td><td><b>' + esc(x.ref) + '</b></td><td>' + esc(x.party) + '</td><td>' + esc(x.resp) + '</td><td class="nowrap">' + fmtDT(x.planned) + '</td><td class="num late-txt">' + fmtDelay(x.delay) + '</td><td>' + esc(x.waits) + '</td></tr>').join('') : '<tr><td colspan="7" class="empty">Nothing is held up</td></tr>') + '</table></div>';
-  const pend = mineOpen.filter(r => r.status === 'Pending').sort((a, b) => a.planned - b.planned);
-  h += '<h2>' + (sa ? 'Open activities (everyone)' : 'My open activities') + '</h2><div class="tbl-wrap"><table><tr><th>Activity</th><th>Reference</th><th>Party</th><th>Responsible</th><th>Planned</th><th>Status</th></tr>' +
-    (pend.length ? pend.slice(0, 40).map(r => '<tr><td>' + esc(r.act) + '</td><td><b>' + esc(r.ref) + '</b></td><td>' + esc(r.party) + '</td><td>' + esc(paDef(r.k).grp) + '</td><td class="nowrap">' + fmtDT(r.planned) + '</td><td><span class="st Pending">Pending</span></td></tr>').join('') : '<tr><td colspan="6" class="empty">Nothing open</td></tr>') + '</table></div>';
-  if (sa) h += '<h2>People score (last 30 days)</h2><div class="tbl-wrap"><table><tr><th>Name</th><th>Doer</th><th>Department</th><th>Designation</th><th class="num">Done</th><th class="num">On time</th><th class="num">Score</th><th class="num">Open tasks</th><th class="num">Late tasks</th></tr>' +
-    (board.length ? board.sort((a, b) => (a.score == null ? 101 : a.score) - (b.score == null ? 101 : b.score)).map(b => '<tr><td>' + esc(b.u.name) + '</td><td>' + esc(b.u.doer || '') + '</td><td>' + esc(b.u.department || '') + '</td><td>' + esc(b.u.designation || '') + '</td><td class="num">' + b.done + '</td><td class="num">' + b.onTime + '</td><td class="num' + (b.score != null && b.score < 80 ? ' late-txt' : '') + '"><b>' + (b.score == null ? '—' : b.score + '%') + '</b></td><td class="num">' + b.pending + '</td><td class="num' + (b.lateOpen ? ' late-txt' : '') + '">' + b.lateOpen + '</td></tr>').join('') : '<tr><td colspan="9" class="empty">No activity yet</td></tr>') + '</table></div>';
-  return h;
-}
 function nextStepsOf(x) {
   const deps = (x.spec.steps || []).filter(d => (Array.isArray(d.trigger) ? d.trigger : [d.trigger]).some(t => t && t.type === 'afterStep' && t.step === x.step.id));
   return deps.map(d => d.name).join(', ');
