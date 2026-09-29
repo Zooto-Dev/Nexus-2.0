@@ -163,7 +163,7 @@ function icSetupHtml(edit) {
     } else {
       h += '<tr><td class="c"><span class="seqn">' + (i + 1) + '</span></td><td><b>' + esc(a.name) + '</b></td><td class="wrap small">' + a.values.map(esc).join(', ') + ' <span class="muted">(' + a.values.length + ')</span></td><td class="small">' + (a.when_attr ? '<b>' + esc(whenLabel(a)) + '</b>' : '<span class="muted">Always</span>') + '</td><td class="wrap small">' + (used.map(t => esc(t.name)).join(', ') || '—') + '</td>' +
         (edit ? '<td class="c nowrap"><button class="btn sm" data-act="at-move" data-id="' + esc(a.id) + '" data-dir="-1" title="Move up"' + (i ? '' : ' disabled') + '>↑</button> <button class="btn sm" data-act="at-move" data-id="' + esc(a.id) + '" data-dir="1" title="Move down"' + (i < A.length - 1 ? '' : ' disabled') + '>↓</button> ' +
-          '<button class="btn sm" data-act="at-edit" data-id="' + esc(a.id) + '">Edit</button> ' + (used.length ? '' : '<button class="btn sm ghost danger" data-act="at-del" data-id="' + esc(a.id) + '" data-confirm="Delete?">×</button>') + '</td>' : '') + '</tr>';
+          '<button class="btn sm" data-act="at-edit" data-id="' + esc(a.id) + '">Edit</button> ' + '<button class="btn sm ghost danger" data-act="at-del" data-id="' + esc(a.id) + '" data-confirm="' + (used.length ? 'Delete? Removes from ' + used.length + ' item type' + (used.length > 1 ? 's' : '') : 'Delete?') + '">×</button>' + '</td>' : '') + '</tr>';
     }
   });
   if (!A.length) h += '<tr><td colspan="6" class="empty">No attributes for ' + esc(cat) + ' yet</td></tr>';
@@ -253,9 +253,11 @@ ACTIONS['at-move'] = el => {
 ACTIONS['at-del'] = el => {
   if (!requirePerm('development', 'edit')) return;
   const a = Store.get('attributes', el.dataset.id);
+  const used = typesOf(a.category).filter(t => usesAttr(t, a.name));
+  used.forEach(t => { t.attrs = (t.attrs || []).filter(n => norm(n) !== norm(a.name)); Store.put('item_types', t); });
   Store.del('attributes', a.id); renumber(a.category);
   catAttrs(a.category).forEach(x => { if (norm(x.when_attr || '') === norm(a.name)) { x.when_attr = ''; x.when_val = ''; Store.put('attributes', x); } });
-  audit('attribute.delete', a.category + ' · ' + a.name, ''); icRender();
+  audit('attribute.delete', a.category + ' · ' + a.name, used.map(t => t.name).join(', ')); icRender();
 };
 function itRead(tr) {
   return {
