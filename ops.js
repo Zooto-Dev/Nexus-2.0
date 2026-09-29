@@ -8,12 +8,12 @@ function stepDoneBtn(o, s, def, spec) {
 }
 ACTIONS['step-done'] = el => {
   const tr = el.closest('tr'); const note = tr && tr.querySelector('input[data-note]'); const nv = note ? note.value.trim() : '';
-  const o = Store.get('orders', el.dataset.o); const r = o && resolveOrder(o); const def = r && r.spec.steps.find(x => x.id === el.dataset.s);
+  const o = fmsGet(el.dataset.o); const r = o && resolveOrder(o); const def = r && r.spec.steps.find(x => x.id === el.dataset.s);
   if (!def || !def.capture) { markStepDone(el.dataset.o, el.dataset.s, nv); route(); return; }
   const f = (r.spec.fields || []).find(x => x.key === def.capture.field) || { label: def.capture.field, type: 'date' };
   const old = $('#capDlg'); if (old) old.remove();
   const d = document.createElement('div'); d.id = 'capDlg'; d.className = 'dlg-back';
-  d.innerHTML = '<div class="dlg"><div class="dlg-h">' + esc(o.no) + ' · ' + esc(def.name) + '</div><table class="jckv"><tr><td class="k">' + esc(f.label) + ' *</td><td class="v"><input id="capVal" type="' + (f.type === 'datetime' ? 'datetime-local' : f.type === 'date' ? 'date' : 'text') + '" value="' + esc((o.extra || {})[def.capture.field] || '') + '"></td></tr></table>' +
+  d.innerHTML = '<div class="dlg"><div class="dlg-h">' + esc(o.no) + ' · ' + esc(def.name) + '</div><table class="jckv"><tr><td class="k">' + esc(f.label) + ' *</td><td class="v">' + (f.options ? '<select id="capVal"><option value=""></option>' + f.options.filter(Boolean).map(x => '<option>' + esc(x) + '</option>').join('') + '</select>' : '<input id="capVal" type="' + (f.type === 'datetime' ? 'datetime-local' : f.type === 'date' ? 'date' : 'text') + '" value="' + esc((o.extra || {})[def.capture.field] || '') + '">') + '</td></tr></table>' +
     '<div class="dlg-f"><span id="capMsg" class="small late-txt"></span><span class="grow"></span><button class="btn" data-cap-x>Cancel</button><button class="btn primary" data-cap-ok>Done</button></div></div>';
   document.body.appendChild(d); $('#capVal').focus();
   d.addEventListener('click', ev => {
@@ -32,7 +32,7 @@ function personTasks(doer) {
   const late = (p, a) => { if (!p || !a || a <= p) return 0; try { return cal.workMinutesBetween(p, a); } catch (e) { return Math.round((a - p) / 60000); } };
   const openSt = p => p && p < now ? 'Delayed' : p && ymdOf(p) === today ? 'Pending' : 'Upcoming';
   const out = [];
-  Store.all('orders').forEach(o => {
+  fmsDocs().forEach(o => {
     if (o.priority === 'Cancelled') return;
     const r = resolveOrder(o); if (!r) return;
     r.order.forEach(id => {
@@ -476,7 +476,7 @@ ACTIONS['orders-csv'] = () => downloadCsv('orders-' + todayYmd() + '.csv',
 /* ---------------- Order page ---------------- */
 VIEWS.order = {
   mod: 'orders', render(id) {
-    const o = Store.get('orders', id); if (!o) { setMain('<div class="panel empty">Order not found.</div>'); return; }
+    const o = Store.get('orders', id); if (!o && Store.get('samples', id)) return go('sample', id); if (!o) { setMain('<div class="panel empty">Order not found.</div>'); return; }
     const r = resolveOrder(o); const t = orderTotals(o); const d = dispatchedQty(o); const st = orderState(o);
     const proc = Store.get('processes', o.process_id);
     let h = '<div class="toolbar"><h1 style="margin:0">' + esc(o.no) + ' · ' + esc(o.customer_name) + '</h1>' + stHtml(st.label).replace('st ' + stCls(st.label), 'st ' + st.cls) + '<span class="grow"></span>' +
@@ -591,13 +591,13 @@ const TRK_UI = { f: 'open', q: '', pid: null };
 VIEWS.tracker = {
   mod: 'tracker', render(param) {
     if (param) { const pr = Store.all('processes').find(p => p.code === param && p.active); if (pr) TRK_UI.pid = pr.id; }
-    const procs = Store.all('processes').filter(p => Store.all('orders').some(o => o.process_id === p.id) || p.active).sort((a, b) => b.version - a.version);
+    const procs = Store.all('processes').filter(p => fmsDocs().some(o => o.process_id === p.id) || p.active).sort((a, b) => a.code === b.code ? b.version - a.version : a.code < b.code ? -1 : 1);
     if (!TRK_UI.pid || !procs.some(p => p.id === TRK_UI.pid)) TRK_UI.pid = (activeProcess() || procs[0] || {}).id;
     const proc = Store.get('processes', TRK_UI.pid); if (!proc) { setMain('<div class="panel empty">No flow yet.</div>'); return; }
     const q = norm(TRK_UI.q);
-    const orders = Store.all('orders').filter(o => o.process_id === proc.id).sort((a, b) => b.created_at < a.created_at ? -1 : 1)
+    const orders = fmsDocs().filter(o => o.process_id === proc.id).sort((a, b) => b.created_at < a.created_at ? -1 : 1)
       .filter(o => (TRK_UI.f === 'all' || orderState(o).open) && (!q || norm(o.no + ' ' + o.customer_name).includes(q)));
-    let h = '<div class="toolbar">' + (procs.length > 1 ? seg('pid', procs.map(p => ({ v: p.id, l: 'v' + p.version + (p.active ? ' (active)' : '') })), TRK_UI.pid) : '<span class="muted small">' + esc(proc.name) + ' v' + proc.version + '</span>') +
+    let h = '<div class="toolbar">' + (procs.length > 1 ? seg('pid', procs.map(p => ({ v: p.id, l: p.name + ' v' + p.version + (p.active ? ' (active)' : '') })), TRK_UI.pid) : '<span class="muted small">' + esc(proc.name) + ' v' + proc.version + '</span>') +
       seg('f', [{ v: 'open', l: 'Open orders' }, { v: 'all', l: 'All' }], TRK_UI.f) + '<input id="trkQ" placeholder="Filter…" value="' + esc(TRK_UI.q) + '"><span class="muted small">' + orders.length + ' order(s)</span></div>';
     const steps = FMSEngine.topoOrder(proc.spec).map(id => proc.spec.steps.find(s => s.id === id));
     h += '<div class="tbl-wrap" style="max-height:75vh"><table class="trk"><tr><th rowspan="2">Order</th><th rowspan="2">Brand</th>' + steps.map(s => '<th colspan="3" class="c">' + esc(s.name) + '</th>').join('') + '</tr><tr>' + steps.map(() => '<th>Planned</th><th>Actual</th><th class="num">Delay</th>').join('') + '</tr>' +

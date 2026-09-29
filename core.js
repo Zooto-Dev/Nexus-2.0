@@ -47,7 +47,7 @@ function flash(msg, type) {
 
 /* ================= store ================= */
 const DB_KEY = 'nexus2_db_v8';
-const COLS = ['users', 'roles', 'customers', 'items', 'materials', 'processes', 'orders', 'dispatches', 'purchase_orders', 'sourcing', 'grns', 'inwards', 'vendors', 'issues', 'rsjw', 'rtvs', 'boms', 'job_cards', 'requisitions', 'tickets', 'checklist', 'attributes', 'item_types', 'mail_queue', 'prod_reports', 'wa_log', 'audit'];
+const COLS = ['users', 'roles', 'customers', 'items', 'materials', 'processes', 'orders', 'samples', 'dispatches', 'purchase_orders', 'sourcing', 'grns', 'inwards', 'vendors', 'issues', 'rsjw', 'rtvs', 'boms', 'job_cards', 'requisitions', 'tickets', 'checklist', 'attributes', 'item_types', 'mail_queue', 'prod_reports', 'wa_log', 'audit'];
 let DB = null;
 const CFG = window.NEXUS_CONFIG || {};
 const CLOUD = !!(CFG.SUPABASE_URL && CFG.SUPABASE_ANON_KEY && window.supabase);
@@ -319,13 +319,20 @@ function orderFields(o) {
     brand_merchant: ((Store.all('customers').find(c => norm(c.name) === norm(o.customer_name)) || {}).merchandiser || '')
   });
 }
+// FMS instances: sales orders (O2D) and sample development records share the same step engine
+function fmsDocs() { return Store.all('orders').concat(Store.all('samples')); }
+function fmsGet(id) { return Store.get('orders', id) || Store.get('samples', id); }
+function fmsPut(o) { Store.put(o.kind === 'sample' ? 'samples' : 'orders', o); }
+function sampleFields(o) {
+  return Object.assign({}, o.extra || {}, { created_at: o.created_at, order_no: o.no, sample_no: o.no, batch_no: o.batch_no, brand: o.brand, article: o.article, colour: o.colour, size: o.size, gender: o.gender, category: o.category, status: o.status || '' });
+}
 function resolveOrder(o) {
   const key = o.id + '|' + o.updated_at;
   if (RES_CACHE.has(key)) return RES_CACHE.get(key);
   const proc = Store.get('processes', o.process_id); const spec = specOf(proc);
   let res = null;
   if (spec) {
-    try { res = FMSEngine.resolveInstance(spec, { fields: orderFields(o), actuals: o.actuals || {} }, new Date()); res.spec = spec; }
+    try { res = FMSEngine.resolveInstance(spec, { fields: o.kind === 'sample' ? sampleFields(o) : orderFields(o), actuals: o.actuals || {} }, new Date()); res.spec = spec; }
     catch (e) { console.error(e); }
   }
   RES_CACHE.set(key, res); return res;
@@ -350,7 +357,7 @@ function orderState(o) {
 // All actionable steps across open orders.
 function allOpenSteps() {
   const out = [];
-  Store.all('orders').forEach(o => {
+  fmsDocs().forEach(o => {
     if (o.priority === 'Cancelled') return;
     const r = resolveOrder(o); if (!r) return;
     r.order.forEach(id => { const s = r.steps[id]; if (s.status === 'Pending' || s.status === 'Late') out.push({ order: o, step: s, def: r.spec.steps.find(x => x.id === id), spec: r.spec }); });
@@ -364,7 +371,7 @@ function canMarkStep(def, s, spec) {
   return can('tasks', 'edit') && isMyDoer(s.doer);
 }
 function markStepDone(orderId, stepId, note, capVal) {
-  const o = Store.get('orders', orderId); if (!o) return;
+  const o = fmsGet(orderId); if (!o) return;
   const r = resolveOrder(o); const s = r && r.steps[stepId]; const def = r && r.spec.steps.find(x => x.id === stepId);
   if (!s || !(s.status === 'Pending' || s.status === 'Late')) { flash('This step is not open.', 'err'); return; }
   if (!canMarkStep(def, s, r.spec)) { flash('Only ' + esc(s.doer) + ' (or a tracker editor) can close this step.', 'err'); return; }
@@ -373,7 +380,7 @@ function markStepDone(orderId, stepId, note, capVal) {
   o.actuals = o.actuals || {}; o.actuals[stepId] = nowIso();
   if (note) { o.notes = o.notes || {}; o.notes[stepId] = note; }
   o.done_by = o.done_by || {}; o.done_by[stepId] = ME.name;
-  Store.put('orders', o);
+  fmsPut(o);
   audit('step.done', o.no, s.name + (s.delayMinutes ? ' (late ' + fmtDelay(s.delayMinutes) + ')' : '') + (note ? ' — ' + note : ''));
   flash(esc(s.name) + ' marked done for ' + esc(o.no) + '. <a data-act="undo-step" data-o="' + esc(o.id) + '" data-s="' + esc(stepId) + '">Undo</a>');
 }
@@ -415,14 +422,14 @@ function fmsAutoRun(force) {
 }
 setInterval(() => { if (typeof ME !== 'undefined' && ME) fmsAutoRun(true); }, 60000);
 function undoStep(orderId, stepId) {
-  const o = Store.get('orders', orderId); if (!o || !o.actuals || !o.actuals[stepId]) return;
+  const o = fmsGet(orderId); if (!o || !o.actuals || !o.actuals[stepId]) return;
   const r = resolveOrder(o);
   const justMine = o.done_by && o.done_by[stepId] === ME.name && (Date.now() - new Date(o.actuals[stepId])) < 5 * 60000;
   if (!justMine && !can('tracker', 'edit')) { flash('Undo needs tracker edit access.', 'err'); return; }
   const dependents = r.spec.steps.filter(d => (Array.isArray(d.trigger) ? d.trigger : [d.trigger]).some(t => t && t.type === 'afterStep' && t.step === stepId) && o.actuals[d.id]);
   if (dependents.length) { flash('Cannot undo — next step already done: ' + esc(dependents.map(d => d.name).join(', ')), 'err'); return; }
   delete o.actuals[stepId];
-  Store.put('orders', o); audit('step.undo', o.no, r.steps[stepId].name); flash('Undone.'); route();
+  fmsPut(o); audit('step.undo', o.no, r.steps[stepId].name); flash('Undone.'); route();
 }
 
 /* ================= validation of a process spec (browser port of validate_spec.js) ================= */
@@ -498,6 +505,8 @@ const NAV = [
     { v: 'rtv', l: 'RTV', mod: 'store' },
     { v: 'materials', l: 'Materials', mod: 'masters' }] },
   { menu: 'Development', items: [
+    { v: 'samplenew', l: 'Sample Entry', mod: 'development', edit: true },
+    { v: 'samples', l: 'Sample Tracker', mod: 'development' },
     { v: 'itemcreate', l: 'Item Creation', mod: 'development' },
     { v: 'bom', l: 'BOM', mod: 'development' },
     { v: 'boms', l: 'Created BOM', mod: 'development' }] },
