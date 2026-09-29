@@ -510,6 +510,7 @@ const NAV = [
     { v: 'invoices', l: 'Invoices', mod: 'accounts' }] },
   { menu: 'Operations', items: [
     { v: 'activity', l: 'Activity List', mod: 'audit' },
+    { v: 'itemconfig', l: 'Item Category Configuration', mod: 'development' },
     { v: 'planactual', l: 'Plan vs Actual', mod: 'audit' },
     { v: 'tickets', l: 'Raise Ticket', mod: 'tickets' },
     { v: 'users', l: 'Manage Users', mod: 'users' },

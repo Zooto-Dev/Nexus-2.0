@@ -2,10 +2,10 @@
    Every category owns its attributes, each with a fixed sequence number. An item's name is always
    ITEM TYPE + attribute values in that category sequence, so the same material cannot be named two
    ways and cannot be created twice. Attributes, values and item types are data managed in
-   Category Setup; only the first-run footwear defaults live in code. */
+   Item Category Configuration; only the first-run footwear defaults live in code. */
 'use strict';
 
-const IC_UI = { tab: 'create', cat: '', type: '', vals: {}, extra: {}, scat: '', editAttr: null, editType: null, newCats: [] };
+const IC_UI = { cat: '', type: '', vals: {}, extra: {}, scat: '', editAttr: null, editType: null, newCats: [] };
 const icSlug = s => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '_');
 const squash = s => norm(s).replace(/[^a-z0-9.]/g, '');
 
@@ -38,31 +38,37 @@ function itemDuplicate(cat, t, vals) {
 }
 function renumber(cat) { catAttrs(cat).forEach((a, i) => { if (a.seq !== i + 1) { a.seq = i + 1; Store.put('attributes', a); } }); }
 
+function icRender() { (VIEWS[curView().v] === VIEWS.itemconfig ? VIEWS.itemconfig : VIEWS.itemcreate).render(); }
+function icBind() {
+  onSeg(e => {
+    if (e.target.dataset.seg === 'iccat') { IC_UI.scat = e.detail; IC_UI.editAttr = IC_UI.editType = null; }
+    icRender();
+  });
+}
 VIEWS.itemcreate = {
   mod: 'development', render() {
     const edit = can('development', 'edit');
-    let h = subTitle('Item Creation') + '<div class="toolbar">' + seg('ictab', [{ v: 'create', l: 'Create Item' }, { v: 'setup', l: 'Category Setup' }], IC_UI.tab) + '</div>';
-    h += IC_UI.tab === 'create' ? icCreateHtml(edit) : icSetupHtml(edit);
-    setMain(h);
-    onSeg(e => {
-      const s = e.target.dataset.seg;
-      if (s === 'ictab') { IC_UI.tab = e.detail; IC_UI.editAttr = IC_UI.editType = null; }
-      if (s === 'iccat') { IC_UI.scat = e.detail; IC_UI.editAttr = IC_UI.editType = null; }
-      VIEWS.itemcreate.render();
-    });
+    setMain(subTitle('Item Creation') + icCreateHtml(edit));
+    icBind();
     const m = $('#main');
     m.addEventListener('change', e => {
       const t = e.target;
-      if (t.id === 'icCat') { IC_UI.cat = t.value; IC_UI.type = ''; IC_UI.vals = {}; IC_UI.extra = {}; IC_UI.photo = ''; VIEWS.itemcreate.render(); }
-      if (t.id === 'icType') { IC_UI.type = t.value; IC_UI.vals = {}; IC_UI.extra = {}; VIEWS.itemcreate.render(); }
-      if (t.id === 'icPhoto') readImg(t.files[0], src => { IC_UI.photo = src; VIEWS.itemcreate.render(); });
-      if (t.dataset.icmp) { const mt = Store.get('materials', t.dataset.icmp); if (mt) readImg(t.files[0], src => { mt.photo = src; Store.put('materials', mt); audit('item.photo', '', mt.code); flash('Photo saved.'); VIEWS.itemcreate.render(); }); }
+      if (t.id === 'icCat') { IC_UI.cat = t.value; IC_UI.type = ''; IC_UI.vals = {}; IC_UI.extra = {}; IC_UI.photo = ''; icRender(); }
+      if (t.id === 'icType') { IC_UI.type = t.value; IC_UI.vals = {}; IC_UI.extra = {}; icRender(); }
+      if (t.id === 'icPhoto') readImg(t.files[0], src => { IC_UI.photo = src; icRender(); });
+      if (t.dataset.icmp) { const mt = Store.get('materials', t.dataset.icmp); if (mt) readImg(t.files[0], src => { mt.photo = src; Store.put('materials', mt); audit('item.photo', '', mt.code); flash('Photo saved.'); icRender(); }); }
       if (t.dataset.icAttr) {
         IC_UI.vals[t.dataset.icAttr] = t.value;
         const ty = Store.get('item_types', IC_UI.type); if (ty) typeAttrs(ty).forEach(a => { if (!attrOn(a, IC_UI.vals, ty)) delete IC_UI.vals[a.name]; });
-        VIEWS.itemcreate.render(); const nx = $$('select[data-ic-attr]').find(s => !s.value && !s.disabled); if (nx) nx.focus(); }
+        icRender(); const nx = $$('select[data-ic-attr]').find(s => !s.value && !s.disabled); if (nx) nx.focus(); }
     });
     m.addEventListener('input', e => { if (e.target.dataset.icx) IC_UI.extra[e.target.dataset.icx] = e.target.value; });
+  }
+};
+VIEWS.itemconfig = {
+  mod: 'development', render() {
+    setMain(subTitle('Item Category Configuration') + icSetupHtml(can('development', 'edit')));
+    icBind();
   }
 };
 
@@ -134,9 +140,9 @@ ACTIONS['ic-create'] = () => {
   });
   audit('item.create', m.code, m.name);
   flash('Created ' + esc(m.code) + ' · ' + esc(m.name));
-  IC_UI.vals = {}; IC_UI.extra = {}; IC_UI.photo = ''; VIEWS.itemcreate.render();
+  IC_UI.vals = {}; IC_UI.extra = {}; IC_UI.photo = ''; icRender();
 };
-ACTIONS['ic-photo-clear'] = () => { IC_UI.photo = ''; VIEWS.itemcreate.render(); };
+ACTIONS['ic-photo-clear'] = () => { IC_UI.photo = ''; icRender(); };
 
 /* ================= Category Setup ================= */
 function icSetupHtml(edit) {
@@ -197,7 +203,7 @@ ACTIONS['ic-addcat'] = () => {
   if (!c) return;
   const ex = itemCats().find(x => norm(x) === norm(c));
   if (!ex) IC_UI.newCats.push(c);
-  IC_UI.scat = ex || c; VIEWS.itemcreate.render();
+  IC_UI.scat = ex || c; icRender();
 };
 // "Only when" choices: every value of every other attribute of the category
 function whenSel(A, a) {
@@ -217,10 +223,10 @@ ACTIONS['at-add'] = el => {
   if (catAttrs(cat).some(a => norm(a.name) === norm(r.name))) { flash(esc(r.name) + ' already exists in ' + esc(cat) + '.', 'err'); return; }
   if (norm(r.when_attr) === norm(r.name)) { flash('An attribute cannot depend on itself.', 'err'); return; }
   Store.put('attributes', { id: uid(), category: cat, name: r.name, seq: catAttrs(cat).length + 1, values: r.values, when_attr: r.when_attr, when_val: r.when_val });
-  audit('attribute.add', cat + ' · ' + r.name, r.values.length + ' values'); VIEWS.itemcreate.render();
+  audit('attribute.add', cat + ' · ' + r.name, r.values.length + ' values'); icRender();
 };
-ACTIONS['at-edit'] = el => { IC_UI.editAttr = el.dataset.id; VIEWS.itemcreate.render(); };
-ACTIONS['at-cancel'] = () => { IC_UI.editAttr = null; VIEWS.itemcreate.render(); };
+ACTIONS['at-edit'] = el => { IC_UI.editAttr = el.dataset.id; icRender(); };
+ACTIONS['at-cancel'] = () => { IC_UI.editAttr = null; icRender(); };
 ACTIONS['at-save'] = el => {
   if (!requirePerm('development', 'edit')) return;
   const a = Store.get('attributes', el.dataset.id); const r = atRead(el.closest('tr'));
@@ -233,7 +239,7 @@ ACTIONS['at-save'] = el => {
     catAttrs(a.category).forEach(x => { if (norm(x.when_attr || '') === norm(old)) { x.when_attr = r.name; Store.put('attributes', x); } });
   }
   audit('attribute.edit', a.category + ' · ' + r.name, r.values.length + ' values' + (a.when_attr ? ' · only when ' + whenLabel(a) : ''));
-  IC_UI.editAttr = null; VIEWS.itemcreate.render();
+  IC_UI.editAttr = null; icRender();
 };
 ACTIONS['at-move'] = el => {
   if (!requirePerm('development', 'edit')) return;
@@ -242,14 +248,14 @@ ACTIONS['at-move'] = el => {
   if (j < 0 || j >= list.length) return;
   [list[i], list[j]] = [list[j], list[i]];
   list.forEach((x, k) => { if (x.seq !== k + 1) { x.seq = k + 1; Store.put('attributes', x); } });
-  audit('attribute.sequence', a.category, list.map(x => x.name).join(' > ')); VIEWS.itemcreate.render();
+  audit('attribute.sequence', a.category, list.map(x => x.name).join(' > ')); icRender();
 };
 ACTIONS['at-del'] = el => {
   if (!requirePerm('development', 'edit')) return;
   const a = Store.get('attributes', el.dataset.id);
   Store.del('attributes', a.id); renumber(a.category);
   catAttrs(a.category).forEach(x => { if (norm(x.when_attr || '') === norm(a.name)) { x.when_attr = ''; x.when_val = ''; Store.put('attributes', x); } });
-  audit('attribute.delete', a.category + ' · ' + a.name, ''); VIEWS.itemcreate.render();
+  audit('attribute.delete', a.category + ' · ' + a.name, ''); icRender();
 };
 function itRead(tr) {
   return {
@@ -269,20 +275,20 @@ ACTIONS['it-add'] = el => {
   const cat = IC_UI.scat; const r = itRead(el.closest('tr')); const err = itCheck(r, cat);
   if (err) { flash(esc(err), 'err'); return; }
   Store.put('item_types', Object.assign({ id: uid(), category: cat }, r));
-  audit('itemtype.add', cat + ' · ' + r.name, r.attrs.join(', ')); VIEWS.itemcreate.render();
+  audit('itemtype.add', cat + ' · ' + r.name, r.attrs.join(', ')); icRender();
 };
-ACTIONS['it-edit'] = el => { IC_UI.editType = el.dataset.id; VIEWS.itemcreate.render(); };
-ACTIONS['it-cancel'] = () => { IC_UI.editType = null; VIEWS.itemcreate.render(); };
+ACTIONS['it-edit'] = el => { IC_UI.editType = el.dataset.id; icRender(); };
+ACTIONS['it-cancel'] = () => { IC_UI.editType = null; icRender(); };
 ACTIONS['it-save'] = el => {
   if (!requirePerm('development', 'edit')) return;
   const t = Store.get('item_types', el.dataset.id); const r = itRead(el.closest('tr')); const err = itCheck(r, t.category, t.id);
   if (err) { flash(esc(err), 'err'); return; }
   Object.assign(t, r); Store.put('item_types', t);
-  audit('itemtype.edit', t.category + ' · ' + t.name, r.attrs.join(', ')); IC_UI.editType = null; VIEWS.itemcreate.render();
+  audit('itemtype.edit', t.category + ' · ' + t.name, r.attrs.join(', ')); IC_UI.editType = null; icRender();
 };
 ACTIONS['it-del'] = el => {
   if (!requirePerm('development', 'edit')) return;
-  const t = Store.get('item_types', el.dataset.id); Store.del('item_types', t.id); audit('itemtype.delete', t.category + ' · ' + t.name, ''); VIEWS.itemcreate.render();
+  const t = Store.get('item_types', el.dataset.id); Store.del('item_types', t.id); audit('itemtype.delete', t.category + ' · ' + t.name, ''); icRender();
 };
 
 /* ================= first-run footwear defaults ================= */
