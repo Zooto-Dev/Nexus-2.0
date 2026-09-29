@@ -21,6 +21,10 @@ function typesOf(cat) { return Store.all('item_types').filter(t => norm(t.catego
 function usesAttr(t, name) { return (t.attrs || []).some(x => norm(x) === norm(name)); }
 // the attributes a type uses, always in the category sequence (never in the order they were ticked)
 function typeAttrs(t) { return catAttrs(t.category).filter(a => usesAttr(t, a.name)); }
+// an attribute can depend on another one ("only when FOAM = WITH FOAM"); otherwise it is always asked
+function attrOn(a, vals, t) { return !a.when_attr || (t && !usesAttr(t, a.when_attr)) || norm(vals[a.when_attr] || '') === norm(a.when_val || ''); }
+function activeAttrs(t, vals) { return typeAttrs(t).filter(a => attrOn(a, vals, t)); }
+function whenLabel(a) { return a.when_attr ? a.when_attr + ' = ' + a.when_val : ''; }
 function itemNameOf(t, vals) { return [t.name].concat(typeAttrs(t).map(a => vals[a.name] || '')).filter(Boolean).join(' ').replace(/\s+/g, ' ').trim().toUpperCase(); }
 function itemKeyOf(cat, typeName, vals) {
   return norm(cat) + '|' + norm(typeName) + '|' + Object.keys(vals).filter(k => vals[k]).map(k => norm(k) + '=' + norm(vals[k])).sort().join(',');
@@ -51,7 +55,10 @@ VIEWS.itemcreate = {
       if (t.id === 'icType') { IC_UI.type = t.value; IC_UI.vals = {}; IC_UI.extra = {}; VIEWS.itemcreate.render(); }
       if (t.id === 'icPhoto') readImg(t.files[0], src => { IC_UI.photo = src; VIEWS.itemcreate.render(); });
       if (t.dataset.icmp) { const mt = Store.get('materials', t.dataset.icmp); if (mt) readImg(t.files[0], src => { mt.photo = src; Store.put('materials', mt); audit('item.photo', '', mt.code); flash('Photo saved.'); VIEWS.itemcreate.render(); }); }
-      if (t.dataset.icAttr) { IC_UI.vals[t.dataset.icAttr] = t.value; VIEWS.itemcreate.render(); const nx = $$('select[data-ic-attr]').find(s => !s.value && !s.disabled); if (nx) nx.focus(); }
+      if (t.dataset.icAttr) {
+        IC_UI.vals[t.dataset.icAttr] = t.value;
+        const ty = Store.get('item_types', IC_UI.type); if (ty) typeAttrs(ty).forEach(a => { if (!attrOn(a, IC_UI.vals, ty)) delete IC_UI.vals[a.name]; });
+        VIEWS.itemcreate.render(); const nx = $$('select[data-ic-attr]').find(s => !s.value && !s.disabled); if (nx) nx.focus(); }
     });
     m.addEventListener('input', e => { if (e.target.dataset.icx) IC_UI.extra[e.target.dataset.icx] = e.target.value; });
   }
@@ -62,7 +69,7 @@ function icCreateHtml(edit) {
   const cats = itemCats().filter(c => typesOf(c).length);
   const types = IC_UI.cat ? typesOf(IC_UI.cat) : [];
   const t = types.find(x => x.id === IC_UI.type);
-  const attrs = t ? typeAttrs(t) : [];
+  const attrs = t ? activeAttrs(t, IC_UI.vals) : [];
   const X = IC_UI.extra;
   let rows = '<tr><td class="k">Category *</td><td><select id="icCat"><option value="">Select category…</option>' + cats.map(c => '<option' + (c === IC_UI.cat ? ' selected' : '') + '>' + esc(c) + '</option>').join('') + '</select></td></tr>' +
     '<tr><td class="k">Item Type *</td><td><select id="icType"' + (types.length ? '' : ' disabled') + '><option value="">' + (IC_UI.cat ? 'Select item type…' : '—') + '</option>' + types.map(x => '<option value="' + esc(x.id) + '"' + (x.id === IC_UI.type ? ' selected' : '') + '>' + esc(x.name) + '</option>').join('') + '</select></td></tr>';
@@ -99,6 +106,7 @@ function icCreateHtml(edit) {
   // existing items: one column per attribute so values line up
   if (t) {
     const list = Store.all('materials').filter(m => norm(m.group) === norm(IC_UI.cat) && norm(m.item_type || '') === norm(t.name)).sort((a, b) => a.code.localeCompare(b.code));
+    const attrs = typeAttrs(t);
     h += '<h2>' + esc(t.name) + ' — existing items (' + list.length + ')</h2><div class="tbl-wrap"><table><tr><th>Photo</th><th>Item Code</th><th>Item Name</th>' + attrs.map((a, i) => '<th>' + (i + 1) + '. ' + esc(a.name) + '</th>').join('') + '<th>UOM</th><th class="num">Price</th></tr>' +
       (list.length ? list.map(m => '<tr><td>' + (can('development', 'edit') ? '<label class="icphoto sm" title="Add / change photo">' + (m.photo ? '<img src="' + m.photo + '">' : '<span class="muted small">+ Photo</span>') + '<input type="file" accept="image/*" data-icmp="' + esc(m.id) + '" style="display:none"></label>' : photoThumb(m.photo)) + '</td><td><b>' + esc(m.code) + '</b></td><td>' + esc(m.name) + '</td>' + attrs.map(a => '<td>' + esc((m.attrs || {})[a.name] || '') + '</td>').join('') + '<td>' + esc(m.uom || '') + '</td><td class="num">' + (m.price ? money(m.price) : '') + '</td></tr>').join('')
         : '<tr><td colspan="' + (attrs.length + 5) + '" class="empty">No items of this type yet</td></tr>') + '</table></div>';
@@ -110,7 +118,7 @@ function icCreateHtml(edit) {
 ACTIONS['ic-create'] = () => {
   if (!requirePerm('development', 'edit')) return;
   const t = Store.get('item_types', IC_UI.type); if (!t) return;
-  const attrs = typeAttrs(t); const vals = {};
+  const attrs = activeAttrs(t, IC_UI.vals); const vals = {};
   attrs.forEach(a => { vals[a.name] = IC_UI.vals[a.name] || ''; });
   if (attrs.some(a => !vals[a.name])) { flash('Select every attribute first.', 'err'); return; }
   const dup = itemDuplicate(IC_UI.cat, t, vals);
@@ -138,20 +146,20 @@ function icSetupHtml(edit) {
 
   // attributes of this category, in name sequence
   h += '<div class="card"><div class="card-h"><b>' + esc(cat) + ' — Attributes</b></div><div class="card-b">' +
-    '<table class="jcbom icgrid"><tr class="hd"><th style="width:56px">Seq</th><th style="width:180px">Attribute</th><th>Allowed Values</th><th style="width:220px">Used in Item Types</th>' + (edit ? '<th style="width:190px">Actions</th>' : '') + '</tr>';
+    '<table class="jcbom icgrid"><tr class="hd"><th style="width:56px">Seq</th><th style="width:180px">Attribute</th><th>Allowed Values</th><th style="width:190px">Only when</th><th style="width:220px">Used in Item Types</th>' + (edit ? '<th style="width:190px">Actions</th>' : '') + '</tr>';
   A.forEach((a, i) => {
     const used = typesOf(cat).filter(t => usesAttr(t, a.name));
     if (edit && IC_UI.editAttr === a.id) {
-      h += '<tr data-arow="' + esc(a.id) + '"><td class="c">' + (i + 1) + '</td><td><input data-af="name" value="' + esc(a.name) + '"></td><td><textarea data-af="vals" rows="3">' + esc(a.values.join(', ')) + '</textarea></td><td class="wrap small">' + used.map(t => esc(t.name)).join(', ') + '</td>' +
+      h += '<tr data-arow="' + esc(a.id) + '"><td class="c">' + (i + 1) + '</td><td><input data-af="name" value="' + esc(a.name) + '"></td><td><textarea data-af="vals" rows="3">' + esc(a.values.join(', ')) + '</textarea></td><td>' + whenSel(A, a) + '</td><td class="wrap small">' + used.map(t => esc(t.name)).join(', ') + '</td>' +
         '<td class="c"><button class="btn sm primary" data-act="at-save" data-id="' + esc(a.id) + '">Save</button> <button class="btn sm" data-act="at-cancel">Cancel</button></td></tr>';
     } else {
-      h += '<tr><td class="c"><span class="seqn">' + (i + 1) + '</span></td><td><b>' + esc(a.name) + '</b></td><td class="wrap small">' + a.values.map(esc).join(', ') + ' <span class="muted">(' + a.values.length + ')</span></td><td class="wrap small">' + (used.map(t => esc(t.name)).join(', ') || '—') + '</td>' +
+      h += '<tr><td class="c"><span class="seqn">' + (i + 1) + '</span></td><td><b>' + esc(a.name) + '</b></td><td class="wrap small">' + a.values.map(esc).join(', ') + ' <span class="muted">(' + a.values.length + ')</span></td><td class="small">' + (a.when_attr ? '<b>' + esc(whenLabel(a)) + '</b>' : '<span class="muted">Always</span>') + '</td><td class="wrap small">' + (used.map(t => esc(t.name)).join(', ') || '—') + '</td>' +
         (edit ? '<td class="c nowrap"><button class="btn sm" data-act="at-move" data-id="' + esc(a.id) + '" data-dir="-1" title="Move up"' + (i ? '' : ' disabled') + '>↑</button> <button class="btn sm" data-act="at-move" data-id="' + esc(a.id) + '" data-dir="1" title="Move down"' + (i < A.length - 1 ? '' : ' disabled') + '>↓</button> ' +
           '<button class="btn sm" data-act="at-edit" data-id="' + esc(a.id) + '">Edit</button> ' + (used.length ? '' : '<button class="btn sm ghost danger" data-act="at-del" data-id="' + esc(a.id) + '" data-confirm="Delete?">×</button>') + '</td>' : '') + '</tr>';
     }
   });
-  if (!A.length) h += '<tr><td colspan="5" class="empty">No attributes for ' + esc(cat) + ' yet</td></tr>';
-  if (edit) h += '<tr class="addrow" data-arow="new"><td class="c">' + (A.length + 1) + '</td><td><input data-af="name" placeholder="e.g. COLOUR"></td><td><textarea data-af="vals" rows="2" placeholder="Values, comma separated: BLACK, WHITE, NAVY"></textarea></td><td></td><td class="c"><button class="btn sm primary" data-act="at-add">Add Attribute</button></td></tr>';
+  if (!A.length) h += '<tr><td colspan="6" class="empty">No attributes for ' + esc(cat) + ' yet</td></tr>';
+  if (edit) h += '<tr class="addrow" data-arow="new"><td class="c">' + (A.length + 1) + '</td><td><input data-af="name" placeholder="e.g. COLOUR"></td><td><textarea data-af="vals" rows="2" placeholder="Values, comma separated: BLACK, WHITE, NAVY"></textarea></td><td>' + whenSel(A, null) + '</td><td></td><td class="c"><button class="btn sm primary" data-act="at-add">Add Attribute</button></td></tr>';
   h += '</table></div></div>';
 
   // item types of this category: one tick column per attribute, in sequence
@@ -189,17 +197,24 @@ ACTIONS['ic-addcat'] = () => {
   if (!ex) IC_UI.newCats.push(c);
   IC_UI.scat = ex || c; VIEWS.itemcreate.render();
 };
+// "Only when" choices: every value of every other attribute of the category
+function whenSel(A, a) {
+  const cur = a && a.when_attr ? a.when_attr + '|' + a.when_val : '';
+  return '<select data-af="when"><option value="">Always</option>' + A.filter(x => !a || x.id !== a.id).map(x => '<optgroup label="' + esc(x.name) + '">' + (x.values || []).map(v => '<option value="' + esc(x.name + '|' + v) + '"' + (cur === x.name + '|' + v ? ' selected' : '') + '>' + esc(x.name + ' = ' + v) + '</option>').join('') + '</optgroup>').join('') + '</select>';
+}
 function atRead(tr) {
   const name = $('[data-af="name"]', tr).value.trim().toUpperCase().replace(/\s+/g, ' ');
   const values = Array.from(new Set($('[data-af="vals"]', tr).value.split(/[,\n]/).map(x => x.trim().toUpperCase().replace(/\s+/g, ' ')).filter(Boolean)));
-  return { name, values };
+  const w = ($('[data-af="when"]', tr) || { value: '' }).value; const k = w.indexOf('|');
+  return { name, values, when_attr: k > 0 ? w.slice(0, k) : '', when_val: k > 0 ? w.slice(k + 1) : '' };
 }
 ACTIONS['at-add'] = el => {
   if (!requirePerm('development', 'edit')) return;
   const cat = IC_UI.scat; const r = atRead(el.closest('tr'));
   if (!r.name || !r.values.length) { flash('Attribute name and at least one value are required.', 'err'); return; }
   if (catAttrs(cat).some(a => norm(a.name) === norm(r.name))) { flash(esc(r.name) + ' already exists in ' + esc(cat) + '.', 'err'); return; }
-  Store.put('attributes', { id: uid(), category: cat, name: r.name, seq: catAttrs(cat).length + 1, values: r.values });
+  if (norm(r.when_attr) === norm(r.name)) { flash('An attribute cannot depend on itself.', 'err'); return; }
+  Store.put('attributes', { id: uid(), category: cat, name: r.name, seq: catAttrs(cat).length + 1, values: r.values, when_attr: r.when_attr, when_val: r.when_val });
   audit('attribute.add', cat + ' · ' + r.name, r.values.length + ' values'); VIEWS.itemcreate.render();
 };
 ACTIONS['at-edit'] = el => { IC_UI.editAttr = el.dataset.id; VIEWS.itemcreate.render(); };
@@ -209,9 +224,13 @@ ACTIONS['at-save'] = el => {
   const a = Store.get('attributes', el.dataset.id); const r = atRead(el.closest('tr'));
   if (!r.name || !r.values.length) { flash('Attribute name and at least one value are required.', 'err'); return; }
   if (catAttrs(a.category).some(x => x.id !== a.id && norm(x.name) === norm(r.name))) { flash(esc(r.name) + ' already exists in ' + esc(a.category) + '.', 'err'); return; }
-  const old = a.name; a.name = r.name; a.values = r.values; Store.put('attributes', a);
-  if (norm(old) !== norm(r.name)) typesOf(a.category).forEach(t => { if (usesAttr(t, old)) { t.attrs = t.attrs.map(x => norm(x) === norm(old) ? r.name : x); Store.put('item_types', t); } });
-  audit('attribute.edit', a.category + ' · ' + r.name, r.values.length + ' values');
+  if (norm(r.when_attr) === norm(r.name)) { flash('An attribute cannot depend on itself.', 'err'); return; }
+  const old = a.name; a.name = r.name; a.values = r.values; a.when_attr = r.when_attr; a.when_val = r.when_val; Store.put('attributes', a);
+  if (norm(old) !== norm(r.name)) {
+    typesOf(a.category).forEach(t => { if (usesAttr(t, old)) { t.attrs = t.attrs.map(x => norm(x) === norm(old) ? r.name : x); Store.put('item_types', t); } });
+    catAttrs(a.category).forEach(x => { if (norm(x.when_attr || '') === norm(old)) { x.when_attr = r.name; Store.put('attributes', x); } });
+  }
+  audit('attribute.edit', a.category + ' · ' + r.name, r.values.length + ' values' + (a.when_attr ? ' · only when ' + whenLabel(a) : ''));
   IC_UI.editAttr = null; VIEWS.itemcreate.render();
 };
 ACTIONS['at-move'] = el => {
@@ -226,7 +245,9 @@ ACTIONS['at-move'] = el => {
 ACTIONS['at-del'] = el => {
   if (!requirePerm('development', 'edit')) return;
   const a = Store.get('attributes', el.dataset.id);
-  Store.del('attributes', a.id); renumber(a.category); audit('attribute.delete', a.category + ' · ' + a.name, ''); VIEWS.itemcreate.render();
+  Store.del('attributes', a.id); renumber(a.category);
+  catAttrs(a.category).forEach(x => { if (norm(x.when_attr || '') === norm(a.name)) { x.when_attr = ''; x.when_val = ''; Store.put('attributes', x); } });
+  audit('attribute.delete', a.category + ' · ' + a.name, ''); VIEWS.itemcreate.render();
 };
 function itRead(tr) {
   return {
