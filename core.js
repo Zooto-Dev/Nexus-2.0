@@ -493,9 +493,6 @@ const NAV = [
     { v: 'po', l: 'Purchase Order', mod: 'purchase' },
     { v: 'poapproval', l: 'PO Approval', mod: 'purchase' },
     { v: 'invapproval', l: 'Invoice Approval', mod: 'purchase' },
-    { v: 'excessapproval', l: 'Excess Approval', mod: 'purchase' },
-    { v: 'sourcing', l: 'Sourcing', mod: 'purchase' },
-    { v: 'followup', l: 'Followup', mod: 'purchase' },
     { v: 'vendors', l: 'Vendors', mod: 'purchase' }] },
   { menu: 'Merchant', items: [
     { v: 'punch', l: 'Punch Order', mod: 'orders', edit: true },
@@ -721,7 +718,7 @@ function setMain(html) {
 /* ---- table pagination: applied to every .tbl-wrap table after render ---- */
 const PAGE_SIZE = 20;
 // rows per page: a named table (data-pg) first, then the screen, then the default; 0 = no paging. Set in Settings.
-const PG_NAMED = { home_tasks: 'Home · My tasks', sa_excess: 'Super Admin Home · Excess approvals', sa_po: 'Super Admin Home · PO approvals', sa_esc2: 'Super Admin Home · 2nd escalations', sa_score: 'Super Admin Home · MIS score', sa_doer: 'Super Admin Home · Held up by person', sa_proc: 'Super Admin Home · Slow processes' };
+const PG_NAMED = { home_tasks: 'Home · My tasks', home_requests: 'Home · My requests', sa_excess: 'Super Admin Home · Excess approvals', sa_po: 'Super Admin Home · PO approvals', sa_esc2: 'Super Admin Home · 2nd escalations', sa_score: 'Super Admin Home · MIS score', sa_doer: 'Super Admin Home · Held up by person', sa_proc: 'Super Admin Home · Slow processes' };
 function pageSizeOf(tbl) {
   const p = (typeof DB !== 'undefined' && DB.settings && DB.settings.page_size) || {}; const v = curView().v;
   const pick = [tbl.dataset.pg, v, '_default'].find(k => k && p[k] != null && p[k] !== '');

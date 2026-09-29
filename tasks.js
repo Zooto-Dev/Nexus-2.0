@@ -371,3 +371,66 @@ function saHomeHtml() {
     tbl('sa_proc', ['Process', 'Source', 'Total', 'Late %', 'Avg delay (done)', 'Open late', 'Avg delay (open)'], pRows.map(x => '<tr><td><b>' + esc(x.task) + '</b></td><td>' + esc(x.src) + '</td><td class="num">' + x.total + '</td><td class="num">' + Math.round((x.late + x.open) * 100 / x.total) + '%</td><td class="num">' + (x.late ? fmtDelay(Math.round(x.dsum / x.late)) : '') + '</td><td class="num' + (x.open ? ' late-txt' : '') + '">' + x.open + '</td><td class="num">' + (x.open ? fmtDelay(Math.round(x.osum / x.open)) : '') + '</td></tr>'), 7) + '</div></div></div>';
   return h;
 }
+
+/* ================= My requests: what I sent for approval and what happened ================= */
+// one row per request: { kind, ref, party, detail, at, status, by, when, remark, hist:[{at, by, what}] }
+function myRequests(names) {
+  const mine = n => n && names.has(n); const out = [];
+  const st = s => s === 'Approved' || s === 'Accepted' ? 'Approved' : s === 'Rejected' ? 'Rejected' : s === 'Amend' ? 'Amend' : s === 'Hold' ? 'Hold' : 'Pending';
+  const push = (x, hist) => { x.hist = hist.filter(h => h.at).sort((a, b) => a.at < b.at ? -1 : 1); x.status = st(x.status); out.push(x); };
+  Store.all('purchase_orders').filter(p => mine(p.created_by) && !p.cancelled).forEach(p => {
+    const done = p.approval === 'Approved' || p.approval === 'Rejected'; const last = (p.amend_log || []).slice(-1)[0];
+    push({ kind: 'PO Approval', ref: p.no, party: p.vendor, detail: (p.lines || []).length + ' item(s)', at: p.at || p.created_at || p.date, status: p.approval, by: done ? p.approved_by : p.approval === 'Amend' && last ? last.by : '', when: done ? p.approved_at : p.approval === 'Amend' && last ? last.at : '', remark: p.approval === 'Rejected' ? p.reject_remark : p.approval === 'Amend' && last ? last.remark : '', link: '#/poapproval' },
+      [{ at: p.at || p.created_at, by: p.created_by, what: 'Sent for approval' }].concat((p.amend_log || []).map(a => ({ at: a.at, by: a.by, what: 'Amend — ' + (a.remark || '') })))
+        .concat(done ? [{ at: p.approved_at, by: p.approved_by, what: p.approval + (p.reject_remark ? ' — ' + p.reject_remark : '') }] : []));
+  });
+  Store.all('inwards').forEach(i => {
+    if (mine(i.by)) {
+      const done = i.inv_status === 'Approved' || i.inv_status === 'Rejected';
+      push({ kind: 'Invoice Approval', ref: i.no, party: i.vendor, detail: 'Invoice ' + (i.bill_no || ''), at: i.at, status: i.inv_status, by: done ? i.inv_by : i.inv_status === 'Hold' ? i.inv_hold_by : '', when: done ? i.inv_at : i.inv_hold_at || '', remark: i.inv_status === 'Rejected' ? i.inv_reject_reason : i.inv_status === 'Hold' ? i.inv_hold_reason : '', link: '#/invapproval' },
+        [{ at: i.at, by: i.by, what: 'Gate entry sent for invoice approval' }].concat(i.inv_hold_at ? [{ at: i.inv_hold_at, by: i.inv_hold_by, what: 'Hold — ' + (i.inv_hold_reason || '') }] : [])
+          .concat((i.amend_log || []).map(a => ({ at: a.at, by: a.by, what: 'Amend — ' + (a.remark || '') }))).concat(done ? [{ at: i.inv_at, by: i.inv_by, what: i.inv_status + (i.inv_reject_reason ? ' — ' + i.inv_reject_reason : '') }] : []));
+    }
+    (i.qc || []).filter(q => q.result === 'Mismatch' && mine(q.by)).forEach(q => {
+      push({ kind: 'Swatch Approval', ref: i.no, party: i.vendor, detail: q.material, at: q.at, status: q.m_status === 'Approved' || q.m_status === 'Match' ? 'Approved' : q.m_status === 'Amend' ? 'Amend' : q.m_status ? 'Rejected' : '', by: q.m_by || '', when: q.m_at || '', remark: q.m_note || '', link: '#/swatch' },
+        [{ at: q.at, by: q.by, what: 'QC mismatch sent for swatch approval' }].concat(q.m_status ? [{ at: q.m_at, by: q.m_by, what: q.m_status + (q.m_note ? ' — ' + q.m_note : '') }] : []));
+    });
+  });
+  Store.all('grns').filter(g => mine(g.by)).forEach(g => (g.lines || []).filter(l => num(l.excess) > 0 && l.excess_status).forEach(l => {
+    const done = l.excess_status === 'Approved' || l.excess_status === 'Rejected';
+    push({ kind: 'Excess Approval', ref: g.no, party: g.vendor, detail: l.material + ' × ' + qtyFmt(l.excess), at: g.at || g.date, status: l.excess_status, by: done ? l.excess_by : '', when: done ? l.excess_at : '', remark: ((l.amend_log || []).slice(-1)[0] || {}).remark || '', link: '#/excessapproval' },
+      [{ at: g.at, by: g.by, what: 'Excess ' + qtyFmt(l.excess) + ' sent for approval' }].concat((l.amend_log || []).map(a => ({ at: a.at, by: a.by, what: (a.stage || 'Amend') + ' — ' + (a.remark || '') })))
+        .concat(done ? [{ at: l.excess_at, by: l.excess_by, what: l.excess_status }] : []));
+  }));
+  Store.all('issues').filter(i => i.req_no && !i.type && mine(i.by)).forEach(i => {
+    const by = i.approved_by || i.decided_by || '', when = i.approved_at || i.decided_at || '';
+    push({ kind: 'Issuance Approval', ref: i.no, party: i.req_no, detail: (i.material || '') + ' × ' + qtyFmt(i.qty), at: i.at || i.date, status: i.status, by, when, remark: i.decision_note || '', link: '#/issuance' },
+      [{ at: i.at, by: i.by, what: 'Issue sent for approval' }].concat(when ? [{ at: when, by, what: i.status + (i.decision_note ? ' — ' + i.decision_note : '') }] : []));
+  });
+  Store.all('tickets').filter(t => mine(t.by)).forEach(t => {
+    push({ kind: 'Ticket', ref: t.no, party: t.dept, detail: t.subject, at: t.at, status: t.status === 'Closed' ? 'Approved' : '', by: t.closed_by || '', when: t.closed_at || '', remark: ((t.comments || []).slice(-1)[0] || {}).note || '', link: '#/tickets', closed: t.status === 'Closed' },
+      [{ at: t.at, by: t.by, what: 'Raised' }].concat((t.comments || []).map(c => ({ at: c.at, by: c.by, what: c.note }))).concat(t.closed_at ? [{ at: t.closed_at, by: t.closed_by, what: 'Closed' }] : []));
+  });
+  out.forEach(x => { if (x.kind === 'Ticket' && x.closed) x.status = 'Closed'; });
+  return out.sort((a, b) => (b.at || '') < (a.at || '') ? -1 : 1);
+}
+const MR_UI = { f: 'Pending' };
+let MR_ROWS = [];
+function myRequestsCard(names) {
+  const all = myRequests(names); MR_ROWS = all;
+  const n = k => k === 'all' ? all.length : all.filter(x => x.status === k || (k === 'Approved' && x.status === 'Closed')).length;
+  const rows = all.filter(x => MR_UI.f === 'all' || x.status === MR_UI.f || (MR_UI.f === 'Approved' && x.status === 'Closed') || (MR_UI.f === 'Pending' && (x.status === 'Hold' || x.status === 'Amend')));
+  const cls = { Pending: 'Pending', Hold: 'Pending', Amend: 'Late', Approved: 'Done', Closed: 'Done', Rejected: 'Cancelled' };
+  return '<div class="dcard"><div class="dh3">My requests<span class="grow"></span>' + seg('mrf', [{ v: 'Pending', l: 'Pending ' + (n('Pending') + n('Hold') + n('Amend')) }, { v: 'Approved', l: 'Approved ' + n('Approved') }, { v: 'Rejected', l: 'Rejected ' + n('Rejected') }, { v: 'all', l: 'All ' + n('all') }], MR_UI.f) + '</div>' +
+    '<div class="tbl-wrap"><table data-pg="home_requests"><tr><th>Request</th><th>Reference</th><th>Party</th><th>Detail</th><th>Sent on</th><th>Status</th><th>By</th><th>On</th><th>Remark</th><th></th></tr>' +
+    (rows.length ? rows.map(x => '<tr><td>' + esc(x.kind) + '</td><td><a href="' + esc(x.link) + '"><b>' + esc(x.ref) + '</b></a></td><td>' + esc(x.party || '') + '</td><td>' + esc(x.detail || '') + '</td><td class="nowrap">' + fmtDT(x.at) + '</td>' +
+      '<td><span class="st ' + (cls[x.status] || 'Waiting') + '">' + esc(x.status) + '</span></td><td>' + esc(x.by || '') + '</td><td class="nowrap">' + (x.when ? fmtDT(x.when) : '') + '</td><td>' + esc(x.remark || '') + '</td><td><a class="small" data-act="mr-hist" data-i="' + all.indexOf(x) + '">History</a></td></tr>').join('')
+      : '<tr><td colspan="10" class="empty">No requests</td></tr>') + '</table></div></div>';
+}
+ACTIONS['mr-hist'] = el => {
+  const x = MR_ROWS[+el.dataset.i]; if (!x) return;
+  const aud = Store.all('audit').filter(a => a.ref === x.ref).map(a => ({ at: a.at, by: a.user, what: a.action + (a.detail ? ' — ' + a.detail : '') }));
+  const seen = new Set(); const list = x.hist.concat(aud).sort((a, b) => a.at < b.at ? -1 : 1).filter(h => { const k = String(h.at).slice(0, 16) + '|' + h.by; if (seen.has(k + h.what)) return false; seen.add(k + h.what); return true; });
+  formDialog(x.kind + ' · ' + x.ref, [{ k: 'log', l: 'Log', type: 'static', value: '' }], 'Close', () => {});
+  const d = $('#fxDlg'); if (d) $('.jckv', d).innerHTML = '<tr class="hd"><th>When</th><th>By</th><th>What</th></tr>' + list.map(h => '<tr><td class="nowrap">' + fmtDT(h.at) + '</td><td>' + esc(h.by || '') + '</td><td>' + esc(h.what) + '</td></tr>').join('');
+};

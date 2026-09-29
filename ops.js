@@ -98,6 +98,7 @@ VIEWS.home = {
     const who = HT_UI.who; const self = norm(who) === norm(ME.doer); const sa = isSuperAdmin();
     const doers = Array.from(new Set(Store.all('users').filter(u => u.active !== false && u.doer).map(u => u.doer).concat(who ? [who] : []))).sort();
     const D = homeData(who); const T = D.tasks;
+    const names = new Set(Store.all('users').filter(u => u.doer && norm(u.doer) === norm(who)).map(u => u.name));
     const cnt = k => T.filter(t => t.status === k).length;
     const person = self ? ME.name : (Store.all('users').find(u => norm(u.doer) === norm(who)) || {}).name || who;
 
@@ -108,8 +109,9 @@ VIEWS.home = {
 
     // Super Admin looking at their own Home: approvals, 2nd escalations, MIS score, bottlenecks
     if (sa && self) {
-      h += saHomeHtml();
+      h += saHomeHtml() + myRequestsCard(names);
       setMain(h);
+      onSeg(e => { if (e.target.dataset.seg === 'mrf') { MR_UI.f = e.detail; VIEWS.home.render(); } });
       const w0 = $('#htWho'); if (w0) w0.addEventListener('change', () => { HT_UI.who = w0.value; VIEWS.home.render(); });
       $('#main').addEventListener('change', e => { if (e.target.id === 'saFrom' || e.target.id === 'saTo') { SA_UI[e.target.id === 'saFrom' ? 'from' : 'to'] = e.target.value; VIEWS.home.render(); } });
       return;
@@ -144,6 +146,8 @@ VIEWS.home = {
         : '<div class="dl-empty">No escalations</div>') + '</div>';
     h += '</div></div>';
 
+    // requests this person sent for approval
+    h += myRequestsCard(names);
     // open activities (purchase / store / approvals)
     if (self || sa) h += '<div class="dcard"><div class="dh3">' + (sa ? 'Open activities (everyone)' : 'My open activities') + '<span class="n">' + D.open.length + '</span></div><div class="tbl-wrap"><table><tr><th>Activity</th><th>Reference</th><th>Party</th><th>Responsible</th><th>Planned</th><th>Status</th></tr>' +
       (D.open.length ? D.open.slice(0, 60).map(r => '<tr><td>' + esc(r.act) + '</td><td><b>' + esc(r.ref) + '</b></td><td>' + esc(r.party) + '</td><td>' + esc(paDef(r.k).grp) + '</td><td class="nowrap">' + fmtDT(r.planned) + '</td><td><span class="st Pending">Pending</span></td></tr>').join('') : '<tr><td colspan="6" class="empty">Nothing open</td></tr>') + '</table></div></div>';
@@ -189,7 +193,7 @@ VIEWS.home = {
     }
     const m = setMain(h);
     const w = $('#htWho'); if (w) w.addEventListener('change', () => { HT_UI.who = w.value; HT_UI.heldAll = false; VIEWS.home.render(); });
-    onSeg(e => { if (e.target.dataset.seg === 'htf') { HT_UI.f = e.detail; VIEWS.home.render(); } });
+    onSeg(e => { if (e.target.dataset.seg === 'htf') { HT_UI.f = e.detail; VIEWS.home.render(); } if (e.target.dataset.seg === 'mrf') { MR_UI.f = e.detail; VIEWS.home.render(); } });
     return m;
   }
 };
