@@ -180,7 +180,7 @@ function clDnMail(t, pdf) {
     'Kindly adjust the said amount in your ledger and acknowledge receipt of this Debit Note by replying to this email.\n\n' +
     'In case of any query, please contact our Accounts team.\n\n' +
     'Thanks & Regards,\nAccounts Team\nZooto Fashion Pvt Ltd\nIMT Manesar, Gurugram';
-  const mq = Store.put('mail_queue', { id: uid(), to, cc, subject: 'Debit Note against Invoice ' + (invoice || '-') + ' — Zooto Fashion Pvt Ltd', body, ref: invoice || t.title, name: 'Zooto Fashion Pvt Ltd (no-reply)', reply_to: noreply, from: noreply, attach_pdf: true,
+  const mq = Store.put('mail_queue', { id: uid(), to, cc, subject: 'Debit Note against Invoice ' + (invoice || '-') + ' — Zooto Fashion Pvt Ltd', body, ref: invoice || t.title, name: 'Zooto Fashion Pvt Ltd (no-reply)', no_reply: true, reply_to: noreply, from: noreply, attach_pdf: true,
     status: real(to) ? 'queued' : 'no_recipient', error: real(to) ? '' : 'Vendor email is not in the vendor master', at: nowIso(), by: ME.name });
   if (real(to)) mailSend(mq.id, false, { pdf, pdf_name: 'Debit_Note_' + String(invoice || 'DN').replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 30) + '.pdf' });
   else flash('Debit note mail not sent — add the email of ' + esc(vendor || 'the vendor') + ' in the vendor master.', 'err');

@@ -101,7 +101,8 @@ function json_(o) { return ContentService.createTextOutput(JSON.stringify(o)).se
 function testSetup() {
   if (!PropertiesService.getScriptProperties().getProperty('NEXUS_MAIL_SECRET')) throw new Error('Add NEXUS_MAIL_SECRET in Project Settings → Script Properties first.');
   var me = Session.getActiveUser().getEmail();
-  MailApp.sendEmail(me, 'Nexus mail test', 'Nexus mail is working.', { name: 'Zooto Nexus' });
+  // sent the way Nexus sends: from the no-reply address (Google Workspace)
+  MailApp.sendEmail(me, 'Nexus mail test', 'Nexus mail is working.', { name: 'Zooto Nexus', noReply: true });
   try { Logger.log('Gmail aliases: ' + (GmailApp.getAliases() || []).join(', ')); } catch (x) { }
   log_([new Date(), me, '', 'Nexus mail test', 'setup', 'sent', '']);
   Logger.log('Test mail sent to ' + me + '. Quota left today: ' + MailApp.getRemainingDailyQuota());
