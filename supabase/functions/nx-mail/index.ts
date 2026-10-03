@@ -58,6 +58,12 @@ Deno.serve(async (req) => {
       else if (bad) { status = 'failed'; error = bad + ' is not a Nexus user, vendor or Settings alert email'; }
       else {
         const payload: Doc = { secret, to: to.join(','), cc: cc.join(','), subject: String(row.subject || '').slice(0, 250), body: String(row.body || '').slice(0, 20000), ref: String(row.ref || '') };
+        // sender settings of this mail type: name, no-reply, reply-to and the Gmail alias to send from
+        payload.name = String(row.name || 'Zooto Nexus').replace(/[\r\n<>"]+/g, ' ').slice(0, 80);
+        payload.noReply = row.no_reply === true;
+        const rt = list(row.reply_to)[0] || '', fr = list(row.from)[0] || '';
+        if (EMAIL.test(rt)) payload.replyTo = rt;
+        if (EMAIL.test(fr)) payload.from = fr;
         if (pdf) payload.attachments = [{ name: pdf.name, mime: 'application/pdf', data: pdf.b64 }];
         try {
           const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), redirect: 'follow' });
@@ -77,6 +83,7 @@ Deno.serve(async (req) => {
       if (!row) return out({ error: 'Mail not found' }, 404);
       if (row.status === 'sent') return out({ ok: true, skipped: 'already sent' });
       if (row.status !== 'queued' && !isAdmin) return out({ error: 'Only Admin can resend a mail' }, 403);
+      if (row.attach_pdf && !b.pdf) return out({ error: 'This mail goes with its PDF — send it again from where it was made' }, 400);
       let pdf: { b64: string; name: string } | undefined;
       if (b.pdf) {
         const bytes = atob(String(b.pdf).slice(0, 8)).slice(0, 5);
@@ -89,7 +96,7 @@ Deno.serve(async (req) => {
     // Admin: send everything still queued (e.g. mails made while mail was not set up)
     if (b.action === 'flush') {
       if (!isAdmin) return out({ error: 'Only Admin' }, 403);
-      const rows = (await docs('mail_queue')).filter((r) => r.status === 'queued').slice(0, 25);
+      const rows = (await docs('mail_queue')).filter((r) => r.status === 'queued' && !r.attach_pdf).slice(0, 25);
       const res = [];
       for (const r of rows) res.push(await sendOne(r));
       return out({ ok: res.every((r) => r.status === 'sent'), sent: res.filter((r) => r.status === 'sent').length, failed: res.filter((r) => r.status !== 'sent').length });

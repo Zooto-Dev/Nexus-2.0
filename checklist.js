@@ -162,9 +162,29 @@ ACTIONS['cl-done'] = el => {
     t.done = t.done || {}; t.done[clDoneKey(t, ymd)] = { at, by: ME.name, remark: rem, photos: photos.length, log };
     t.done_at = at; clPin(t); Store.put('checklist', t);
     audit('checklist.done', t.title, t.doer + ' · ' + ymd + (rem ? ' — ' + rem : '')); d.remove(); renderNav(); route();
-    if (isDN) waSend('debit_note', t.id + '|' + ymd, false, { pdf: dnPdf });   // the debit note goes to the vendor on WhatsApp
+    if (isDN) { waSend('debit_note', t.id + '|' + ymd, false, { pdf: dnPdf }); clDnMail(t, dnPdf); }   // the debit note goes to the vendor on WhatsApp and email
   });
 };
+// debit note mail to the vendor (as in the old code): PDF attached, Purchase + Store team in CC, no-reply sender
+function clDnMail(t, pdf) {
+  let vendor = t.vendor || '', invoice = t.invoice || '';
+  if (!vendor) { const m = /Debit Note\s*[—-]\s*(.*?)\s*\((.*)\)\s*:/.exec(String(t.title || '')); if (m) { invoice = m[1]; vendor = m[2]; } }
+  const v = vendorBy(vendor) || {}; const to = String(v.email || '').trim();
+  const real = e => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e) && !/@nexus\.local$/i.test(e);
+  const cc = Array.from(new Set(Store.all('users').filter(u => u.active !== false && /PURCHASE|STORE/i.test(u.department || '')).map(u => String(u.email || '').trim().toLowerCase()).filter(e => real(e) && e !== to.toLowerCase()))).join(',');
+  const noreply = String(settings().noreply_email || '').trim();
+  const item = t.items || '';
+  const body = 'Dear ' + (vendor || 'Vendor') + ',\n\n' +
+    'Please find attached the Debit Note issued against your Invoice No. ' + (invoice || '-') + (item ? ' for the item "' + item + '"' : '') + '.\n\n' +
+    'This Debit Note has been raised on account of shortage / rejected material observed at the time of receipt. ' +
+    'Kindly adjust the said amount in your ledger and acknowledge receipt of this Debit Note by replying to this email.\n\n' +
+    'In case of any query, please contact our Accounts team.\n\n' +
+    'Thanks & Regards,\nAccounts Team\nZooto Fashion Pvt Ltd\nIMT Manesar, Gurugram';
+  const mq = Store.put('mail_queue', { id: uid(), to, cc, subject: 'Debit Note against Invoice ' + (invoice || '-') + ' — Zooto Fashion Pvt Ltd', body, ref: invoice || t.title, name: 'Zooto Fashion Pvt Ltd (no-reply)', reply_to: noreply, from: noreply, attach_pdf: true,
+    status: real(to) ? 'queued' : 'no_recipient', error: real(to) ? '' : 'Vendor email is not in the vendor master', at: nowIso(), by: ME.name });
+  if (real(to)) mailSend(mq.id, false, { pdf, pdf_name: 'Debit_Note_' + String(invoice || 'DN').replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 30) + '.pdf' });
+  else flash('Debit note mail not sent — add the email of ' + esc(vendor || 'the vendor') + ' in the vendor master.', 'err');
+}
 ACTIONS['cl-photo'] = el => { const l = Store.get('checklist_log', el.dataset.log); if (!l) return; const w = window.open(''); w.document.write(l.photos.map(p => '<img src="' + p + '" style="max-width:100%;margin:4px">').join('')); };
 ACTIONS['cl-undo'] = el => {
   const t = Store.get('checklist', el.dataset.id); if (!t) return; const k = clDoneKey(t, el.dataset.d); const dn = clDoneOf(t, el.dataset.d);
