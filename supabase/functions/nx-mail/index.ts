@@ -59,7 +59,7 @@ Deno.serve(async (req) => {
       else {
         const payload: Doc = { secret, to: to.join(','), cc: cc.join(','), subject: String(row.subject || '').slice(0, 250), body: String(row.body || '').slice(0, 20000), ref: String(row.ref || '') };
         // sender settings of this mail type: name, no-reply, reply-to and the Gmail alias to send from
-        payload.name = String(row.name || 'Zooto Nexus').replace(/[\r\n<>"]+/g, ' ').slice(0, 80);
+        payload.name = String(row.name || 'Nexus 2.0').replace(/[\r\n<>"]+/g, ' ').slice(0, 80);
         payload.noReply = row.no_reply === true;
         const rt = list(row.reply_to)[0] || '', fr = list(row.from)[0] || '';
         if (EMAIL.test(rt)) payload.replyTo = rt;

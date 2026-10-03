@@ -537,7 +537,7 @@ ACTIONS['po-save'] = () => {
     const to = String(settings().alert_moq_email || '').trim();
     const body = 'PO ' + po.no + ' (' + vm.name + ') was raised above the net requirement because of MOQ.\n\n' +
       moqLog.map(x => x.material + ' ' + ((matBy(x.material) || {}).name || '') + ': net ' + qtyFmt(x.net) + ', ordered ' + qtyFmt(x.moq) + ' (+' + qtyFmt(x.extra) + '). Reason: ' + x.reason).join('\n') + '\n\nRaised by ' + ME.name + '.';
-    const mq = Store.put('mail_queue', { id: uid(), to, subject: 'MOQ over-order on ' + po.no + ' — ' + vm.name, body, ref: po.no, status: to ? 'queued' : 'no_recipient', name: 'Zooto Nexus', no_reply: true, at: nowIso(), by: ME.name }); if (to) mailSend(mq.id);
+    const mq = Store.put('mail_queue', { id: uid(), to, subject: 'MOQ over-order on ' + po.no + ' — ' + vm.name, body, ref: po.no, status: to ? 'queued' : 'no_recipient', name: 'Nexus 2.0', no_reply: true, at: nowIso(), by: ME.name }); if (to) mailSend(mq.id);
     mailNote = to ? ' MOQ alert queued for ' + esc(to) + '.' : ' <b>Set the MOQ alert email in Settings</b> — the alert is logged but has no recipient.';
   }
   PO_UI.form = false; PO_UI.moq = {}; flash(esc(po.no) + ' saved — <b>approval pending</b>.' + mailNote); VIEWS.po.render();

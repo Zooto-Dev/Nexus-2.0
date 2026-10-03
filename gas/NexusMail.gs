@@ -6,7 +6,7 @@
  * Setup (once):
  *  1. script.google.com → New project → paste this file → Save.
  *  2. Project Settings → Script Properties → Add:  NEXUS_MAIL_SECRET = <a long random text>
- *     (optional) NEXUS_MAIL_NAME = Zooto Nexus                  (sender name when a mail does not bring its own)
+ *     (optional) NEXUS_MAIL_NAME = Nexus 2.0                  (sender name when a mail does not bring its own)
  *     (optional) NEXUS_MAIL_REPLY_TO = purchase@yourcompany.com  (replies go here when a mail does not bring its own)
  *  3. Run "testSetup" once from the editor and allow the Gmail permission.
  *  4. Deploy → New deployment → Web app → Execute as: Me, Who has access: Anyone → Deploy → copy the /exec URL.
@@ -30,7 +30,7 @@ function doPost(e) {
     // every mail brings its own sender name / no-reply / reply-to / from (Nexus decides per mail type)
     var props = PropertiesService.getScriptProperties();
     var opts = {
-      name: String(p.name || props.getProperty('NEXUS_MAIL_NAME') || 'Zooto Nexus').slice(0, 80),
+      name: String(p.name || props.getProperty('NEXUS_MAIL_NAME') || 'Nexus 2.0').slice(0, 80),
       htmlBody: toHtml_(body)
     };
     if (cc) opts.cc = cc;
@@ -88,7 +88,7 @@ function cleanList_(s) {
 function toHtml_(text) {
   var esc = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   return '<div style="font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#111;white-space:pre-wrap">' + esc + '</div>' +
-    '<div style="font-family:Arial,sans-serif;font-size:11px;color:#888;margin-top:16px">Sent by Zooto Nexus</div>';
+    '<div style="font-family:Arial,sans-serif;font-size:11px;color:#888;margin-top:16px">Sent by Nexus 2.0</div>';
 }
 function safeEqual_(a, b) {
   if (a.length !== b.length) return false;
@@ -102,7 +102,7 @@ function testSetup() {
   if (!PropertiesService.getScriptProperties().getProperty('NEXUS_MAIL_SECRET')) throw new Error('Add NEXUS_MAIL_SECRET in Project Settings → Script Properties first.');
   var me = Session.getActiveUser().getEmail();
   // sent the way Nexus sends: from the no-reply address (Google Workspace)
-  MailApp.sendEmail(me, 'Nexus mail test', 'Nexus mail is working.', { name: 'Zooto Nexus', noReply: true });
+  MailApp.sendEmail(me, 'Nexus mail test', 'Nexus mail is working.', { name: 'Nexus 2.0', noReply: true });
   try { Logger.log('Gmail aliases: ' + (GmailApp.getAliases() || []).join(', ')); } catch (x) { }
   log_([new Date(), me, '', 'Nexus mail test', 'setup', 'sent', '']);
   Logger.log('Test mail sent to ' + me + '. Quota left today: ' + MailApp.getRemainingDailyQuota());
