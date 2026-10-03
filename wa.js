@@ -94,10 +94,13 @@ const WAI = { msgs: [], loaded: false, loading: false, sel: '', draft: {}, sub: 
     '.wai-list,.wai-chat{background:var(--card,#fff);border:1px solid var(--line,#e3e6e4);border-radius:10px;overflow:hidden;display:flex;flex-direction:column}' +
     '.wai-list .rows{overflow:auto;flex:1}.wai-c{padding:10px 12px;border-bottom:1px solid var(--line,#eef0ef);cursor:pointer;display:grid;grid-template-columns:1fr auto;gap:2px 8px}.wai-c:hover{background:#f5f8f7}.wai-c.on{background:#e8f3f2}' +
     '.wai-c .n{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.wai-c .t{font-size:11px;color:#6b7280;white-space:nowrap}.wai-c .s{font-size:12px;color:#4b5563;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.wai-c .u{background:#16a34a;color:#fff;border-radius:10px;font-size:11px;padding:0 7px;justify-self:end;height:18px;line-height:18px}' +
-    '.wai-h{padding:10px 14px;border-bottom:1px solid var(--line,#eef0ef);font-weight:700}.wai-h small{font-weight:400;color:#6b7280;margin-left:8px}' +
+    '.wai-h{padding:10px 14px;border-bottom:1px solid var(--line,#eef0ef);font-weight:700;display:flex;align-items:center;gap:6px}.wai-h .grow{flex:1}.wai-h small{font-weight:400;color:#6b7280;margin-left:8px}' +
     '.wai-m{flex:1;overflow:auto;padding:14px;background:#f3f1ec;display:flex;flex-direction:column;gap:6px}' +
     '.wai-b{max-width:70%;padding:7px 10px;border-radius:9px;background:#fff;box-shadow:0 1px 1px rgba(0,0,0,.06);white-space:pre-wrap;word-wrap:break-word;font-size:13px}.wai-b.out{align-self:flex-end;background:#dcf5d9}' +
     '.wai-b .meta{font-size:10.5px;color:#6b7280;margin-top:3px;text-align:right}.wai-b .tpl{font-size:11px;color:#0e6a73;font-weight:700}.wai-b .err{color:#b91c1c;font-size:11px}.wai-b .rd{color:#2563eb}' +
+    '.wai-b{position:relative}.wai-x{display:none;position:absolute;top:2px;right:4px;font-size:12px;background:rgba(255,255,255,.9);border-radius:6px;padding:0 4px}.wai-x a{cursor:pointer;text-decoration:none}.wai-b:hover .wai-x{display:block}' +
+    '.wai-q{border-left:3px solid #0e6a73;background:rgba(0,0,0,.05);padding:3px 7px;border-radius:5px;font-size:12px;color:#374151;margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
+    '.wai-rq{display:flex;align-items:center;gap:8px;padding:6px 10px;border-top:1px solid var(--line,#eef0ef);background:#f8faf9}.wai-rq .wai-q{flex:1;margin:0}.wai-rq a{cursor:pointer;font-size:18px;color:#6b7280}' +
     '.wai-f{display:flex;gap:8px;padding:10px;border-top:1px solid var(--line,#eef0ef)}.wai-f textarea{flex:1;resize:none;height:54px}.wai-note{padding:8px 12px;font-size:12px;color:#92400e;background:#fef3c7}' +
     '@media(max-width:760px){.wai{grid-template-columns:1fr;height:auto}.wai-list{max-height:260px}.wai-chat{min-height:420px}}';
   document.head.appendChild(st);
@@ -163,20 +166,24 @@ VIEWS.wainbox = {
       const msgs = WAI.msgs.filter(m => m.wa === c.wa).sort((a, b) => (a.at || '') < (b.at || '') ? -1 : 1);
       const tick = m => m.dir !== 'out' ? '' : m.status === 'sending' ? ' 🕓' : m.status === 'read' ? ' <span class="rd">✓✓</span>' : m.status === 'delivered' ? ' ✓✓' : m.status === 'failed' ? ' ✕' : ' ✓';
       const open = c.lastIn && (Date.now() - new Date(c.lastIn).getTime()) < 24 * 3600 * 1000;
-      h += '<div class="wai-chat"><div class="wai-h">' + esc(waiWho(c.wa)) + (c.wa ? '<small>+' + esc(c.wa) + '</small>' : '') + '</div><div class="wai-m" id="waiM">' +
-        msgs.map(m => '<div class="wai-b ' + m.dir + '">' + (m.template ? '<div class="tpl">' + esc(m.template) + '</div>' : '') + esc(m.body || '') +
+      const byId = new Map(msgs.map(m => [m.id, m]));
+      const quote = id => { const q = byId.get(id); return q ? '<div class="wai-q">' + esc(q.dir === 'in' ? waiWho(q.wa) : 'You') + ': ' + esc((q.template || q.body || q.filename || q.type || '').slice(0, 120)) + '</div>' : ''; };
+      h += '<div class="wai-chat"><div class="wai-h">' + esc(waiWho(c.wa)) + (c.wa ? '<small>+' + esc(c.wa) + '</small>' : '') + '<span class="grow"></span><button class="btn sm ghost danger" data-act="wai-delchat" data-confirm="Delete this whole chat?">Delete chat</button></div><div class="wai-m" id="waiM">' +
+        msgs.map(m => '<div class="wai-b ' + m.dir + '">' + '<div class="wai-x"><a data-act="wai-reply" data-id="' + esc(m.id) + '" title="Reply">↩</a> <a data-act="wai-del" data-id="' + esc(m.id) + '" data-confirm="Delete?" title="Delete">🗑</a></div>' +
+          (m.reply_to ? quote(m.reply_to) : '') + (m.template ? '<div class="tpl">' + esc(m.template) + '</div>' : '') + esc(m.body || '') +
           (m.media_id ? '<div><a data-act="wai-media" data-id="' + esc(m.media_id) + '">📎 ' + esc(m.filename || m.type || 'Attachment') + '</a></div>' : (m.filename && m.dir === 'out' ? '<div>📎 ' + esc(m.filename) + '</div>' : '')) +
           (m.ref ? '<div class="meta" style="text-align:left">' + esc(m.ref) + '</div>' : '') +
           (m.error ? '<div class="err">' + esc(m.error) + '</div>' : '') +
           (m.status === 'failed' && m.event && m.rid && isAdminRole() ? '<div><a data-act="wa-resend" data-e="' + esc(m.event) + '" data-id="' + esc(m.rid) + '">Resend</a></div>' : '') +
           '<div class="meta">' + (m.by_name ? esc(m.by_name) + ' · ' : '') + fmtDT(m.at) + tick(m) + '</div></div>').join('') + '</div>' +
         (open || !c.wa ? '' : '<div class="wai-note">' + (c.lastIn ? 'Reply closed — no message from this number in the last 24 hours.' : 'Reply closed — this number has not written to us.') + '</div>') +
+        (WAI.reply && byId.get(WAI.reply) && open ? '<div class="wai-rq">' + quote(WAI.reply) + '<a data-act="wai-reply-x">×</a></div>' : '') +
         (!c.wa ? '' : '<div class="wai-f"><textarea id="waiTxt"' + (open ? '' : ' disabled') + '>' + esc(WAI.draft[c.wa] || '') + '</textarea><button class="btn primary" data-act="wai-send"' + (open ? '' : ' disabled') + '>Send</button></div>') + '</div>';
     } else h += '<div class="wai-chat"></div>';
     h += '</div>';
     const main = setMain(h);
     const box = $('#waiM'); if (box) box.scrollTop = box.scrollHeight;
-    const t = $('#waiTxt'); if (t) { t.addEventListener('input', () => { WAI.draft[WAI.sel] = t.value; }); t.addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) ACTIONS['wai-send'](); }); }
+    const t = $('#waiTxt'); if (t) { t.addEventListener('input', () => { WAI.draft[WAI.sel] = t.value; }); t.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); ACTIONS['wai-send'](); } }); if (WAI.reply) t.focus(); }
     if (c && c.unread) waiSeen(c.wa);
     return main;
   }
@@ -189,11 +196,12 @@ ACTIONS['wai-open'] = el => { WAI.sel = el.dataset.wa; VIEWS.wainbox.render(); }
 ACTIONS['wai-send'] = async () => {
   const t = $('#waiTxt'); const text = t ? t.value.trim() : ''; const to = WAI.sel;
   if (!text || !to) return;
-  const tmp = { id: 'tmp-' + Date.now(), wa: to, dir: 'out', type: 'text', body: text, status: 'sending', by_name: ME.name, seen: true, at: new Date().toISOString() };
-  WAI.msgs.push(tmp); WAI.draft[to] = ''; VIEWS.wainbox.render();
+  const replyTo = WAI.reply && /^wamid\./.test(WAI.reply) ? WAI.reply : '';
+  const tmp = { id: 'tmp-' + Date.now(), wa: to, dir: 'out', type: 'text', body: text, status: 'sending', by_name: ME.name, seen: true, at: new Date().toISOString(), reply_to: replyTo || null };
+  WAI.msgs.push(tmp); WAI.draft[to] = ''; WAI.reply = null; VIEWS.wainbox.render();
   let msg = '', id = '';
   try {
-    const { data, error } = await SB.functions.invoke('nx-wa', { body: { action: 'reply', to, text } });
+    const { data, error } = await SB.functions.invoke('nx-wa', { body: { action: 'reply', to, text, reply_to: replyTo } });
     msg = data && data.error; id = data && data.id;
     if (error) { msg = error.message; try { const j = await error.context.json(); msg = j.error || msg; } catch (e) { } }
   } catch (e) { msg = e.message; }
@@ -204,6 +212,27 @@ ACTIONS['wai-send'] = async () => {
     if (k >= 0) { if (id && WAI.msgs.some(x => x.id === id)) WAI.msgs.splice(k, 1); else Object.assign(WAI.msgs[k], { id: id || tmp.id, status: 'sent' }); }
   }
   if (curView().v === 'wainbox') VIEWS.wainbox.render();
+};
+ACTIONS['wai-reply'] = el => { WAI.reply = el.dataset.id; VIEWS.wainbox.render(); };
+ACTIONS['wai-reply-x'] = () => { WAI.reply = null; VIEWS.wainbox.render(); };
+async function waiDelete(body) {
+  try {
+    const { data, error } = await SB.functions.invoke('nx-wa', { body: Object.assign({ action: 'delete' }, body) });
+    let msg = data && data.error; if (error) { msg = error.message; try { const j = await error.context.json(); msg = j.error || msg; } catch (e) { } }
+    if (msg) { flash('Not deleted: ' + esc(msg), 'err'); return false; }
+    return true;
+  } catch (e) { flash('Not deleted: ' + esc(e.message), 'err'); return false; }
+}
+ACTIONS['wai-del'] = async el => {
+  const id = el.dataset.id; const m = WAI.msgs.find(x => x.id === id); if (!m) return;
+  if (!id.startsWith('tmp-') && !(await waiDelete({ ids: [id] }))) return;
+  WAI.msgs = WAI.msgs.filter(x => x.id !== id); audit('wa.delete_message', '+' + m.wa, (m.template || m.body || '').slice(0, 80)); VIEWS.wainbox.render();
+};
+ACTIONS['wai-delchat'] = async () => {
+  const wa = WAI.sel; if (wa == null) return;
+  if (!(await waiDelete({ wa }))) return;
+  const n = WAI.msgs.filter(x => x.wa === wa).length; WAI.msgs = WAI.msgs.filter(x => x.wa !== wa); WAI.sel = null; WAI.reply = null;
+  audit('wa.delete_chat', '+' + wa, n + ' message(s)'); flash('Chat deleted.'); VIEWS.wainbox.render();
 };
 ACTIONS['wai-media'] = async el => {
   try {

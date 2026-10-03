@@ -58,7 +58,8 @@ function formDialog(title, fields, okLabel, cb, danger) {
   const old = $('#fxDlg'); if (old) old.remove();
   const d = document.createElement('div'); d.id = 'fxDlg'; d.className = 'dlg-back';
   d.innerHTML = '<div class="dlg"><div class="dlg-h">' + esc(title) + '</div><table class="jckv">' + fields.map(f => '<tr><td class="k">' + esc(f.l) + (f.req ? ' *' : '') + '</td><td class="v">' +
-    (f.type === 'textarea' ? '<textarea data-fx="' + f.k + '" rows="3">' + esc(f.value || '') + '</textarea>' : f.type === 'static' ? esc(f.value || '') : '<input data-fx="' + f.k + '" type="' + (f.type || 'text') + '"' + (f.type === 'number' ? ' min="0" step="any"' : '') + ' value="' + esc(f.value == null ? '' : f.value) + '">') + '</td></tr>').join('') +
+    (f.type === 'textarea' ? '<textarea data-fx="' + f.k + '" rows="3">' + esc(f.value || '') + '</textarea>' : f.type === 'static' ? esc(f.value || '') :
+      f.type === 'select' ? '<select data-fx="' + f.k + '">' + (f.options || []).map(o => '<option' + (String(o) === String(f.value || '') ? ' selected' : '') + '>' + esc(o) + '</option>').join('') + '</select>' : '<input data-fx="' + f.k + '" type="' + (f.type || 'text') + '"' + (f.type === 'number' ? ' min="0" step="any"' : '') + ' value="' + esc(f.value == null ? '' : f.value) + '">') + '</td></tr>').join('') +
     '</table><div class="dlg-f"><span id="fxMsg" class="small late-txt"></span><span class="grow"></span><button class="btn" data-fx-cancel>Cancel</button><button class="btn ' + (danger ? 'danger' : 'primary') + '" data-fx-ok>' + esc(okLabel) + '</button></div></div>';
   document.body.appendChild(d); const first = $('[data-fx]', d); if (first) first.focus();
   d.addEventListener('keydown', ev => { if (ev.key === 'Escape') d.remove(); });

@@ -56,7 +56,7 @@ Deno.serve(async (req) => {
       for (const m of v.messages || []) {
         const from = String(m.from || '').replace(/\D/g, '');
         const at = m.timestamp ? new Date(Number(m.timestamp) * 1000).toISOString() : new Date().toISOString();
-        rows.push({ id: String(m.id), wa: from, name: names[from] || null, dir: 'in', status: 'received', at, ...bodyOf(m) });
+        rows.push({ id: String(m.id), wa: from, name: names[from] || null, dir: 'in', status: 'received', at, reply_to: m.context?.id ? String(m.context.id) : null, ...bodyOf(m) });
       }
       for (const s of v.statuses || []) {
         const err = (s.errors || []).map((e: Doc) => e.error_data?.details || e.title || e.message).filter(Boolean).join('; ');

@@ -165,3 +165,4 @@ alter publication supabase_realtime add table public.nx_wa_msgs;
 alter table public.nx_wa_msgs add column if not exists event text;
 alter table public.nx_wa_msgs add column if not exists rid text;
 alter table public.nx_wa_msgs add column if not exists ref text;
+alter table public.nx_wa_msgs add column if not exists reply_to text;

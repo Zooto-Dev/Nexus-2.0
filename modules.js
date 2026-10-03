@@ -344,7 +344,8 @@ VIEWS.po = {
     else h += '<div class="tbl-wrap"><table class="bomflat"><tr><th>PO No</th><th>PO Date</th><th>Vendor</th><th class="num">Sr</th><th>Item Name</th><th>Item Code</th><th>Brand</th><th>UOM</th><th class="num">Qty</th><th class="num">Received</th><th class="num">Pending</th><th>Expected</th><th>Status</th><th>Raised By</th><th>Approved By</th><th></th></tr>' +
       (rows.length ? rows.map(p => {
         const st = poStatus(p);
-        const act = (st === 'Amend' && edit && (poOwn(p) || isSuperAdmin()) ? '<button class="btn sm primary" data-act="po-edit" data-id="' + esc(p.id) + '">Edit</button>' : '') +
+        const act = (st === 'Amend' && edit && (p.amend_by ? p.amend_by === ME.name : (poOwn(p) || isSuperAdmin())) ? '<button class="btn sm primary" data-act="po-edit" data-id="' + esc(p.id) + '">Edit</button>' : '') +
+          (edit && poRevisable(p) ? ' <button class="btn sm" data-act="po-revise" data-id="' + esc(p.id) + '">Revise price</button>' : '') +
           (edit && (st === 'Open' || st === 'Pending Approval' || st === 'Amend') ? ' <button class="btn ghost sm danger" data-act="po-cancel" data-id="' + esc(p.id) + '" data-confirm="Cancel PO?">Cancel</button>' : '');
         let row = p.lines.map((l, i) => '<tr class="click' + (i === 0 ? ' bomfirst' : '') + '" data-act="po-toggle" data-id="' + esc(p.id) + '"><td><b>' + esc(p.no) + '</b></td><td>' + fmtD(p.date) + '</td><td>' + esc(p.vendor) + '</td><td class="num">' + (i + 1) + '</td><td>' + esc((matBy(l.material) || {}).name || '') + '</td><td>' + esc(l.material) + '</td><td>' + esc(l.brand || '') + '</td><td>' + esc(l.uom || '') + '</td><td class="num">' + qtyFmt(l.qty) + '</td><td class="num">' + qtyFmt(num(l.received)) + '</td><td class="num">' + qtyFmt(Math.max(0, num(l.qty) - num(l.received))) + '</td><td>' + fmtD(p.expected) + '</td><td><span class="st ' + poStCls(st) + '">' + st + '</span></td><td>' + esc(p.created_by || '') + '</td><td>' + esc(p.approved_by || '') + '</td><td class="right">' + (i === 0 ? act : '') + '</td></tr>').join('');
         if (PO_UI.open === p.id) row += '<tr class="inline-form"><td colspan="16">' + poDetail(p) + '</td></tr>';
@@ -515,8 +516,14 @@ ACTIONS['po-save'] = () => {
   if (PO_UI.editId) {
     const ep = Store.get('purchase_orders', PO_UI.editId);
     if (!ep || ep.approval !== 'Amend') { $('#npMsg').innerHTML = '<span class="late-txt">This PO is no longer open for amendment.</span>'; return; }
-    Object.assign(ep, { date: $('#npDate').value || ep.date, expected: exp, remarks: $('#npRem').value.trim(), lines, approval: 'Pending' });
+    if (ep.amend_by && ep.amend_by !== ME.name) { $('#npMsg').innerHTML = '<span class="late-txt">' + esc(ep.amend_by) + ' is amending this PO.</span>'; return; }
+    Object.assign(ep, { date: $('#npDate').value || ep.date, expected: exp, remarks: $('#npRem').value.trim(), lines });
     ep.edit_log = (ep.edit_log || []).concat([{ by: ME.name, at: nowIso() }]);
+    if (ep.amend_by === ME.name) {   // amended by the approver himself: approved on save
+      poMarkApproved(ep, 'po.amend_approve');
+      PO_UI.form = false; PO_UI.editId = null; flash(esc(ep.no) + ' amended and approved.'); VIEWS.po.render(); return;
+    }
+    ep.approval = 'Pending';
     Store.put('purchase_orders', ep); audit('po.amended', ep.no, 'resubmitted for approval'); waSend('po_submitted', ep.id);
     PO_UI.form = false; PO_UI.editId = null; flash(esc(ep.no) + ' updated and sent for approval.'); VIEWS.po.render(); return;
   }
@@ -534,6 +541,39 @@ ACTIONS['po-save'] = () => {
     mailNote = to ? ' MOQ alert queued for ' + esc(to) + '.' : ' <b>Set the MOQ alert email in Settings</b> — the alert is logged but has no recipient.';
   }
   PO_UI.form = false; PO_UI.moq = {}; flash(esc(po.no) + ' saved — <b>approval pending</b>.' + mailNote); VIEWS.po.render();
+};
+/* ---- price revision of an approved PO: the old PO is cancelled, a new PO with the new rates goes to the CEO ---- */
+function poRevisable(p) { return !p.cancelled && p.approval === 'Approved' && !(p.lines || []).some(l => num(l.received) > 0) && !Store.all('inwards').some(i => norm(i.po_no) === norm(p.no)); }
+ACTIONS['po-revise'] = el => {
+  if (!requirePerm('purchase', 'edit')) return;
+  const p = Store.get('purchase_orders', el.dataset.id); if (!p || !poRevisable(p)) { flash('Only an approved PO with nothing received can be revised.', 'err'); return; }
+  const old = $('#prvDlg'); if (old) old.remove();
+  const d = document.createElement('div'); d.id = 'prvDlg'; d.className = 'dlg-back';
+  d.innerHTML = '<div class="dlg" style="max-width:820px"><div class="dlg-h">Revise price · ' + esc(p.no) + ' · ' + esc(p.vendor) + '</div><div class="tbl-wrap"><table class="nopage"><tr><th>Item Name</th><th>Item Code</th><th>UOM</th><th class="num">Qty</th><th class="num">Rate</th><th class="num">New Rate</th></tr>' +
+    p.lines.map((l, k) => '<tr><td>' + esc((matBy(l.material) || {}).name || '') + '</td><td>' + esc(l.material) + '</td><td>' + esc(l.uom || '') + '</td><td class="num">' + qtyFmt(l.qty) + '</td><td class="num">' + esc(l.rate) + '</td><td class="num"><input data-prv="' + k + '" type="number" min="0" step="any" value="' + esc(l.rate) + '" style="width:110px"></td></tr>').join('') + '</table></div>' +
+    '<table class="jckv"><tr><td class="k">Reason *</td><td class="v"><textarea id="prvWhy" rows="2"></textarea></td></tr></table>' +
+    '<div class="dlg-f"><span id="prvMsg" class="small late-txt"></span><span class="grow"></span><button class="btn" data-x>Cancel</button><button class="btn primary" data-ok>Cancel ' + esc(p.no) + ' &amp; send new PO for CEO approval</button></div></div>';
+  document.body.appendChild(d);
+  d.addEventListener('click', ev => {
+    if (ev.target.closest('[data-x]')) { d.remove(); return; }
+    if (!ev.target.closest('[data-ok]')) return;
+    const why = $('#prvWhy', d).value.trim(); const rates = $$('[data-prv]', d).map(i => num(i.value));
+    if (rates.some(r => !(r > 0))) { $('#prvMsg', d).textContent = 'Every rate must be more than 0.'; return; }
+    if (rates.every((r, k) => Math.abs(r - num(p.lines[k].rate)) < 1e-9)) { $('#prvMsg', d).textContent = 'No rate was changed.'; return; }
+    if (!why) { $('#prvMsg', d).textContent = 'Write the reason.'; return; }
+    const cur = Store.get('purchase_orders', p.id); if (!cur || !poRevisable(cur)) { $('#prvMsg', d).textContent = 'This PO can no longer be revised.'; return; }
+    const changes = p.lines.map((l, k) => ({ material: l.material, from: num(l.rate), to: rates[k] })).filter(x => Math.abs(x.from - x.to) > 1e-9);
+    const np = clone(p); ['cancelled', '_sig', 'approved_by', 'approved_at', 'reject_remark', 'amend_by', 'amend_by_id', 'superseded_by', 'cancel_reason', 'cancelled_at', 'cancelled_by'].forEach(k => delete np[k]);
+    Object.assign(np, { id: uid(), no: fyNo('purchase_orders', 'PO', 3), date: todayYmd(), at: nowIso(), created_at: nowIso(), created_by: ME.name, created_by_id: ME.id, approval: 'Pending',
+      lines: p.lines.map((l, k) => Object.assign(clone(l), { rate: rates[k], received: 0, rejected: 0 })), amend_log: [], edit_log: [], followups: [],
+      revised_from: p.no, revised_from_id: p.id, revise_reason: why, price_changes: changes, remarks: ((p.remarks ? p.remarks + ' | ' : '') + 'Replaces PO ' + p.no + ' (price revised)').slice(0, 300) });
+    Store.put('purchase_orders', np);
+    cur.cancelled = true; cur.cancel_reason = 'Price revised — replaced by ' + np.no; cur.superseded_by = np.no; cur.cancelled_at = nowIso(); cur.cancelled_by = ME.name;
+    Store.put('purchase_orders', cur); poJcRaise(cur, -1);
+    audit('po.price_revised', cur.no, 'replaced by ' + np.no + ' · ' + changes.map(x => x.material + ' ' + x.from + '→' + x.to).join(', ') + ' · ' + why);
+    audit('po.create', np.no, 'price revision of ' + cur.no + ' — waiting for CEO approval');
+    waSend('po_submitted', np.id); d.remove(); flash(esc(cur.no) + ' cancelled — ' + esc(np.no) + ' sent to the CEO for approval. The vendor is told when it is approved.'); VIEWS.po.render();
+  });
 };
 ACTIONS['po-cancel'] = el => { const p = Store.get('purchase_orders', el.dataset.id); p.cancelled = true; Store.put('purchase_orders', p); audit('po.cancel', p.no, ''); VIEWS.po.render(); };
 
@@ -993,7 +1033,17 @@ function issDecide(id, kind) {
     flash(esc(i.no) + (kind === 'amend' ? ' sent back to Store for amendment.' : ' rejected.')); VIEWS.issuance.render();
   });
 }
-ACTIONS['iss-amend'] = el => issDecide(el.dataset.id, 'amend');
+// the approver amends the issue qty himself; it stays with him for approval (it does not go back to Store)
+ACTIONS['iss-amend'] = el => {
+  if (!canApproveIssue()) { flash('Only the Store Incharge can do this.', 'err'); return; }
+  const i = Store.get('issues', el.dataset.id); if (!i || i.status !== 'Pending') return;
+  formDialog('Amend ' + i.no + ' · ' + ((matBy(i.material) || {}).name || i.material), [{ k: 'qty', l: 'Issue Qty', type: 'number', value: i.qty, req: true }, { k: 'why', l: 'What was amended', type: 'textarea', req: true }], 'Save amendment', v => {
+    if (num(v.qty) > num(i.qty) + 1e-9) return 'Qty can only be reduced (it is ' + qtyFmt(i.qty) + ').';
+    i.amend_log = (i.amend_log || []).concat([{ at: nowIso(), by: ME.name, remark: v.why + ' (qty ' + qtyFmt(i.qty) + ' → ' + qtyFmt(v.qty) + ')', stage: 'Amended at issuance approval' }]);
+    i.qty = num(v.qty); Store.put('issues', i); if (i.req_no) reqRefresh(i.req_no);
+    audit('issue.amend', i.no, 'qty ' + qtyFmt(v.qty) + ' · ' + v.why); flash(esc(i.no) + ' amended — approve it now.'); VIEWS.issuance.render();
+  });
+};
 ACTIONS['iss-deny'] = el => issDecide(el.dataset.id, 'reject');
 ACTIONS['ret-save'] = () => {
   if (!requirePerm('store', 'edit')) return;

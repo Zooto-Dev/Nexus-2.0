@@ -55,7 +55,7 @@ Deno.serve(async (req) => {
     const isAdmin = ['superadmin', 'admin'].includes(me.role);
 
     const event = String(b.event || ''), id = String(b.id || ''), resend = b.resend === true;
-    if (!id && !['test', 'reply', 'media'].includes(b.action)) return out({ error: 'Missing record id' }, 400);
+    if (!id && !['test', 'reply', 'media', 'delete'].includes(b.action)) return out({ error: 'Missing record id' }, 400);
     if (resend && !isAdmin) return out({ error: 'Only Admin can resend' }, 403);
 
     const token = Deno.env.get('WA_TOKEN') || '', phoneId = Deno.env.get('WA_PHONE_ID') || '';
@@ -66,8 +66,8 @@ Deno.serve(async (req) => {
     };
     // context of the event being sent, stored with each chat message so it can be resent
     let ctx = { event: '', rid: '', ref: '' };
-    const keepOut = async (to: string, type: string, body: string, template: string, wamid: string, err: string, filename = '', name = '') => {
-      await db.from('nx_wa_msgs').insert({ id: wamid || crypto.randomUUID(), wa: to, name: name || null, dir: 'out', type, body, template: template || null, filename: filename || null, status: err ? 'failed' : 'sent', error: err || null, by_name: await actor(), seen: true, event: ctx.event || null, rid: ctx.rid || null, ref: ctx.ref || null });
+    const keepOut = async (to: string, type: string, body: string, template: string, wamid: string, err: string, filename = '', name = '', replyTo = '') => {
+      await db.from('nx_wa_msgs').insert({ id: wamid || crypto.randomUUID(), wa: to, name: name || null, dir: 'out', type, body, template: template || null, filename: filename || null, status: err ? 'failed' : 'sent', error: err || null, by_name: await actor(), seen: true, event: ctx.event || null, rid: ctx.rid || null, ref: ctx.ref || null, reply_to: replyTo || null });
     };
     const uploadPdf = async (b64: string, name: string): Promise<{ id?: string; error?: string }> => {
       const bytes = Uint8Array.from(atob(String(b64 || '')), (c) => c.charCodeAt(0));
@@ -100,12 +100,25 @@ Deno.serve(async (req) => {
       if (text.length > 4000) return out({ error: 'Message is too long (max 4000 characters)' }, 400);
       const [{ data: last }] = await Promise.all([db.from('nx_wa_msgs').select('at').eq('wa', to).eq('dir', 'in').order('at', { ascending: false }).limit(1), actor()]);
       if (!last || !last.length) return out({ error: 'This number has not written to us — only templates can be sent to it' }, 400);
-      const r = await fetch(GRAPH + phoneId + '/messages', { method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify({ messaging_product: 'whatsapp', recipient_type: 'individual', to, type: 'text', text: { body: text, preview_url: false } }) });
+      // reply to one message: WhatsApp shows it quoted on the phone
+      const replyTo = /^wamid\.[\w=+/-]+$/.test(String(b.reply_to || '')) ? String(b.reply_to) : '';
+      const r = await fetch(GRAPH + phoneId + '/messages', { method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify({ messaging_product: 'whatsapp', recipient_type: 'individual', to, type: 'text', text: { body: text, preview_url: false }, ...(replyTo ? { context: { message_id: replyTo } } : {}) }) });
       const j = await r.json().catch(() => ({}));
       const err = j.messages && j.messages.length ? '' : String(j.error?.error_data?.details || j.error?.message || r.status);
       const wamid = j.messages?.[0]?.id || '';
-      await keepOut(to, 'text', text, '', wamid, err);
+      await keepOut(to, 'text', text, '', wamid, err, '', '', replyTo);
       return err ? out({ ok: false, error: err }) : out({ ok: true, id: wamid });
+    }
+    // Delete messages or a whole chat from Nexus (WhatsApp does not allow deleting them from the other phone)
+    if (b.action === 'delete') {
+      if (!isAdmin) return out({ error: 'Only Admin can delete chats' }, 403);
+      const ids = Array.isArray(b.ids) ? b.ids.map(String).filter(Boolean).slice(0, 500) : [];
+      const wa = String(b.wa || '').replace(/\D/g, '');
+      if (!ids.length && !wa && b.wa !== '') return out({ error: 'Nothing to delete' }, 400);
+      const q = db.from('nx_wa_msgs').delete({ count: 'exact' });
+      const { error, count } = ids.length ? await q.in('id', ids) : await q.eq('wa', wa);
+      if (error) return out({ error: error.message }, 500);
+      return out({ ok: true, deleted: count || 0 });
     }
     // Open a photo / document someone sent us
     if (b.action === 'media') {
@@ -145,6 +158,7 @@ Deno.serve(async (req) => {
         { to, name: '', template: 'high_alert_material_issue', params: [['1', 'ZF-TEST'], ['2', 'Stitching']] },
         { to, name: '', template: 'production_no_material_alert', params: [['1', 'ZF-TEST']] },
         { to, name: '', template: 'low_stock_alert', params: [['1', 'EVA-10 (Current 10 PAIR / Min 100 PAIR)']] },
+        { to, name: '', template: 'po_revised_vendor', params: [['old_po_number', 'TEST/PO/001'], ['po_number', 'TEST/PO/002'], ['total_amount', '1100.00'], ['delivery_date', '05-Oct-2026']], doc: true },
         { to, name: '', template: 'vendor_delivery_due', params: [['1', 'Test Vendor'], ['2', 'EVA-10 (qty 100, due 05-Oct-2026)'], ['3', 'TEST/PO/001'], ['4', '05-Oct-2026']] }
       ];
       const up = await uploadPdf(b.pdf, 'Nexus_Test.pdf');
@@ -180,13 +194,16 @@ Deno.serve(async (req) => {
       if (event === 'po_submitted') {
         if (p.approval !== 'Pending') return out({ error: 'PO is not waiting for approval' }, 409);
         round = String((p.edit_log || []).length);
-        msgs = staff(heads(/PURCHASE/), 'po_approval_request', [['po_number', safe(p.no)], ['creator_name', safe(p.created_by)]]);
+        // a price revision is approved by the CEO (Super Admin)
+        msgs = staff(p.revised_from ? superAdmins() : heads(/PURCHASE/), 'po_approval_request', [['po_number', safe(p.no)], ['creator_name', safe(p.created_by)]]);
       } else {
         if (p.approval !== 'Approved') return out({ error: 'PO is not approved' }, 409);
         needPdf = true; pdfName = String(p.no || 'Purchase_Order').replace(/[^a-zA-Z0-9]/g, '_') + '.pdf';
         const total = (p.lines || []).reduce((a: number, l: Doc) => a + num(l.rate) * num(l.qty) * (1 + num(l.gst) / 100), 0);
         const v = await vendorOf(p.vendor);
-        msgs.push({ to: phone(v?.mobile), name: String(p.vendor || ''), template: 'po_approval_vendor', params: [['po_number', safe(p.no)], ['total_amount', total.toFixed(2)], ['delivery_date', fmtD(p.expected)]], doc: true });
+        // price revision: the vendor is told the earlier PO is cancelled and this one replaces it
+        if (p.revised_from) msgs.push({ to: phone(v?.mobile), name: String(p.vendor || ''), template: 'po_revised_vendor', params: [['old_po_number', safe(p.revised_from)], ['po_number', safe(p.no)], ['total_amount', total.toFixed(2)], ['delivery_date', fmtD(p.expected)]], doc: true });
+        else msgs.push({ to: phone(v?.mobile), name: String(p.vendor || ''), template: 'po_approval_vendor', params: [['po_number', safe(p.no)], ['total_amount', total.toFixed(2)], ['delivery_date', fmtD(p.expected)]], doc: true });
         const creator = byName[norm(p.created_by)];
         const purchase = [creator, ...dept(/PURCHASE/).filter((u) => !isHead(u))].filter(Boolean) as Doc[];
         msgs.push(...staff(purchase, 'po_approval_creator', [['po_number', safe(p.no)], ['creator_name', safe(p.created_by)]], true));
@@ -320,7 +337,9 @@ Deno.serve(async (req) => {
     let sent = 0, failed = 0;
     for (const m of msgs) {
       if (!m.to) { rows.push(log(m, 'no_mobile', 'No valid mobile number')); await notSent(m, 'No valid mobile number for ' + (m.name || 'this person')); failed++; continue; }
-      const err = await sendTpl(m, media, pdfName);
+      let err = await sendTpl(m, media, pdfName);
+      // revised-PO template not approved in Meta yet: the vendor still gets the new PO with the normal template
+      if (err && m.template === 'po_revised_vendor') { rows.push(log(m, 'failed', err)); m.template = 'po_approval_vendor'; m.params = m.params.filter(([k]) => k !== 'old_po_number'); err = await sendTpl(m, media, pdfName); }
       if (!err) { rows.push(log(m, 'sent')); sent++; } else { rows.push(log(m, 'failed', err)); failed++; }
     }
     await finish();

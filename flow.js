@@ -98,7 +98,9 @@ VIEWS.poapproval = {
     bar += '</div>';
     const hist = (p.amend_log || []).length ? '<div class="tbl-wrap" style="margin-top:12px"><table><tr><th>Amendment</th><th>By</th><th>Date</th></tr>' + p.amend_log.map(x => '<tr><td>' + esc(x.remark) + '</td><td>' + esc(x.by) + '</td><td>' + fmtDT(x.at) + '</td></tr>').join('') + '</table></div>' : '';
     const moq = (p.moq_log || []).length ? '<div class="tbl-wrap" style="margin-top:12px"><table><tr><th>Item Code</th><th class="num">Net Requirement</th><th class="num">Ordered (MOQ)</th><th class="num">Extra</th><th>Reason</th><th>By</th></tr>' + p.moq_log.map(x => '<tr><td>' + esc(x.material) + '</td><td class="num">' + qtyFmt(x.net) + '</td><td class="num">' + qtyFmt(x.moq) + '</td><td class="num">' + qtyFmt(x.extra) + '</td><td>' + esc(x.reason) + '</td><td>' + esc(x.by) + '</td></tr>').join('') + '</table></div>' : '';
-    setMain(bar + '<div class="card po2-card">' + poDocHtml(p) + '</div>' + moq + hist);
+    const rev = p.revised_from ? '<div class="tbl-wrap" style="margin-bottom:12px"><table class="nopage"><tr><th>Replaces PO</th><th>Item Code</th><th>Item Name</th><th class="num">Old Rate</th><th class="num">New Rate</th><th>Reason</th></tr>' +
+      (p.price_changes || []).map(x => '<tr><td><b>' + esc(p.revised_from) + '</b></td><td>' + esc(x.material) + '</td><td>' + esc((matBy(x.material) || {}).name || '') + '</td><td class="num">' + esc(x.from) + '</td><td class="num"><b>' + esc(x.to) + '</b></td><td>' + esc(p.revise_reason || '') + '</td></tr>').join('') + '</table></div>' : '';
+    setMain(bar + rev + '<div class="card po2-card">' + poDocHtml(p) + '</div>' + moq + hist);
     const r = $('#paRem'); if (r) r.focus();
   }
 };
@@ -108,10 +110,15 @@ ACTIONS['pa-approve'] = el => {
   const p = Store.get('purchase_orders', el.dataset.id);
   if (!p || p.approval !== 'Pending') return;
   if (!canApprovePo(p)) { flash(poOwn(p) ? 'You raised this PO — someone else must approve it.' : 'Only Admin/Manager can approve POs.', 'err'); return; }
-  p.approval = 'Approved'; p.approved_by = ME.name; p.approved_at = nowIso(); Store.put('purchase_orders', p);
-  p.lines.forEach(l => { if (!l.jc_no) return; const j = jcBy(l.jc_no); if (!j) return; const jl = (j.lines || []).find(x => norm(x.material) === norm(l.material)); if (jl) { jl.po_raised = num(jl.po_raised) + num(l.qty); Store.put('job_cards', j); } });
-  audit('po.approve', p.no, p.vendor); flash(esc(p.no) + ' approved.'); waSend('po_approved', p.id); PA_UI.view = null; VIEWS.poapproval.render();
+  if (p.revised_from && !isSuperAdmin()) { flash('A price revision is approved by the CEO (Super Admin).', 'err'); return; }
+  poMarkApproved(p); flash(esc(p.no) + ' approved.'); PA_UI.view = null; VIEWS.poapproval.render();
 };
+// PO approved: job card PO quantities go up and the vendor gets the PO on WhatsApp
+function poJcRaise(p, sign) { (p.lines || []).forEach(l => { if (!l.jc_no) return; const j = jcBy(l.jc_no); if (!j) return; const jl = (j.lines || []).find(x => norm(x.material) === norm(l.material)); if (jl) { jl.po_raised = Math.max(0, num(jl.po_raised) + sign * num(l.qty)); Store.put('job_cards', j); } }); }
+function poMarkApproved(p, how) {
+  p.approval = 'Approved'; p.approved_by = ME.name; p.approved_at = nowIso(); Store.put('purchase_orders', p);
+  poJcRaise(p, 1); audit(how || 'po.approve', p.no, p.vendor + (p.revised_from ? ' · replaces ' + p.revised_from : '')); waSend('po_approved', p.id);
+}
 ACTIONS['pa-open'] = el => { PA_UI.id = el.dataset.id; PA_UI.act = el.dataset.a; VIEWS.poapproval.render(); };
 ACTIONS['pa-cancel'] = () => { PA_UI.id = null; PA_UI.act = null; VIEWS.poapproval.render(); };
 ACTIONS['pa-confirm'] = el => {
@@ -120,12 +127,15 @@ ACTIONS['pa-confirm'] = el => {
   const rem = ($('#paRem') || { value: '' }).value.trim();
   if (!rem) { flash(PA_UI.act === 'amend' ? 'Write what needs to be amended.' : 'Write the reason for rejection.', 'err'); return; }
   if (PA_UI.act === 'amend') {
-    p.approval = 'Amend'; p.amend_log = (p.amend_log || []).concat([{ remark: rem, by: ME.name, at: nowIso() }]);
-    audit('po.amend_request', p.no, rem); flash(esc(p.no) + ' sent back to ' + esc(p.created_by || 'the creator') + ' for amendment.');
-  } else {
-    p.approval = 'Rejected'; p.approved_by = ME.name; p.reject_remark = rem;
-    audit('po.reject', p.no, rem); flash(esc(p.no) + ' rejected.');
+    // the approver amends the PO himself; it is approved when he saves it (it does not go back to the creator)
+    p.approval = 'Amend'; p.amend_by = ME.name; p.amend_by_id = ME.id; p.amend_log = (p.amend_log || []).concat([{ remark: rem, by: ME.name, at: nowIso() }]);
+    Store.put('purchase_orders', p); audit('po.amend', p.no, rem); PA_UI.id = null; PA_UI.act = null; PA_UI.view = null;
+    go('po'); setTimeout(() => ACTIONS['po-edit']({ dataset: { id: p.id } }), 60); return;
   }
+  p.approval = 'Rejected'; p.approved_by = ME.name; p.approved_at = nowIso(); p.reject_remark = rem;
+  audit('po.reject', p.no, rem); flash(esc(p.no) + ' rejected.');
+  // a rejected price revision puts the earlier PO back
+  if (p.revised_from_id) { const old = Store.get('purchase_orders', p.revised_from_id); if (old && old.cancelled && old.superseded_by === p.no) { old.cancelled = false; old.cancel_reason = ''; old.superseded_by = ''; Store.put('purchase_orders', old); audit('po.revision_rejected', old.no, 'restored — ' + p.no + ' rejected'); } }
   Store.put('purchase_orders', p); PA_UI.id = null; PA_UI.act = null; PA_UI.view = null; VIEWS.poapproval.render();
 };
 
@@ -310,9 +320,14 @@ VIEWS.invapproval = {
 ACTIONS['ia-amend'] = el => {
   if (!requirePerm('purchase', 'edit')) return;
   const i = Store.get('inwards', el.dataset.id); if (!i) return;
-  reasonDialog('Send ' + (i.bill_no || i.no) + ' back to Store for correction', 'Send for amendment', why => {
-    i.inv_status = 'Amend'; i.amend_log = (i.amend_log || []).concat([{ at: nowIso(), by: ME.name, remark: why, stage: 'Invoice Approval' }]);
-    Store.put('inwards', i); audit('inward.invoice_amend', i.no, why); IA_UI.view = null; flash(esc(i.bill_no) + ' sent back to Store for amendment.'); VIEWS.invapproval.render();
+  // the approver corrects it here; it stays with him for approval (it does not go back to Store)
+  formDialog('Amend ' + i.no, [{ k: 'bill_no', l: (i.bill_type || 'Invoice') + ' No', value: i.bill_no, req: true }, { k: 'bill_date', l: (i.bill_type || 'Invoice') + ' Date', type: 'date', value: i.bill_date, req: true },
+    { k: 'qty', l: 'Invoice Qty', type: 'number', value: i.qty, req: true }, { k: 'remark', l: 'Remark', value: i.remark || '' }, { k: 'note', l: 'What was amended', type: 'textarea', req: true }], 'Save amendment', v => {
+    if (Store.all('inwards').some(x => x.id !== i.id && norm(x.vendor) === norm(i.vendor) && norm(x.bill_no) === norm(v.bill_no))) return i.vendor + ' already has ' + v.bill_no + '.';
+    const was = (i.bill_no || '') + ' · ' + (i.bill_date || '') + ' · ' + qtyFmt(i.qty);
+    Object.assign(i, { bill_no: v.bill_no, bill_date: v.bill_date, qty: v.qty, remark: v.remark });
+    i.amend_log = (i.amend_log || []).concat([{ at: nowIso(), by: ME.name, remark: v.note + ' (was ' + was + ')', stage: 'Amended at invoice approval' }]);
+    Store.put('inwards', i); audit('inward.invoice_amend', i.no, v.note + ' — was ' + was); flash(esc(i.no) + ' amended — approve it now.'); VIEWS.invapproval.render();
   });
 };
 ACTIONS['ia-view'] = el => { IA_UI.view = el.dataset.id; IA_UI.act = null; IA_UI.notes = []; VIEWS.invapproval.render(); };
@@ -414,10 +429,12 @@ ACTIONS['qcm-set'] = el => {
 ACTIONS['qcm-amend'] = el => {
   if (!requirePerm('merchant', 'edit')) return;
   const k = el.dataset.k; const { i, q } = qcFind(k); if (!q || q.m_status) return;
-  reasonDialog('Send ' + q.material + ' back to QC', 'Send for amendment', why => {
-    q.amend_log = (q.amend_log || []).concat([{ at: nowIso(), by: ME.name, remark: why, stage: 'Swatch Approval', result: q.result }]);
-    q.result = ''; q.photo = ''; q.qc_note = why; Store.put('inwards', i); audit('inward.swatch_amend', i.no, q.material + ' · ' + why);
-    flash(esc(q.material) + ' sent back to QC for a re-check.'); VIEWS.swatch.render();
+  // the merchant corrects the QC result himself (a wrong mismatch becomes a match); it does not go back to QC
+  formDialog('Amend QC · ' + q.material, [{ k: 'res', l: 'QC result', type: 'select', options: ['Match', 'Mismatch'], value: 'Match' }, { k: 'why', l: 'Reason', type: 'textarea', req: true }], 'Save amendment', v => {
+    q.amend_log = (q.amend_log || []).concat([{ at: nowIso(), by: ME.name, remark: v.why, stage: 'Swatch Approval', result: q.result + ' → ' + v.res }]);
+    q.result = v.res; q.qc_note = v.why; if (v.res === 'Match') { q.m_status = 'Approved'; q.m_by = ME.name; q.m_at = nowIso(); q.m_note = 'Amended to Match — ' + v.why; }
+    Store.put('inwards', i); audit('inward.swatch_amend', i.no, q.material + ' · ' + v.res + ' · ' + v.why);
+    flash(esc(q.material) + (v.res === 'Match' ? ' amended to Match — goes to GRN.' : ' stays a mismatch — approve or reject it.')); VIEWS.swatch.render();
   });
 };
 ACTIONS['sw-set'] = el => {
@@ -577,9 +594,15 @@ ACTIONS['ex-set'] = el => {
 ACTIONS['ex-amend'] = el => {
   if (!canApproveExcess()) { flash('Only the CEO can decide excess material.', 'err'); return; }
   const g = Store.get('grns', el.dataset.id); const l = g && g.lines[+el.dataset.k]; if (!l || l.excess_status !== 'Pending') return;
-  reasonDialog('Send excess of ' + l.material + ' back to Store', 'Send for amendment', why => {
-    l.excess_status = 'Amend'; l.amend_log = (l.amend_log || []).concat([{ at: nowIso(), by: ME.name, remark: why, stage: 'Excess Approval' }]);
-    Store.put('grns', g); audit('grn.excess_amend', g.no, l.material + ' · ' + why); flash('Sent back to Store to correct the excess.'); VIEWS.excessapproval.render();
+  // the CEO corrects the excess qty himself and then decides; it does not go back to Store
+  formDialog('Amend excess · ' + g.no + ' · ' + l.material, [{ k: 'excess', l: 'Excess Qty', type: 'number', value: l.excess }, { k: 'why', l: 'What was amended', type: 'textarea', req: true }], 'Save amendment', v => {
+    const ex = Math.max(0, num(v.excess)); if (ex > num(l.excess) + 1e-9) return 'Excess can only be reduced (it is ' + qtyFmt(l.excess) + ').';
+    l.recv_qty = num(l.recv_qty != null ? l.recv_qty : num(l.accepted) + num(l.rejected) + num(l.excess)) - (num(l.excess) - ex);
+    l.amend_log = (l.amend_log || []).concat([{ at: nowIso(), by: ME.name, remark: v.why + ' (excess ' + qtyFmt(l.excess) + ' → ' + qtyFmt(ex) + ')', stage: 'Amended at excess approval' }]);
+    l.excess = ex; l.excess_status = ex > 0 ? 'Pending' : '';
+    Store.put('grns', g); audit('grn.excess_amend', g.no, l.material + ' · excess ' + qtyFmt(ex) + ' · ' + v.why);
+    if (!g.lines.some(x => x.excess_status === 'Pending' || x.excess_status === 'Amend')) waSend('grn_final', g.id);
+    flash(ex > 0 ? 'Excess amended to ' + qtyFmt(ex) + ' — accept or reject it now.' : 'Excess removed.'); VIEWS.excessapproval.render();
   });
 };
 ACTIONS['ex-fix'] = el => {
