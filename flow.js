@@ -562,7 +562,7 @@ ACTIONS['grn-save'] = () => {
   if (totEx > 0) {
     const to = String(settings().alert_excess_email || '').trim();
     const body = 'GRN ' + g.no + ' · ' + p.vendor + ' · PO ' + p.no + ' · Invoice ' + iw.bill_no + '\n' + calc.filter(c => c.excess > 0).map(c => c.l.material + ' — ' + ((matBy(c.l.material) || {}).name || '') + ': PO pending ' + qtyFmt(c.pen) + ', invoice ' + qtyFmt(c.inv) + ', excess ' + qtyFmt(c.excess)).join('\n') + '\nGRN by ' + ME.name;
-    Store.put('mail_queue', { id: uid(), to, subject: 'Excess material for approval — ' + g.no + ' (' + p.vendor + ')', body, ref: g.no, status: to ? 'queued' : 'no_recipient', at: nowIso(), by: ME.name });
+    const mq = Store.put('mail_queue', { id: uid(), to, subject: 'Excess material for approval — ' + g.no + ' (' + p.vendor + ')', body, ref: g.no, status: to ? 'queued' : 'no_recipient', at: nowIso(), by: ME.name }); if (to) mailSend(mq.id);
     flash(esc(g.no) + ' saved — stock updated. Excess ' + qtyFmt(totEx) + ' sent for approval' + (to ? ' (mail to ' + esc(to) + ')' : '') + '; GRN report after the decision.');
   }
   else { flash(esc(g.no) + ' saved — stock updated.'); ACTIONS['print-grn']({ dataset: { id: g.id } }); }

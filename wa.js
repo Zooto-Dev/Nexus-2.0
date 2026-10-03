@@ -47,6 +47,44 @@ async function waSend(event, id, resend, extra) {
   } catch (e) { flash('WhatsApp (' + esc(WA_EVENT_LABEL[event] || event) + ') not sent: ' + esc(e.message), 'err'); }
 }
 
+/* ---------- Mail: queued in mail_queue, sent by the nx-mail edge function through Google Apps Script ---------- */
+async function mailSend(id, resend) {
+  if (!CLOUD || !SB || !id) return;
+  try {
+    await waSynced();
+    const { data, error } = await SB.functions.invoke('nx-mail', { body: { id } });
+    let msg = data && data.error;
+    if (error) { msg = error.message; try { const j = await error.context.json(); msg = j.error || msg; } catch (e) { } }
+    if (msg) flash('Mail not sent: ' + esc(msg), 'err');
+    else if (resend && data && data.ok) flash('Mail sent.');
+  } catch (e) { flash('Mail not sent: ' + esc(e.message), 'err'); }
+}
+const ML_UI = { st: '' };
+VIEWS.maillog = {
+  mod: 'audit', render() {
+    const stName = { queued: 'Queued', sent: 'Sent', failed: 'Failed', no_recipient: 'No recipient' };
+    const rows = Store.all('mail_queue').filter(r => !ML_UI.st || r.status === ML_UI.st).sort((a, b) => (b.at || '') < (a.at || '') ? -1 : 1);
+    const admin = isAdminRole();
+    const m = setMain('<div class="toolbar"><select id="mlSt"><option value="">All status</option>' + Object.keys(stName).map(k => '<option value="' + k + '"' + (ML_UI.st === k ? ' selected' : '') + '>' + stName[k] + '</option>').join('') + '</select><span class="grow"></span>' + (admin && CLOUD ? '<button class="btn" data-act="ml-flush">Send queued</button>' : '') + '</div>' +
+      '<div class="tbl-wrap"><table><tr><th>Date &amp; Time</th><th>Ref</th><th>To</th><th>Subject</th><th>Status</th><th>Sent At</th><th>Error</th><th>By</th>' + (admin ? '<th></th>' : '') + '</tr>' +
+      (rows.length ? rows.map(r => '<tr><td class="nowrap">' + fmtDT(r.at) + '</td><td>' + esc(r.ref || '') + '</td><td>' + esc(r.to || '') + '</td><td>' + esc(r.subject || '') + '</td><td><span class="st ' + (r.status === 'sent' ? 'Done' : r.status === 'queued' ? 'Pending' : 'Late') + '">' + esc(stName[r.status] || r.status || '') + '</span></td><td class="nowrap">' + (r.sent_at ? fmtDT(r.sent_at) : '') + '</td><td>' + esc(r.error || '') + '</td><td>' + esc(r.by || '') + '</td>' +
+        (admin ? '<td>' + (r.status !== 'sent' && r.to ? '<button class="btn sm" data-act="ml-resend" data-id="' + esc(r.id) + '">Resend</button>' : '') + '</td>' : '') + '</tr>').join('')
+        : '<tr><td colspan="' + (admin ? 9 : 8) + '" class="empty">No mails yet</td></tr>') + '</table></div>');
+    m.addEventListener('change', e => { if (e.target.id === 'mlSt') { ML_UI.st = e.target.value; VIEWS.maillog.render(); } });
+  }
+};
+ACTIONS['ml-resend'] = async el => { if (!isAdminRole()) return; audit('mail.resend', el.dataset.id, ''); await mailSend(el.dataset.id, true); };
+ACTIONS['ml-flush'] = async () => {
+  if (!isAdminRole() || !CLOUD || !SB) return;
+  audit('mail.flush', '', '');
+  try {
+    const { data, error } = await SB.functions.invoke('nx-mail', { body: { action: 'flush' } });
+    let msg = data && data.error;
+    if (error) { msg = error.message; try { const j = await error.context.json(); msg = j.error || msg; } catch (e) { } }
+    flash(msg ? 'Mail not sent: ' + esc(msg) : 'Mail: ' + (data.sent || 0) + ' sent, ' + (data.failed || 0) + ' failed.', msg || data.failed ? 'err' : '');
+  } catch (e) { flash('Mail not sent: ' + esc(e.message), 'err'); }
+};
+
 /* ---------- Operations → WhatsApp Log ---------- */
 const WA_UI = { st: '' };
 VIEWS.walog = {
