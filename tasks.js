@@ -143,9 +143,9 @@ ACTIONS['esc-resolve'] = el => {
 // score = -(100 - quality); quality = weighted Completion%, On-time%, Volume%, Consistency%. 0 is best.
 const SCORE_W = { completion: 0.35, onTime: 0.35, volume: 0.15, consistency: 0.15 };
 function scoreW() { return Object.assign({}, SCORE_W, settings().score_w || {}); }
-function scoreRows(from, to, rowsIn) {
+function scoreRows(from, to, rowsIn, withDemo) {
   const f = from ? new Date(from + 'T00:00:00') : null, tt = to ? new Date(to + 'T23:59:59') : null; const now = new Date();
-  const rows = (rowsIn || allTasks()).filter(t => t.planned && t.doer && t.doer !== 'SYSTEM' && !t.demo && (!f || t.planned >= f) && (!tt || t.planned <= tt) && (t.done || t.planned <= now));
+  const rows = (rowsIn || allTasks()).filter(t => t.planned && t.doer && t.doer !== 'SYSTEM' && (withDemo || !t.demo) && (!f || t.planned >= f) && (!tt || t.planned <= tt) && (t.done || t.planned <= now));
   const m = {};
   rows.forEach(t => {
     const k = t.doer; const s = m[k] || (m[k] = { doer: k, dept: t.dept, total: 0, completed: 0, pending: 0, overdue: 0, onTime: 0, late: 0, monthly: {}, tasks: [] });
@@ -168,7 +168,7 @@ function scoreRows(from, to, rowsIn) {
   });
   return list.sort((a, b) => b.score - a.score);
 }
-function scoreOf(doer, days) { const r = scoreRows(ymdOf(new Date(Date.now() - (days || 30) * 86400000)), todayYmd()).find(x => norm(x.doer) === norm(doer)); return r || null; }
+function scoreOf(doer, days, withDemo) { const r = scoreRows(ymdOf(new Date(Date.now() - (days || 30) * 86400000)), todayYmd(), null, withDemo).find(x => norm(x.doer) === norm(doer)); return r || null; }
 const scoreCls = s => s == null ? '' : s >= -10 ? 'done-txt' : s >= -30 ? 'pend-txt' : 'late-txt';
 
 /* ================= Task Tracker screen ================= */

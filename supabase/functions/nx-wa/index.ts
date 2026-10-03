@@ -82,7 +82,8 @@ Deno.serve(async (req) => {
     const sendTpl = async (m: Msg, media: string, fileName: string): Promise<string> => {
       const comp: Doc[] = [];
       if (m.doc) comp.push({ type: 'header', parameters: [{ type: 'document', document: { id: media, filename: fileName } }] });
-      comp.push({ type: 'body', parameters: m.params.map(([k, v]) => ({ type: 'text', parameter_name: k, text: v })) });
+      // named templates send parameter_name; the older positional ones ({{1}}, {{2}}) have an empty key
+      comp.push({ type: 'body', parameters: m.params.map(([k, v]) => (k && !/^\d+$/.test(k) ? { type: 'text', parameter_name: k, text: v } : { type: 'text', text: v })) });
       const r = await fetch(GRAPH + phoneId + '/messages', { method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify({ messaging_product: 'whatsapp', to: m.to, type: 'template', template: { name: m.template, language: { code: 'en' }, components: comp } }) });
       const j = await r.json().catch(() => ({}));
       const err = j.messages && j.messages.length ? '' : String(j.error?.error_data?.details || j.error?.message || r.status);
@@ -134,7 +135,17 @@ Deno.serve(async (req) => {
         { to, name: '', template: 'swatch_reject_merchant', params: [['invoice_no', 'INV-TEST-1'], ['vendor_name', 'Test Vendor']] },
         { to, name: '', template: 'excess_approval_md', params: [['vendor_name', 'Test Vendor'], ['invoice_no', 'INV-TEST-1']] },
         { to, name: '', template: 'grn_accounts_alert', params: [['vendor_name', 'Test Vendor'], ['total_qty', '100']], doc: true },
-        { to, name: '', template: 'grn_vendor_alert', params: [['vendor_name', 'Test Vendor']], doc: true }
+        { to, name: '', template: 'grn_vendor_alert', params: [['vendor_name', 'Test Vendor']], doc: true },
+        { to, name: '', template: 'jc_review_merchant', params: [['merchant_name', 'Nexus Test'], ['job_card', 'ZF-TEST']], doc: true },
+        { to, name: '', template: 'material_reservation_alert', params: [['job_card', 'ZF-TEST'], ['items_list', 'EVA-10 120 PAIR; SIL0785 240 PAIR'], ['total_qty', '120']] },
+        { to, name: '', template: 'pending_po_purchase', params: [['job_card', 'ZF-TEST'], ['items_list', 'EVA-10 short 40 PAIR']] },
+        { to, name: '', template: 'requisition_pending_alert', params: [['1', 'REQ-TEST'], ['2', 'ZF-TEST'], ['3', '2'], ['4', 'https://nexus']] },
+        { to, name: '', template: 'order_cancel_alert', params: [['1', 'ZF-TEST'], ['2', 'TEST/PO/001'], ['3', 'Test Vendor']] },
+        { to, name: '', template: 'debit_note_vendor', params: [['1', 'Test Vendor'], ['2', 'INV-TEST-1'], ['3', 'EVA-10']], doc: true },
+        { to, name: '', template: 'high_alert_material_issue', params: [['1', 'ZF-TEST'], ['2', 'Stitching']] },
+        { to, name: '', template: 'production_no_material_alert', params: [['1', 'ZF-TEST']] },
+        { to, name: '', template: 'low_stock_alert', params: [['1', 'EVA-10 (Current 10 PAIR / Min 100 PAIR)']] },
+        { to, name: '', template: 'vendor_delivery_due', params: [['1', 'Test Vendor'], ['2', 'EVA-10 (qty 100, due 05-Oct-2026)'], ['3', 'TEST/PO/001'], ['4', '05-Oct-2026']] }
       ];
       const up = await uploadPdf(b.pdf, 'Nexus_Test.pdf');
       const results: { template: string; ok: boolean; error: string }[] = [];
@@ -213,6 +224,70 @@ Deno.serve(async (req) => {
         const v = await vendorOf(g.vendor);
         msgs.push({ to: phone(v?.mobile), name: String(g.vendor || ''), template: 'grn_vendor_alert', params: [['vendor_name', safe(g.vendor)]], doc: true });
       }
+    } else if (event === 'jc_created') {
+      // job card made: PDF to the brand merchandiser, reservation list to Store, short items to Purchase
+      const j = await getDoc('job_cards', id); if (!j) return out({ error: 'Job card not found' }, 404);
+      ref = j.no; needPdf = true; pdfName = 'JobCard_' + String(j.no || '').replace(/[^a-zA-Z0-9]/g, '_') + '.pdf';
+      const mats = Object.fromEntries((await all('materials')).map((m) => [norm(m.code), m]));
+      const lineTxt = (l: Doc, q: number) => safe((mats[norm(l.material)]?.name || l.material) + ' ' + qty(q) + ' ' + (l.uom || mats[norm(l.material)]?.uom || ''));
+      const cust = (await all('customers')).find((c) => norm(c.name) === norm(j.brand));
+      let merch = cust && cust.merchandiser ? [byFirstName(cust.merchandiser)].filter(Boolean) as Doc[] : [];
+      if (!merch.length) merch = dept(/MERCHAND/).filter((u) => /SR|HEAD|MANAGER/.test(norm(u.designation)));
+      msgs = merch.map((u) => ({ to: phone(u.mobile), name: String(u.name || ''), template: 'jc_review_merchant', params: [['merchant_name', safe(u.name)], ['job_card', safe(j.no)]] as [string, string][], doc: true }));
+      const items = (j.lines || []).map((l: Doc) => lineTxt(l, num(l.required))).join('; ').slice(0, 750) || 'NA';
+      msgs.push(...staff(dept(/STORE/), 'material_reservation_alert', [['job_card', safe(j.no)], ['items_list', items], ['total_qty', qty(num(j.qty))]]));
+      const short = String(b.short || '').replace(/[\r\n\t]+/g, ' ').slice(0, 750);
+      if (short) msgs.push(...staff(dept(/PURCHASE/), 'pending_po_purchase', [['job_card', safe(j.no)], ['items_list', safe(short)]]));
+    } else if (event === 'requisition') {
+      const r = await getDoc('requisitions', id); if (!r) return out({ error: 'Requisition not found' }, 404);
+      ref = r.no;
+      const link = /^https:\/\/[\w.-]+(\/[\w./-]*)?$/.test(String(b.link || '')) ? String(b.link) : 'Nexus';
+      msgs = staff(dept(/STORE/), 'requisition_pending_alert', [['1', safe(r.no)], ['2', safe(r.jc_no || r.dept || '-')], ['3', String((r.lines || []).length)], ['4', link]]);
+    } else if (event === 'order_cancel') {
+      const o = await getDoc('orders', id); if (!o) return out({ error: 'Order not found' }, 404);
+      if (o.priority !== 'Cancelled') return out({ error: 'Order is not cancelled' }, 409);
+      ref = o.no;
+      const jcs = (o.lines || []).map((l: Doc) => norm(l.jc_no)).filter(Boolean);
+      const pos = (await all('purchase_orders')).filter((p) => !p.cancelled && (p.lines || []).some((l: Doc) => jcs.includes(norm(l.jc_no))));
+      msgs = staff(dept(/PURCHASE/), 'order_cancel_alert', [['1', safe(jcs.join(', ') || o.no)], ['2', safe(pos.map((p) => p.no).join(', ') || '-')], ['3', safe([...new Set(pos.map((p) => p.vendor))].join(', ') || '-')]]);
+    } else if (event === 'debit_note') {
+      // checklist task "Debit Note …" closed with the debit note PDF: the PDF goes to the vendor
+      const [tid] = id.split('|'); const t = await getDoc('checklist', tid); if (!t) return out({ error: 'Debit note task not found' }, 404);
+      if (!t.vendor) { const m = /Debit Note\s*[—-]\s*(.*?)\s*\((.*)\)\s*:/.exec(String(t.title || '')); if (m) { t.invoice = m[1]; t.vendor = m[2]; } }
+      if (!t.vendor) return out({ error: 'Vendor not known for this debit note' }, 400);
+      ref = t.invoice || t.title; needPdf = true; pdfName = 'DN_' + String(t.invoice || 'DN').replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 30) + '.pdf';
+      const v = await vendorOf(t.vendor);
+      msgs = [{ to: phone(v?.mobile), name: String(t.vendor), template: 'debit_note_vendor', params: [['1', safe(t.vendor)], ['2', safe(t.invoice || '-')], ['3', safe(t.items || '-')]], doc: true }];
+    } else if (event === 'prod_no_material') {
+      const pr = await getDoc('prod_reports', id); if (!pr) return out({ error: 'Production report not found' }, 404);
+      ref = pr.jc_no;
+      const issued = (await all('issues')).some((i) => [i.jc, i.to_jc, i.jc_no].some((x) => x && norm(x) === norm(pr.jc_no)) && i.status === 'Approved');
+      if (issued) return out({ ok: true, skipped: 'material was issued' });
+      msgs = staff(dept(/STORE|PLANNING|PPC/), 'high_alert_material_issue', [['1', safe(pr.jc_no)], ['2', safe(pr.stage)]]);
+      msgs.push(...staff(superAdmins(), 'production_no_material_alert', [['1', safe(pr.jc_no)]]));
+    } else if (event === 'low_stock') {
+      // once a day: the list of items below their minimum level, worked out from stock the app shows
+      ref = 'Low stock ' + id; round = id;
+      const text = String(b.text || '').replace(/[\r\n\t]+/g, ' ').replace(/\s{2,}/g, ' ').trim().slice(0, 750);
+      if (!text) return out({ ok: true, skipped: 'nothing below minimum' });
+      msgs = staff(dept(/PURCHASE/), 'low_stock_alert', [['1', text]]);
+    } else if (event === 'delivery_due') {
+      // daily reminder to a vendor: PO items due within 7 days or overdue up to 21 days
+      const [vname, day] = [id.split('|')[0], id.split('|')[1] || '']; ref = vname; round = day;
+      const today = new Date(day ? day + 'T00:00:00' : Date.now());
+      const due: { item: string; q: number; d: Date; po: string }[] = [];
+      const mats = Object.fromEntries((await all('materials')).map((m) => [norm(m.code), m]));
+      (await all('purchase_orders')).filter((p) => !p.cancelled && p.approval === 'Approved' && norm(p.vendor) === norm(vname) && p.expected).forEach((p) => {
+        const d = new Date(p.expected + 'T00:00:00'); const diff = Math.round((d.getTime() - today.getTime()) / 86400000);
+        if (diff > 7 || diff < -21) return;
+        (p.lines || []).forEach((l: Doc) => { const left = num(l.qty) - num(l.received); if (left > 1e-9) due.push({ item: String(mats[norm(l.material)]?.name || l.material), q: left, d, po: p.no }); });
+      });
+      if (!due.length) return out({ ok: true, skipped: 'nothing due' });
+      due.sort((a, c) => a.d.getTime() - c.d.getTime());
+      const fd = (d: Date) => String(d.getDate()).padStart(2, '0') + '-' + MON[d.getMonth()] + '-' + d.getFullYear();
+      const items = due.slice(0, 15).map((x) => x.item + ' (qty ' + qty(x.q) + ', due ' + fd(x.d) + ')').join(', ') + (due.length > 15 ? ', +' + (due.length - 15) + ' more' : '');
+      const v = await vendorOf(vname);
+      msgs = [{ to: phone(v?.mobile), name: vname, template: 'vendor_delivery_due', params: [['1', safe(vname)], ['2', safe(items)], ['3', safe([...new Set(due.map((x) => x.po))].join(', '))], ['4', fd(due[0].d)]] }];
     } else return out({ error: 'Unknown event' }, 400);
     ctx = { event, rid: id, ref };
 

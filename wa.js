@@ -3,8 +3,8 @@
    template, parameters and recipients. PO approval and final GRN also send their PDF. */
 'use strict';
 
-const WA_PDF = { po_approved: 'po', grn_final: 'grn' };
-const WA_EVENT_LABEL = { po_submitted: 'PO sent for approval', po_approved: 'PO approved', gate_entry: 'Gate entry', invoice_approved: 'Invoice approved', qc_mismatch: 'QC mismatch', excess_pending: 'Excess approval', grn_final: 'GRN', test: 'Test' };
+const WA_PDF = { po_approved: 'po', grn_final: 'grn', jc_created: 'jc' };
+const WA_EVENT_LABEL = { po_submitted: 'PO sent for approval', po_approved: 'PO approved', gate_entry: 'Gate entry', invoice_approved: 'Invoice approved', qc_mismatch: 'QC mismatch', excess_pending: 'Excess approval', grn_final: 'GRN', jc_created: 'Job card', requisition: 'Requisition', order_cancel: 'Order cancelled', debit_note: 'Debit note', prod_no_material: 'Production without material', low_stock: 'Low stock', delivery_due: 'Vendor delivery reminder', test: 'Test' };
 
 let WA_LIB = null;
 function waLib() {
@@ -14,9 +14,9 @@ function waLib() {
 }
 // the same document the Print button shows, as a PDF (base64, no prefix)
 async function waPdf(kind, id) {
-  const d = kind === 'po' ? Store.get('purchase_orders', id) : Store.get('grns', id);
+  const d = Store.get(kind === 'po' ? 'purchase_orders' : kind === 'jc' ? 'job_cards' : 'grns', id);
   if (!d) throw new Error('Record not found');
-  return waHtmlPdf(kind === 'po' ? poDocHtml(d) : grnDocHtml(d));
+  return waHtmlPdf(kind === 'po' ? poDocHtml(d) : kind === 'jc' ? jcDocHtml(d) : grnDocHtml(d));
 }
 async function waHtmlPdf(html) {
   await waLib();
@@ -32,11 +32,11 @@ async function waHtmlPdf(html) {
 // wait until our own saves have reached the cloud, so the server reads the latest record
 async function waSynced() { for (let t = 0; t < 40 && (pendingWrites > 0 || RETRY_Q.size); t++) await new Promise(r => setTimeout(r, 250)); }
 
-async function waSend(event, id, resend) {
+async function waSend(event, id, resend, extra) {
   if (!CLOUD || !SB) return;
   try {
     await waSynced();
-    const body = { event, id, resend: !!resend };
+    const body = Object.assign({}, extra || {}, { event, id, resend: !!resend });
     if (WA_PDF[event]) body.pdf = await waPdf(WA_PDF[event], id);
     const { data, error } = await SB.functions.invoke('nx-wa', { body });
     let msg = data && data.error;
@@ -217,3 +217,21 @@ ACTIONS['wai-media'] = async el => {
     setTimeout(() => URL.revokeObjectURL(url), 60000);
   } catch (e) { flash(esc(e.message), 'err'); }
 };
+
+/* ---------- daily: low stock list to Purchase, delivery reminders to vendors (server sends each once a day) ---------- */
+function waDaily() {
+  if (!CLOUD || !SB || !ME || new Date().getHours() < 10) return;
+  if (!(isAdminRole() || can('purchase', 'edit') || can('store', 'edit'))) return;
+  const day = todayYmd(); try { if (localStorage.getItem('nx_wa_daily') === day) return; localStorage.setItem('nx_wa_daily', day); } catch (e) { return; }
+  try {
+    const { stk } = stockMaps();
+    const txt = lowStockList().map(m => (m.name || m.code) + ' (Current ' + qtyFmt(stk[norm(m.code)] || 0) + ' ' + (m.uom || '') + ' / Min ' + qtyFmt(m.min_level) + ' ' + (m.uom || '') + ')').join('; ').slice(0, 750);
+    if (txt) waSend('low_stock', day, false, { text: txt });
+    const t0 = new Date(day + 'T00:00:00').getTime();
+    const vendors = new Set(Store.all('purchase_orders').filter(p => !p.cancelled && p.approval === 'Approved' && p.expected && (p.lines || []).some(l => num(l.qty) - num(l.received) > 1e-9))
+      .filter(p => { const d = Math.round((new Date(p.expected + 'T00:00:00').getTime() - t0) / 86400000); return d <= 7 && d >= -21; }).map(p => p.vendor));
+    vendors.forEach(v => waSend('delivery_due', v + '|' + day));
+  } catch (e) { console.error(e); }
+}
+setInterval(() => { try { waDaily(); } catch (e) { } }, 30 * 60000);
+setTimeout(() => { try { waDaily(); } catch (e) { } }, 20000);

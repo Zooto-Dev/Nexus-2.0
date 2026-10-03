@@ -394,3 +394,5 @@ a.dl:hover { background: #fafbfc; text-decoration: none; }
 .dsec { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 8px 0 8px; }
 @media (max-width: 1100px) { .dk { grid-template-columns: repeat(3, 1fr); } .dgrid { grid-template-columns: 1fr; } }
 @media (max-width: 640px) { .dk, .dk-co { grid-template-columns: repeat(2, 1fr); } .dk-score { grid-column: span 2; } .dk-c .v { font-size: 24px; } }
+.tphotos{margin-top:3px;display:flex;gap:4px;flex-wrap:wrap}
+.tphotos img{height:34px!important;width:34px;object-fit:cover;border-radius:4px;border:1px solid var(--line)}

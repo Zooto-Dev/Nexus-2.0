@@ -38,7 +38,7 @@ function personTasks(doer) {
     r.order.forEach(id => {
       const s = r.steps[id]; if (!s || norm(s.doer) !== norm(doer)) return;
       const def = r.spec.steps.find(x => x.id === id);
-      const base = { task: s.name, ref: o.no, party: o.customer_name, src: 'FMS', planned: s.planned || null };
+      const base = { task: s.name, ref: o.no, party: o.customer_name, src: o.kind === 'sample' ? 'Sample' : 'FMS', planned: s.planned || null, photos: fmsPhotos(o) };
       if (s.status === 'Pending' || s.status === 'Late') out.push(Object.assign(base, { status: s.status === 'Late' ? 'Delayed' : openSt(s.planned), delay: s.status === 'Late' ? s.delayMinutes : 0, btn: stepDoneBtn(o, s, def, r.spec) }));
       else if (s.actual && new Date(s.actual) >= since) out.push(Object.assign(base, { status: 'Completed', done: new Date(s.actual), delay: s.delayMinutes || 0 }));
     });
@@ -55,6 +55,17 @@ function personTasks(doer) {
     out.push(Object.assign(base, { status: x.status === 'Delayed' ? 'Delayed' : x.status, delay: x.delay, btn: '<a class="btn sm" href="' + esc(x.link) + '">Open</a>' }));
   });
   return out;
+}
+// pictures that make an FMS task clear: the sample photo, or each article's job card photo (BOM photo before the job card exists)
+function fmsPhotos(o) {
+  if (o.kind === 'sample') return o.image ? [o.image] : [];
+  const out = [];
+  (o.lines || []).forEach(l => {
+    const j = l.jc_no && jcBy(l.jc_no);
+    const b = !(j && j.photo) && Store.all('boms').filter(x => norm(x.article) === norm(l.article) && x.photo && (!l.colour || !x.colour || norm(x.colour) === norm(l.colour))).sort((a, c) => (c.version || 0) - (a.version || 0))[0];
+    const src = (j && j.photo) || (b && b.photo); if (src && !out.includes(src)) out.push(src);
+  });
+  return out.slice(0, 4);
 }
 function homeData(who) {
   const sa = isSuperAdmin(); const self = norm(who) === norm(ME.doer);
@@ -75,7 +86,7 @@ function homeData(who) {
   try { escRun(); } catch (e) { console.error(e); }
   const tickets = Store.all('tickets').filter(t => ticketEscalated(t) && names.has(t.by));
   const escs = Store.all('escalations').filter(e => e.status === 'Open' && escInvolved(e, who)).sort((a, b) => b.level - a.level || (a.planned < b.planned ? -1 : 1));
-  const sc = scoreOf(who, 30);
+  const sc = scoreOf(who, 30, true);
   return { tasks, done, doneN, onTime, score: sc ? Math.round(sc.quality) : null, sc, held, tickets, escs, open: paMine.filter(r => r.status === 'Pending').sort((a, b) => a.planned - b.planned) };
 }
 function homeTaskTable(tasks) {
@@ -87,13 +98,13 @@ function homeTaskTable(tasks) {
   return '<div class="dcard"><div class="dh3">My tasks<span class="grow"></span>' +
     seg('htf', ['all', 'Delayed', 'Pending', 'Upcoming', 'Completed'].map(k => ({ v: k, l: (k === 'all' ? 'All' : k) + ' ' + n(k) })), HT_UI.f) + '</div>' +
     '<div class="tbl-wrap"><table data-pg="home_tasks"><tr><th class="num">#</th><th>Task</th><th>Reference</th><th>Party</th><th>Planned</th><th>Completed</th><th>Status</th><th class="num">Delay</th><th></th></tr>' +
-    (list.length ? list.map((t, i) => '<tr><td class="num">' + (i + 1) + '</td><td>' + esc(t.task) + '<div class="muted small">' + esc(t.src) + '</div></td><td><b>' + esc(t.ref || '') + '</b></td><td>' + esc(t.party || '') + '</td><td class="nowrap">' + (t.planned ? fmtDT(t.planned) : '') + '</td><td class="nowrap">' + (t.done ? fmtDT(t.done) : '') + '</td>' +
+    (list.length ? list.map((t, i) => '<tr><td class="num">' + (i + 1) + '</td><td>' + esc(t.task) + '<div class="muted small">' + esc(t.src) + '</div>' + ((t.photos || []).length ? '<div class="tphotos">' + t.photos.map(photoThumb).join(' ') + '</div>' : '') + '</td><td><b>' + esc(t.ref || '') + '</b></td><td>' + esc(t.party || '') + '</td><td class="nowrap">' + (t.planned ? fmtDT(t.planned) : '') + '</td><td class="nowrap">' + (t.done ? fmtDT(t.done) : '') + '</td>' +
       '<td><span class="st ' + cls[t.status] + '">' + t.status + '</span></td><td class="num' + (t.delay ? ' late-txt' : '') + '">' + (t.delay ? fmtDelay(t.delay) : '') + '</td><td class="right">' + (t.btn || '') + '</td></tr>').join('')
       : '<tr><td colspan="9" class="empty">No tasks</td></tr>') + '</table></div></div>';
 }
 VIEWS.home = {
   mod: 'dashboard', render() {
-    const pick = isAdminRole() || can('tracker', 'view');
+    const pick = isSuperAdmin();   // only the Super Admin can look at someone else's Home
     if (!HT_UI.who || !pick) HT_UI.who = ME.doer || '';
     const who = HT_UI.who; const self = norm(who) === norm(ME.doer); const sa = isSuperAdmin();
     const doers = Array.from(new Set(Store.all('users').filter(u => u.active !== false && u.doer).map(u => u.doer).concat(who ? [who] : []))).sort();
@@ -117,11 +128,11 @@ VIEWS.home = {
       return;
     }
     // summary cards
-    const ring = D.score == null ? '—' : D.score + '%';
+    const ring = D.sc ? D.sc.score.toFixed(1) : '—';
     const ringCol = D.score == null ? 'var(--line)' : D.score >= 90 ? 'var(--done)' : D.score >= 70 ? 'var(--pending)' : 'var(--late)';
     const card = (f, v, l, sub, cls) => '<a class="dk-c' + (HT_UI.f === f ? ' on' : '') + '" data-act="ht-f" data-f="' + f + '"><span class="l">' + l + '</span><span class="v ' + (cls || '') + '">' + v + '</span><span class="s">' + sub + '</span></a>';
     h += '<div class="dk">' +
-      '<div class="dk-c dk-score"><div class="ring" style="background:conic-gradient(' + ringCol + ' ' + (D.score || 0) + '%, var(--line2) 0)"><b>' + ring + '</b></div><div><span class="l">Score · 30 days</span><span class="v ' + (D.sc ? scoreCls(D.sc.score) : '') + '" style="font-size:20px">' + (D.sc ? D.sc.score.toFixed(2) : '—') + '</span><span class="s">' + (D.sc ? D.sc.completed + ' of ' + D.sc.total + ' done · ' + D.sc.onTime + ' on time' : 'no tasks yet') + '</span></div></div>' +
+      '<div class="dk-c dk-score"><div class="ring" style="background:conic-gradient(' + ringCol + ' ' + (D.score || 0) + '%, var(--line2) 0)"><b>' + ring + '</b></div><div><span class="l">Score · 30 days</span><span class="s">' + (D.sc ? D.sc.completed + ' of ' + D.sc.total + ' done · ' + D.sc.onTime + ' on time' : 'no tasks yet') + '</span></div></div>' +
       card('Delayed', cnt('Delayed'), 'Delayed', 'past planned time', 'late-txt') +
       card('Pending', cnt('Pending'), 'Pending today', 'due before tonight', 'pend-txt') +
       card('Upcoming', cnt('Upcoming'), 'Upcoming', 'planned later', '') +
@@ -520,7 +531,9 @@ VIEWS.order = {
     const sp = $('[data-seg="opri"]');
     if (sp) sp.addEventListener('segchange', e => {
       const old = o.priority || ''; o.priority = e.detail; Store.put('orders', o);
-      audit('order.priority', o.no, (old || 'Normal') + ' → ' + (e.detail || 'Normal')); flash(esc(o.no) + ' priority: ' + esc(e.detail || 'Normal')); route();
+      audit('order.priority', o.no, (old || 'Normal') + ' → ' + (e.detail || 'Normal')); flash(esc(o.no) + ' priority: ' + esc(e.detail || 'Normal'));
+      if (e.detail === 'Cancelled' && old !== 'Cancelled') waSend('order_cancel', o.id);
+      route();
     });
   }
 };

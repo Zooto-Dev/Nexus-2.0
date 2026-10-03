@@ -98,9 +98,9 @@ function poStatus(po) {
 function poStCls(st) { return st === 'Received' ? 'Done' : st === 'Partial' ? 'Pending' : st === 'Cancelled' || st === 'Rejected' ? 'Cancelled' : st === 'Pending Approval' || st === 'Amend' ? 'Late' : 'Waiting'; }
 // GRN, followup and inwarding run only against APPROVED POs.
 function openPOs() { return Store.all('purchase_orders').filter(p => !p.cancelled && p.approval === 'Approved' && poPending(p) > 0); }
-function autoTask(title, doer, dueDays) {
+function autoTask(title, doer, dueDays, extra) {
   const due = new Date(Date.now() + (dueDays || 0) * 86400000); if (due.getDay() === 0) due.setDate(due.getDate() + 1); // Sunday -> Monday
-  Store.put('checklist', { id: uid(), title, doer, freq: 'Once', due: ymdOf(due), done: {}, active: true, by: 'auto', auto: true });
+  Store.put('checklist', Object.assign({ id: uid(), title, doer, freq: 'Once', due: ymdOf(due), done: {}, active: true, by: 'auto', auto: true }, extra || {}));
 }
 // Standard letterhead document printer used by every report
 function printDoc(o) {
@@ -813,6 +813,9 @@ ACTIONS['jc-save'] = () => {
     swatch_status: 'Pending', status: 'Open', corrections: [], by: ME.name, at: nowIso()
   });
   audit('jc.create', j.no, o.no + ' · ' + l.article + ' × ' + act + ' · ' + lines.length + ' materials');
+  // WhatsApp: job card PDF to the merchandiser, reservation to Store, short items to Purchase
+  const shortTxt = lines.map(x => ({ x, s: num(x.required) - stockOf(x.material) })).filter(y => y.s > 1e-9).map(y => ((matBy(y.x.material) || {}).name || y.x.material) + ' short ' + qtyFmt(y.s) + ' ' + (y.x.uom || '')).join('; ');
+  waSend('jc_created', j.id, false, { short: shortTxt });
   JC_UI.form = false; JCF = null;
   flash(esc(j.no) + ' created — material requirement generated (' + lines.length + ' items, extra +2%). Swatch approval pending.');
   VIEWS.jobcards.render();
@@ -1373,7 +1376,8 @@ ACTIONS['req-save'] = () => {
   if (bad) { msg(esc(bad)); return; }
   if (!lines.length) { msg('Enter a requisition qty for at least one item.'); return; }
   const r = Store.put('requisitions', { id: uid(), no: nextNo('requisitions', 'REQ'), date: todayYmd(), method: U.method, jc_no: U.method === 'jc' ? U.jc : '', dept: U.method === 'jc' ? 'Production' : U.dept, process: U.process, line: U.line, picker: U.picker, lines, status: 'Pending', by: ME.name, at: nowIso() });
-  audit('req.create', r.no, (r.jc_no || r.dept) + ' · ' + lines.map(l => l.material + '×' + l.qty).join(', ')); U.form = false; U.jc = ''; U.cons = [];
+  audit('req.create', r.no, (r.jc_no || r.dept) + ' · ' + lines.map(l => l.material + '×' + l.qty).join(', '));
+  waSend('requisition', r.id, false, { link: location.origin + location.pathname + '#/issuance' }); U.form = false; U.jc = ''; U.cons = [];
   flash('<b>' + esc(r.no) + '</b> created — sent to Store issuance.'); VIEWS.requisition.render();
 };
 
@@ -1426,6 +1430,7 @@ ACTIONS['pr-save'] = () => {
   const o = Store.all('orders').find(x => norm(x.no) === norm(j.order_no)) || {};
   const p = Store.put('prod_reports', { id: uid(), no: nextNo('prod_reports', 'PRD'), at: nowIso(), date: todayYmd(), jc_no: j.no, order_no: j.order_no || '', category: j.category || o.category || '', brand: j.brand || '', article: j.article || '', colour: j.colour || '', stage: U.stage, sizes, total: sizes.reduce((a, x) => a + x.qty, 0), remark: String(U.remark || '').trim(), by: ME.name });
   audit('prod.report', p.no, j.no + ' · ' + U.stage + ' · ' + p.total);
+  if (!Store.all('issues').some(i => i.status === 'Approved' && [i.jc, i.to_jc, i.jc_no].some(x => x && norm(x) === norm(j.no)))) waSend('prod_no_material', p.id);
   Object.assign(U, { form: false, jc: '', stage: '', qty: {}, remark: '' }); flash(esc(p.no) + ' saved — ' + qtyFmt(p.total) + ' pcs at ' + esc(p.stage) + '.'); VIEWS.prodreport.render();
 };
 

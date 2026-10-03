@@ -139,25 +139,30 @@ ACTIONS['cl-done'] = el => {
   const t = Store.get('checklist', el.dataset.id); if (!t) return;
   if (!clCanMark(t)) { flash('Only ' + esc(t.doer) + ' can mark this done.', 'err'); return; }
   const ymd = el.dataset.d || todayYmd();
-  const needPhoto = !/account/i.test(clUserOf(t.doer).department || t.dept || '');
+  const isDN = t.kind === 'debit_note' || /^Debit Note/i.test(t.title || '');
+  const needPhoto = !isDN && !/account/i.test(clUserOf(t.doer).department || t.dept || ''); let dnPdf = '';
   const old = $('#clDlg'); if (old) old.remove();
   const d = document.createElement('div'); d.id = 'clDlg'; d.className = 'dlg-back'; const photos = [];
   d.innerHTML = '<div class="dlg"><div class="dlg-h">' + esc(t.title) + ' · ' + fmtD(ymd) + '</div><table class="jckv">' +
+    (isDN ? '<tr><td class="k">Debit Note PDF *</td><td class="v"><input id="clDn" type="file" accept="application/pdf"></td></tr>' : '') +
     '<tr><td class="k">Photo' + (needPhoto ? ' *' : '') + '</td><td class="v"><input id="clPh" type="file" accept="image/*" multiple> <span id="clPhN" class="small muted"></span></td></tr>' +
     '<tr><td class="k">Remark</td><td class="v"><textarea id="clRem" rows="2"></textarea></td></tr></table>' +
     '<div class="dlg-f"><span id="clMsg" class="small late-txt"></span><span class="grow"></span><button class="btn" data-x>Cancel</button><button class="btn primary" data-ok>Done</button></div></div>';
   document.body.appendChild(d);
+  if (isDN) $('#clDn', d).addEventListener('change', e => { const f = e.target.files[0]; if (!f) { dnPdf = ''; return; } if (f.size > 5 * 1024 * 1024) { $('#clMsg', d).textContent = 'PDF must be under 5 MB.'; e.target.value = ''; return; } const fr = new FileReader(); fr.onload = () => { dnPdf = String(fr.result).split('base64,')[1] || ''; }; fr.readAsDataURL(f); });
   $('#clPh', d).addEventListener('change', e => { Array.from(e.target.files || []).forEach(f => readImg(f, src => { if (src) photos.push(src); $('#clPhN', d).textContent = photos.length + ' photo(s)'; })); });
   d.addEventListener('click', ev => {
     if (ev.target.closest('[data-x]')) { d.remove(); return; }
     if (!ev.target.closest('[data-ok]')) return;
     if (needPhoto && !photos.length) { $('#clMsg', d).textContent = 'Attach a photo.'; return; }
+    if (isDN && !dnPdf) { $('#clMsg', d).textContent = 'Attach the debit note PDF.'; return; }
     const rem = $('#clRem', d).value.trim(); const at = nowIso();
     let log = '';
     if (photos.length) { log = uid(); Store.put('checklist_log', { id: log, task_id: t.id, ymd, doer: t.doer, task: t.title, photos, remark: rem, at, by: ME.name }); }
     t.done = t.done || {}; t.done[clDoneKey(t, ymd)] = { at, by: ME.name, remark: rem, photos: photos.length, log };
     t.done_at = at; clPin(t); Store.put('checklist', t);
     audit('checklist.done', t.title, t.doer + ' · ' + ymd + (rem ? ' — ' + rem : '')); d.remove(); renderNav(); route();
+    if (isDN) waSend('debit_note', t.id + '|' + ymd, false, { pdf: dnPdf });   // the debit note goes to the vendor on WhatsApp
   });
 };
 ACTIONS['cl-photo'] = el => { const l = Store.get('checklist_log', el.dataset.log); if (!l) return; const w = window.open(''); w.document.write(l.photos.map(p => '<img src="' + p + '" style="max-width:100%;margin:4px">').join('')); };
