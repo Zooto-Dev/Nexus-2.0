@@ -3,17 +3,21 @@
 'use strict';
 
 /* ================= Nexus activity doers ================= */
-// settings().act_doer[k] = [{ doer, field: ''|'vendor'|'brand', value }]; the first matching rule wins, an empty field is the default.
+// settings().act_doer[k] = [{ doer, field: '', value: '' }]: one doer per activity (Operations > Task Tracker > Doer Setup).
+// Swatch Approval always goes to the merchant of the brand (CDB), never to a fixed person.
 const ACT_LINK = { po_raise: 'po', po_approval: 'poapproval', inward: 'inward', invoice: 'invapproval', qc: 'swatchmatch', swatch: 'swatch', grn: 'grn', excess: 'excessapproval', issuance: 'issuance', issue_approval: 'issuance', rtv: 'rtv' };
 const ACT_FIELD = { po_raise: 'brand', po_approval: 'vendor', inward: 'vendor', invoice: 'vendor', qc: 'vendor', swatch: 'vendor', grn: 'vendor', excess: 'vendor', issuance: '', issue_approval: '', rtv: 'vendor' };
 function actRules(k) { return ((settings().act_doer || {})[k] || []).filter(r => r.doer); }
 function actDoer(r) {
-  const rules = actRules(r.k);
-  const hit = rules.find(x => x.field && x.value && norm(x.value) === norm(r.party)) || rules.find(x => !x.field);
-  if (hit) return hit.doer;
+  if (r.k === 'swatch' && (r.owners || []).length) return doerOfName(r.owners[0]);
+  const def = actRules(r.k).find(x => !x.field);
+  if (def) return def.doer;
   if ((r.owners || []).length) return String(r.owners[0]).toUpperCase();
   return '';
 }
+// tasks made automatically after a GRN: their doer is set in Doer Setup too
+const AUTO_ACTS = [{ k: 'debit_note', l: 'Debit Note (after GRN with reject / short)', dept: 'ACCOUNTS' }, { k: 'tally_entry', l: 'Tally Entry (after every GRN)', dept: 'ACCOUNTS' }];
+function autoDoer(k, fallback) { const d = actRules(k).find(x => !x.field); return d ? d.doer : fallback; }
 function userByName(n) { return Store.all('users').find(u => norm(u.name) === norm(n)) || null; }
 function doerOfName(n) { const u = userByName(n); return u && u.doer ? u.doer.toUpperCase() : String(n || '').toUpperCase(); }
 function userOfDoer(d) { return Store.all('users').find(u => u.doer && norm(u.doer) === norm(d)) || null; }
@@ -213,38 +217,24 @@ VIEWS.alltasks = {
 ACTIONS['at-csv'] = () => downloadCsv('all-tasks-' + todayYmd() + '.csv', [['Source', 'Task', 'Reference', 'Party', 'Doer', 'Department', 'Planned', 'Actual', 'Status', 'Delay (min)']]
   .concat((VIEWS.alltasks.rows || []).map(x => [x.src, x.task, x.ref, x.party, x.doer, x.dept, x.planned ? fmtDT(x.planned) : '', x.actual ? fmtDT(x.actual) : '', x.status, x.delay || 0])));
 
-// Doer Setup: who does each Nexus activity (default + by vendor / brand)
+// Doer Setup: one doer per activity — simple on purpose
 function atSetupHtml() {
-  const doers = allDoers(); const vend = Store.all('vendors').map(v => v.name).sort(); const brands = Store.all('customers').map(c => c.name).sort();
-  const cfg = settings().act_doer || {};
-  return '<div class="tbl-wrap"><table class="nopage"><tr><th>Activity</th><th>Starts when</th><th>TAT</th><th>Rule</th><th>Vendor / Brand</th><th>Doer</th><th></th></tr>' +
-    PA_DEFS.map(d => {
-      const rules = (cfg[d.k] || []); const fld = ACT_FIELD[d.k]; const list = fld === 'brand' ? brands : vend; const t = paTat(d.k);
-      const def = rules.find(r => !r.field) || { doer: '' };
-      let rows = '<tr class="bomfirst"><td rowspan="' + (rules.filter(r => r.field).length + 1 + (fld ? 1 : 0)) + '"><b>' + esc(d.l) + '</b></td><td rowspan="' + (rules.filter(r => r.field).length + 1 + (fld ? 1 : 0)) + '" class="small">' + esc(PA_START[d.k] || '') + '</td><td rowspan="' + (rules.filter(r => r.field).length + 1 + (fld ? 1 : 0)) + '" class="nowrap">' + esc(t.value + ' ' + t.unit) + '</td>' +
-        '<td>Default</td><td></td><td><select data-adr="' + d.k + '" data-i="def">' + doerOpts(doers, def.doer, 'Not set') + '</select></td><td></td></tr>';
-      rules.forEach((r, i) => { if (!r.field) return; rows += '<tr><td>' + (r.field === 'brand' ? 'Brand' : 'Vendor') + '</td><td>' + esc(r.value) + '</td><td><select data-adr="' + d.k + '" data-i="' + i + '">' + doerOpts(doers, r.doer, 'Not set') + '</select></td><td><button class="btn ghost sm danger" data-act="adr-del" data-k="' + d.k + '" data-i="' + i + '">×</button></td></tr>'; });
-      if (fld) rows += '<tr><td>' + (fld === 'brand' ? 'Brand' : 'Vendor') + '</td><td><select data-adv="' + d.k + '">' + selOpts(list, '', 'Add ' + (fld === 'brand' ? 'brand' : 'vendor') + '…') + '</select></td><td><select data-adn="' + d.k + '">' + selOpts(doers, '', 'Doer…') + '</select></td><td><button class="btn sm" data-act="adr-add" data-k="' + d.k + '">Add</button></td></tr>';
-      return rows;
-    }).join('') + '</table></div>';
+  const doers = allDoers(); const cfg = settings().act_doer || {};
+  const cur = k => ((cfg[k] || []).find(r => !r.field) || {}).doer || '';
+  const row = (l, start, tat, k, cell) => '<tr><td><b>' + esc(l) + '</b></td><td class="small">' + esc(start || '') + '</td><td class="nowrap">' + esc(tat || '') + '</td><td>' + cell + '</td></tr>';
+  return '<div class="tbl-wrap"><table class="nopage"><tr><th>Activity</th><th>Starts when</th><th>TAT</th><th>Doer</th></tr>' +
+    PA_DEFS.map(d => { const t = paTat(d.k); const tat = t ? t.value + ' ' + t.unit : '';
+      return row(d.l, PA_START[d.k], tat, d.k, d.k === 'swatch' ? '<span class="small">Merchant of the brand — <a href="#/customers">CDB → Merchandiser</a></span>'
+        : '<select data-adr="' + d.k + '" data-i="def">' + doerOpts(doers, cur(d.k), 'Not set') + '</select>'); }).join('') +
+    AUTO_ACTS.map(a => row(a.l, 'GRN saved', '1 day', a.k, '<select data-adr="' + a.k + '" data-i="def">' + doerOpts(doers, cur(a.k), 'Not set') + '</select>')).join('') +
+    '</table></div>';
 }
 function atSaveRule(sel) {
-  if (!isAdminRole()) return; const st = settings(); st.act_doer = st.act_doer || {}; const k = sel.dataset.adr; const list = (st.act_doer[k] = st.act_doer[k] || []);
-  if (sel.dataset.i === 'def') { const d = list.find(r => !r.field); if (d) d.doer = sel.value; else list.push({ field: '', value: '', doer: sel.value }); }
-  else list[+sel.dataset.i].doer = sel.value;
-  Store.setSettings(st); AT_CACHE.t = 0; audit('settings.act_doer', paDef(k).l, sel.value || 'Not set'); flash('Saved.');
+  if (!isAdminRole()) return; const st = settings(); st.act_doer = st.act_doer || {}; const k = sel.dataset.adr;
+  st.act_doer[k] = sel.value ? [{ field: '', value: '', doer: sel.value }] : [];
+  Store.setSettings(st); AT_CACHE.t = 0; const a = AUTO_ACTS.find(x => x.k === k);
+  audit('settings.act_doer', a ? a.l : paDef(k).l, sel.value || 'Not set'); flash('Saved.');
 }
-ACTIONS['adr-add'] = el => {
-  if (!isAdminRole()) return; const k = el.dataset.k; const v = $('[data-adv="' + k + '"]').value, d = $('[data-adn="' + k + '"]').value;
-  if (!v || !d) { flash('Pick the ' + (ACT_FIELD[k] || 'value') + ' and the doer.', 'err'); return; }
-  const st = settings(); st.act_doer = st.act_doer || {}; const list = (st.act_doer[k] = st.act_doer[k] || []);
-  if (list.some(r => r.field && norm(r.value) === norm(v))) { flash(esc(v) + ' already has a rule.', 'err'); return; }
-  list.push({ field: ACT_FIELD[k], value: v, doer: d }); Store.setSettings(st); AT_CACHE.t = 0; audit('settings.act_doer', paDef(k).l, v + ' → ' + d); VIEWS.alltasks.render();
-};
-ACTIONS['adr-del'] = el => {
-  if (!isAdminRole()) return; const st = settings(); const list = (st.act_doer || {})[el.dataset.k] || []; const r = list.splice(+el.dataset.i, 1)[0];
-  Store.setSettings(st); AT_CACHE.t = 0; audit('settings.act_doer', paDef(el.dataset.k).l, 'removed ' + (r ? r.value : '')); VIEWS.alltasks.render();
-};
 
 /* ================= Escalations screen ================= */
 const ESC_UI = { f: 'open', tab: 'list' };

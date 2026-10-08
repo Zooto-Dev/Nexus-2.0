@@ -551,10 +551,10 @@ ACTIONS['grn-save'] = () => {
   const g = Store.put('grns', { id: uid(), no: iw.grn_no || reserveGrnNo(), date: todayYmd(), at: nowIso(), inward_id: iw.id, inward_no: iw.no, po_id: p.id, po_no: p.no, vendor: p.vendor, invoice: iw.bill_no, invoice_date: iw.bill_date, reject_reason: why, lines, by: ME.name });
   iw.status = 'GRN Done'; Store.put('inwards', iw);
   const totRej = calc.reduce((x, c) => x + c.rej, 0), totShort = calc.reduce((x, c) => x + c.short, 0), totEx = calc.reduce((x, c) => x + c.excess, 0);
-  if (totRej > 0 || totShort > 0) autoTask('Debit Note — ' + iw.bill_no + ' (' + p.vendor + '): reject ' + qtyFmt(totRej) + ', short ' + qtyFmt(totShort), 'ACCOUNTS', 0,
+  if (totRej > 0 || totShort > 0) autoTask('Debit Note — ' + iw.bill_no + ' (' + p.vendor + '): reject ' + qtyFmt(totRej) + ', short ' + qtyFmt(totShort), autoDoer('debit_note', 'ACCOUNTS'), 0,
     { kind: 'debit_note', vendor: p.vendor, invoice: iw.bill_no || '', items: calc.filter(c => c.rej || c.short).map(c => ((matBy(c.l.material) || {}).name || c.l.material)).join(', ').slice(0, 300), party: p.vendor, ref: iw.bill_no || '' });
-  if (totRej > 0) autoTask('RTV — ' + p.vendor + ' inv ' + iw.bill_no + ': ' + calc.filter(c => c.rej).map(c => c.l.material + ' × ' + qtyFmt(c.rej)).join(', '), 'STORE', 1);
-  autoTask('Tally Entry — GRN ' + g.no + ' (' + p.vendor + ', inv ' + iw.bill_no + ')', 'ACCOUNTS', 1);
+  if (totRej > 0) autoTask('RTV — ' + p.vendor + ' inv ' + iw.bill_no + ': ' + calc.filter(c => c.rej).map(c => c.l.material + ' × ' + qtyFmt(c.rej)).join(', '), autoDoer('rtv', 'STORE'), 1);
+  autoTask('Tally Entry — GRN ' + g.no + ' (' + p.vendor + ', inv ' + iw.bill_no + ')', autoDoer('tally_entry', 'ACCOUNTS'), 1);
   audit('grn.create', g.no, iw.no + ' · ' + p.no + ' · inv ' + iw.bill_no + ' · GRN ' + qtyFmt(calc.reduce((x, c) => x + c.grn, 0)) + (totRej ? ' / rej ' + qtyFmt(totRej) : '') + (totShort ? ' / short ' + qtyFmt(totShort) : '') + (totEx ? ' / excess ' + qtyFmt(totEx) : ''));
   Object.assign(U, { ven: '', po: '', inw: '', rows: [], why: '' });
   VIEWS.grn.render();
