@@ -77,7 +77,7 @@ VIEWS.customers = {
         '<div class="row">' +
         '<label>Brand Name *<input id="cdbName" value="' + esc(ed ? ed.name : '') + '"></label>' +
         '<label>Contact Person<input id="cdbPerson" value="' + esc(ed ? ed.contact_person || '' : '') + '"></label>' +
-        '<label>Merchandiser<input id="cdbMerch" list="dlDoersC" value="' + esc(ed ? ed.merchandiser || '' : '') + '"><datalist id="dlDoersC">' + Array.from(new Set(Store.all('users').map(u => u.doer).filter(Boolean))).map(d => '<option>' + esc(d) + '</option>').join('') + '</datalist></label>' +
+        '<label>Merchandiser<input id="cdbMerch" list="dlDoersC" value="' + esc(ed ? ed.merchandiser || '' : '') + '"><datalist id="dlDoersC">' + Store.all('users').filter(u => u.doer && u.active !== false).sort((a, b) => a.doer.localeCompare(b.doer)).map(u => '<option value="' + esc(u.doer) + '" label="' + esc(doerLabel(u)) + '">' + esc(doerLabel(u)) + '</option>').join('') + '</datalist></label>' +
         '<label>Phone<input id="cdbPhone" value="' + esc(ed ? ed.phone || '' : '') + '"></label>' +
         '<button class="btn primary" data-act="cdb-save">' + (ed ? 'Update' : 'Add Brand') + '</button></div>' +
         '<div id="cdbMsg" class="small" style="margin-top:6px"></div></div></div>';
@@ -142,7 +142,7 @@ VIEWS.users = {
     let h = '<div class="toolbar"><input id="usQ" placeholder="Search…" value="' + esc(US_UI.q) + '"><span class="muted small">' + rows.length + ' user(s)</span><span class="grow"></span>' +
       (edit && CLOUD ? '<button class="btn" data-act="us-sync">Create logins</button>' : '') + (edit ? '<button class="btn primary" data-act="us-new">+ New user</button>' : '') + '</div>';
     h += '<div class="tbl-wrap"><table class="bomflat"><tr><th>Name</th><th>Doer name (FMS)</th><th>Email (login)</th><th>Department</th><th>Designation</th><th>Role</th><th>Password</th><th>Mobile</th><th>Status</th><th></th></tr>' +
-      (rows.length ? rows.map(u => '<tr><td>' + esc(u.name) + '</td><td>' + esc(u.doer || '') + '</td><td>' + esc(u.email || '') + '</td><td>' + esc(u.department || '') + '</td><td>' + esc(u.designation || '') + '</td><td>' + esc(roleName(u.role_id)) + '</td><td class="nowrap">' + pw(u) + '</td><td>' + esc(u.mobile || '') + '</td><td>' + (u.active === false ? '<span class="muted">Inactive</span>' : 'Active') + '</td><td class="right">' +
+      (rows.length ? rows.map(u => '<tr><td>' + esc(u.name) + '</td><td>' + (doerDupOf(u).length ? '<b class="late-txt" title="Same doer name as ' + esc(doerDupOf(u).map(x => x.name).join(', ')) + ' — open and save to fix">' + esc(u.doer) + ' ⚠</b>' : esc(u.doer || '')) + '</td><td>' + esc(u.email || '') + '</td><td>' + esc(u.department || '') + '</td><td>' + esc(u.designation || '') + '</td><td>' + esc(roleName(u.role_id)) + '</td><td class="nowrap">' + pw(u) + '</td><td>' + esc(u.mobile || '') + '</td><td>' + (u.active === false ? '<span class="muted">Inactive</span>' : 'Active') + '</td><td class="right">' +
         (edit && usCanTouch(u) ? '<button class="btn sm ghost" data-act="us-edit" data-id="' + esc(u.id) + '">Edit</button>' : '') + '</td></tr>').join('') : '<tr><td colspan="10" class="empty">No users</td></tr>') + '</table></div>';
     setMain(h);
     $('#usQ').addEventListener('input', e => { US_UI.q = e.target.value; clearTimeout(US_UI.t); US_UI.t = setTimeout(() => { VIEWS.users.render(); const i = $('#usQ'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }, 250); });
@@ -204,7 +204,7 @@ function usDialog(u) {
     if (!isNew && u.email) v.email = norm(u.email);
     const newLogin = !hadLogin && !!v.email;
     if (newLogin && !v.pin) v.pin = v.mobile;
-    v.doer = v.name.split(/\s+/)[0].toUpperCase();            // FMS doer name = first name
+    v.doer = uniqueDoer(v.name, u.id, u.doer);   // tasks and FMS steps are assigned by this name, so it must be unique
     const minPin = CLOUD ? 6 : 4;
     const bad = !v.name ? 'Enter the name.' : v.email && v.email !== norm(u.email || '') && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v.email) ? 'Enter a valid email.' :
       Store.all('users').some(x => x.id !== u.id && v.email && norm(x.email) === v.email) ? 'This email already has a user.' :
@@ -354,3 +354,15 @@ VIEWS.audit = {
 };
 
 boot();
+
+/* Doer name: the key every task, FMS step, checklist and escalation is assigned by.
+   First name when free; when another user already has it (two PRIYANKAs), first + last name, then a number. */
+function uniqueDoer(name, selfId, current) {
+  const taken = d => Store.all('users').some(x => x.id !== selfId && x.doer && norm(x.doer) === norm(d));
+  const w = String(name || '').trim().toUpperCase().split(/\s+/).filter(Boolean);
+  if (current && !taken(current)) return String(current).toUpperCase();   // keep an existing doer name that is still unique
+  const opts = [w[0], w.length > 1 ? w[0] + ' ' + w[w.length - 1] : '', w.join(' ')].filter(Boolean);
+  for (const d of opts) if (!taken(d)) return d;
+  let i = 2; while (taken(w.join(' ') + ' ' + i)) i++; return w.join(' ') + ' ' + i;
+}
+const doerDupOf = u => u.doer ? Store.all('users').filter(x => x.id !== u.id && x.doer && norm(x.doer) === norm(u.doer)) : [];

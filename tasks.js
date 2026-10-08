@@ -191,7 +191,7 @@ VIEWS.alltasks = {
       VIEWS.alltasks.rows = rows;
       const srcs = Array.from(new Set(allTasks().map(x => x.src))).sort(); const depts = Array.from(new Set(allTasks().map(x => x.dept).filter(Boolean))).sort();
       h += '<div class="toolbar">' + seg('atSt', [{ v: 'open', l: 'Open' }, { v: 'delayed', l: 'Delayed' }, { v: 'upcoming', l: 'Upcoming' }, { v: 'done', l: 'Done' }, { v: 'late', l: 'Late' }, { v: 'all', l: 'All' }], AT_UI.st) +
-        '<select id="atSrc">' + selOpts(srcs, AT_UI.src, 'All sources') + '</select>' + (all ? '<select id="atWho">' + selOpts(allDoers(), AT_UI.who, 'All doers') + '</select><select id="atDept">' + selOpts(depts, AT_UI.dept, 'All departments') + '</select>' : '') +
+        '<select id="atSrc">' + selOpts(srcs, AT_UI.src, 'All sources') + '</select>' + (all ? '<select id="atWho">' + doerOpts(allDoers(), AT_UI.who, 'All doers') + '</select><select id="atDept">' + selOpts(depts, AT_UI.dept, 'All departments') + '</select>' : '') +
         '<input id="atFrom" type="date" value="' + esc(AT_UI.from) + '"><input id="atTo" type="date" value="' + esc(AT_UI.to) + '"><input id="atQ" placeholder="Search…" value="' + esc(AT_UI.q) + '"><span class="muted small">' + rows.length + ' task(s)</span><span class="grow"></span><button class="btn" data-act="at-csv">Export CSV</button></div>';
       h += '<div class="tbl-wrap"><table class="bomflat"><tr><th>Source</th><th>Task</th><th>Reference</th><th>Party</th><th>Doer</th><th>Department</th><th>Planned</th><th>Actual</th><th>Status</th><th class="num">Delay</th><th>Escalation</th><th></th></tr>' +
         (rows.length ? rows.map(x => { const e = escBy.get(x.key);
@@ -222,8 +222,8 @@ function atSetupHtml() {
       const rules = (cfg[d.k] || []); const fld = ACT_FIELD[d.k]; const list = fld === 'brand' ? brands : vend; const t = paTat(d.k);
       const def = rules.find(r => !r.field) || { doer: '' };
       let rows = '<tr class="bomfirst"><td rowspan="' + (rules.filter(r => r.field).length + 1 + (fld ? 1 : 0)) + '"><b>' + esc(d.l) + '</b></td><td rowspan="' + (rules.filter(r => r.field).length + 1 + (fld ? 1 : 0)) + '" class="small">' + esc(PA_START[d.k] || '') + '</td><td rowspan="' + (rules.filter(r => r.field).length + 1 + (fld ? 1 : 0)) + '" class="nowrap">' + esc(t.value + ' ' + t.unit) + '</td>' +
-        '<td>Default</td><td></td><td><select data-adr="' + d.k + '" data-i="def">' + selOpts(doers, def.doer, 'Not set') + '</select></td><td></td></tr>';
-      rules.forEach((r, i) => { if (!r.field) return; rows += '<tr><td>' + (r.field === 'brand' ? 'Brand' : 'Vendor') + '</td><td>' + esc(r.value) + '</td><td><select data-adr="' + d.k + '" data-i="' + i + '">' + selOpts(doers, r.doer, 'Not set') + '</select></td><td><button class="btn ghost sm danger" data-act="adr-del" data-k="' + d.k + '" data-i="' + i + '">×</button></td></tr>'; });
+        '<td>Default</td><td></td><td><select data-adr="' + d.k + '" data-i="def">' + doerOpts(doers, def.doer, 'Not set') + '</select></td><td></td></tr>';
+      rules.forEach((r, i) => { if (!r.field) return; rows += '<tr><td>' + (r.field === 'brand' ? 'Brand' : 'Vendor') + '</td><td>' + esc(r.value) + '</td><td><select data-adr="' + d.k + '" data-i="' + i + '">' + doerOpts(doers, r.doer, 'Not set') + '</select></td><td><button class="btn ghost sm danger" data-act="adr-del" data-k="' + d.k + '" data-i="' + i + '">×</button></td></tr>'; });
       if (fld) rows += '<tr><td>' + (fld === 'brand' ? 'Brand' : 'Vendor') + '</td><td><select data-adv="' + d.k + '">' + selOpts(list, '', 'Add ' + (fld === 'brand' ? 'brand' : 'vendor') + '…') + '</select></td><td><select data-adn="' + d.k + '">' + selOpts(doers, '', 'Doer…') + '</select></td><td><button class="btn sm" data-act="adr-add" data-k="' + d.k + '">Add</button></td></tr>';
       return rows;
     }).join('') + '</table></div>';
@@ -294,10 +294,10 @@ function escSetupHtml() {
   const common = c.l1_all || escPc();
   return '<div class="panel" style="max-width:760px"><table class="jckv">' +
     '<tr><td class="k">Level 1 after delay of</td><td class="v"><select id="escAfter">' + [0.5, 1, 2, 3].map(x => '<option value="' + x + '"' + (Math.abs(c.after / 510 - x) < 0.01 ? ' selected' : '') + '>' + x + ' working day' + (x > 1 ? 's' : '') + '</option>').join('') + '</select></td></tr>' +
-    '<tr><td class="k">Level 1 owner</td><td class="v"><select id="escL1all">' + selOpts(doers, c.l1_all || '', 'PC (' + (escPc() || 'none') + ')') + '</select></td></tr>' +
+    '<tr><td class="k">Level 1 owner</td><td class="v"><select id="escL1all">' + doerOpts(doers, c.l1_all || '', 'PC (' + (escPc() || 'none') + ')') + '</select></td></tr>' +
     '<tr><td class="k">Level 2 owner</td><td class="v">All Super Admins (' + esc(Store.all('users').filter(u => u.active !== false && u.doer && isSuperDoer(u.doer)).map(u => u.doer.toUpperCase()).join(', ')) + ')</td></tr></table></div>' +
     '<div class="tbl-wrap"><table class="nopage"><tr><th>Department</th><th>Level 1 owner</th></tr>' +
-    depts.map(d => '<tr><td>' + esc(d) + '</td><td><select data-l1d="' + esc(d) + '">' + selOpts(doers, (c.l1 || {})[d] || '', 'Same as above (' + esc(common || escL2()) + ')') + '</select></td></tr>').join('') + '</table></div>';
+    depts.map(d => '<tr><td>' + esc(d) + '</td><td><select data-l1d="' + esc(d) + '">' + doerOpts(doers, (c.l1 || {})[d] || '', 'Same as above (' + esc(common || escL2()) + ')') + '</select></td></tr>').join('') + '</table></div>';
 }
 
 /* ================= Scorecard screen ================= */

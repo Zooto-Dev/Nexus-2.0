@@ -460,7 +460,7 @@ function bldTables() {
     '<div class="small muted" style="margin:4px 0">' + (used(t).length ? 'Used by: ' + esc(used(t).join(', ')) : 'Not used by any step') + '</div>' +
     '<div class="tbl-wrap"><table><tr><th>Key (e.g. brand)</th><th>Doer</th><th></th></tr>' + Object.entries(T[t]).map(([k, v]) => '<tr data-bt="' + esc(t) + '" data-bk="' + esc(k) + '"><td>' + (edit ? '<input data-btk value="' + esc(k) + '">' : esc(k)) + '</td><td>' + (edit ? '<input data-btv list="dlDoers" value="' + esc(v) + '">' : esc(v)) + '</td><td>' + (edit ? '<button class="btn ghost sm danger" data-act="bt-rdel">×</button>' : '') + '</td></tr>').join('') + '</table></div>' +
     (edit ? '<a class="small" data-act="bt-radd" data-t="' + esc(t) + '">+ row</a>' : '') + '</div>').join('') + '</div>' +
-    '<datalist id="dlDoers">' + doerNames().map(n => '<option value="' + esc(n) + '">').join('') + '</datalist>';
+    '<datalist id="dlDoers">' + doerNames().map(n => { const u = Store.all('users').find(x => x.doer && norm(x.doer) === norm(n)); return '<option value="' + esc(n) + '"' + (u ? ' label="' + esc(doerLabel(u)) + '"' : '') + '>' + (u ? esc(doerLabel(u)) : '') + '</option>'; }).join('') + '</datalist>';
   el.innerHTML = h;
   el.addEventListener('change', e => {
     const tr = e.target.closest('tr[data-bt]'); if (!tr) return; const t = tr.dataset.bt, k0 = tr.dataset.bk; const tb = T[t];

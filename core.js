@@ -241,6 +241,12 @@ function optList(key) {
   const o = (settings().options || {})[key];
   return (o && o.length) ? o : (DEF_OPTS[key] || []);
 }
+// doer dropdowns: the value is the (unique) doer name, the text also shows full name and department
+function doerLabel(u) { return u.doer + ' — ' + u.name + (u.department ? ' · ' + u.department : ''); }
+function doerOpts(list, val, ph) {
+  return '<option value="">' + esc(ph || '— select —') + '</option>' + list.map(x => { const u = Store.all('users').find(y => y.doer && norm(y.doer) === norm(x));
+    return '<option value="' + esc(x) + '"' + (norm(x) === norm(val || '') ? ' selected' : '') + '>' + esc(u ? doerLabel(u) : x) + '</option>'; }).join('');
+}
 function selOpts(list, val, ph) { return '<option value="">' + esc(ph || '— select —') + '</option>' + list.map(x => '<option' + (norm(x) === norm(val || '') ? ' selected' : '') + '>' + esc(x) + '</option>').join(''); }
 
 /* ================= RBAC ================= */

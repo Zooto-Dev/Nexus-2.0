@@ -226,7 +226,7 @@ function clTasksHtml(all) {
     CHK_UI.st === 'all' || (CHK_UI.st === 'open' ? r.status === 'Overdue' || r.status === 'Pending' : r.status.toLowerCase() === CHK_UI.st));
   VIEWS.checklist.rows = rows;
   let h = '<div class="toolbar">' + seg('clSt', [{ v: 'open', l: 'Open' }, { v: 'overdue', l: 'Overdue' }, { v: 'upcoming', l: 'Upcoming' }, { v: 'done', l: 'Done' }, { v: 'all', l: 'All' }], CHK_UI.st) +
-    (all ? '<select id="clWho">' + selOpts(clDoerList(), CHK_UI.who, 'All doers') + '</select>' : '') +
+    (all ? '<select id="clWho">' + doerOpts(clDoerList(), CHK_UI.who, 'All doers') + '</select>' : '') +
     '<input id="clFrom" type="date" value="' + esc(CHK_UI.from) + '"><input id="clTo" type="date" value="' + esc(CHK_UI.to) + '"><span class="muted small">' + rows.length + ' task(s)</span><span class="grow"></span><button class="btn" data-act="cl-csv">Export CSV</button></div>';
   h += '<div class="tbl-wrap"><table class="bomflat"><tr><th>Type</th><th>Name</th><th>Department</th><th>Frequency</th><th>Task</th><th>Planned</th><th>Actual</th><th class="num">Time Delay</th><th>Status</th><th>Done By</th><th>Remark</th><th>Photo</th><th></th></tr>' +
     (rows.length ? rows.map(r => '<tr><td>' + esc(r.type) + '</td><td>' + esc(r.doer) + '</td><td>' + esc(r.dept) + '</td><td>' + esc(r.freq) + '</td><td>' + esc(r.task) + '</td><td class="nowrap">' + fmtDT(r.planned) + '</td><td class="nowrap">' + (r.actual ? fmtDT(r.actual) : '') + '</td>' +
@@ -265,7 +265,7 @@ function clNewHtml() {
   const freqSel = '<select id="clFreq">' + Object.keys(CL_FREQ).map(c => '<optgroup label="' + c + '">' + CL_FREQ[c].map(o => '<option' + (o[0] === CHK_UI.freq ? ' selected' : '') + '>' + esc(o[0]) + '</option>').join('') + '</optgroup>').join('') + '</select>';
   return '<div class="panel" id="clForm" style="max-width:760px"><table class="jckv">' +
     '<tr><td class="k">Type *</td><td class="v">' + seg('clType', ['Checklist', 'Delegation'], CHK_UI.type) + '</td></tr>' +
-    '<tr><td class="k">Doer *</td><td class="v"><select id="clDoer">' + selOpts(clDoerList(), F.clDoer) + '</select></td></tr>' +
+    '<tr><td class="k">Doer *</td><td class="v"><select id="clDoer">' + doerOpts(clDoerList(), F.clDoer) + '</select></td></tr>' +
     '<tr><td class="k">Department</td><td class="v"><input id="clDept" value="' + esc(u.department || '') + '" disabled></td></tr>' +
     '<tr><td class="k">Email</td><td class="v"><input id="clEmail" value="' + esc(u.email || '') + '" disabled></td></tr>' +
     '<tr><td class="k">Task *</td><td class="v"><input id="clTask" value="' + esc(F.clTask || '') + '"></td></tr>' +
