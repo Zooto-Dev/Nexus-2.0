@@ -32,6 +32,12 @@ function dlMat(id) { return '<datalist id="' + id + '">' + Store.all('materials'
 function vendorNames() { return Store.all('vendors').map(v => v.name).sort(); }
 function vendorBy(name) { return Store.all('vendors').find(v => norm(v.name) === norm(name)); }
 function lowStockList() { const { stk } = stockMaps(); return Store.all('materials').filter(m => num(m.min_level) > 0 && (stk[norm(m.code)] || 0) < num(m.min_level)); }
+// PO vendor list: only vendors who supply an item that still has a net requirement (job card / BOM supplier, else Sourcing)
+function poVendorNeeds() {
+  const need = {};
+  netReqRows().filter(r => r.net > 0.0001).forEach(r => Array.from(r.suppliers).forEach(v => { const k = norm(v); (need[k] = need[k] || { name: (vendorBy(v) || {}).name || v, items: 0 }).items++; }));
+  return Object.values(need).sort((a, b) => a.name.localeCompare(b.name));
+}
 function dlVendor() { return '<datalist id="dlVen">' + vendorNames().map(v => '<option value="' + esc(v) + '">').join('') + '</datalist>'; }
 // stk = good stock; rej = GRN rejection (goes back to the vendor);
 // rejLine = line rejection that is unused and can go back to the vendor; rejScrap = line rejection that cannot
@@ -367,10 +373,10 @@ ACTIONS['po-toggle'] = (el, ev) => { if (ev.target.closest('button')) return; PO
 function poForm() {
   const ed = PO_UI.editId ? Store.get('purchase_orders', PO_UI.editId) : null;
   const lastAmend = ed && (ed.amend_log || []).length ? ed.amend_log[ed.amend_log.length - 1] : null;
-  return '<div class="card"><div class="card-b">' + dlVendor() + dlMat('dlMatPo') + '<datalist id="dlBrandPo">' + Store.all('customers').map(c => '<option value="' + esc(c.name) + '">').join('') + '</datalist>' +
+  return '<div class="card"><div class="card-b">' + dlMat('dlMatPo') + '<datalist id="dlBrandPo">' + Store.all('customers').map(c => '<option value="' + esc(c.name) + '">').join('') + '</datalist>' +
     (lastAmend ? '<div class="panel" style="border-left:3px solid var(--late);margin-bottom:10px"><b>' + esc(ed.no) + '</b> \u2014 ' + esc(lastAmend.remark) + ' <span class="muted small">(' + esc(lastAmend.by) + ', ' + fmtDT(lastAmend.at) + ')</span></div>' : '') +
     '<div class="row">' + 
-    '<label>Vendor *<input id="npVen" list="dlVen" value="' + esc(ed ? ed.vendor : '') + '"' + (ed ? ' readonly' : '') + '></label><label>PO date<input id="npDate" type="date" value="' + esc(ed ? ed.date : todayYmd()) + '"></label><label>Expected delivery *<input id="npExp" type="date" value="' + esc(ed ? ed.expected : '') + '"></label><label style="flex:1">Remarks<input id="npRem" value="' + esc(ed ? ed.remarks || '' : '') + '"></label></div>' +
+    '<label>Vendor *' + (ed ? '<input id="npVen" value="' + esc(ed.vendor) + '" readonly>' : '<select id="npVen"><option value="">' + (poVendorNeeds().length ? 'Select vendor…' : 'No net requirement') + '</option>' + poVendorNeeds().map(v => '<option value="' + esc(v.name) + '">' + esc(v.name) + ' (' + v.items + ' item' + (v.items > 1 ? 's' : '') + ')</option>').join('') + '</select>') + '</label><label>PO date<input id="npDate" type="date" value="' + esc(ed ? ed.date : todayYmd()) + '"></label><label>Expected delivery *<input id="npExp" type="date" value="' + esc(ed ? ed.expected : '') + '"></label><label style="flex:1">Remarks<input id="npRem" value="' + esc(ed ? ed.remarks || '' : '') + '"></label></div>' +
     '<div id="npHint" class="muted small" style="margin:6px 0"></div>' +
     '<table style="margin-top:4px"><tr id="npHead"></tr><tbody id="npLines"></tbody></table><a class="small" data-act="po-line" id="npAdd">+ material</a>' +
     '</div><div class="card-f"><button class="btn primary" data-act="po-save">' + (ed ? 'Save & send for approval' : 'Save PO') + '</button><button class="btn" data-act="po-new">Close</button><span id="npMsg" class="small"></span></div></div>';
