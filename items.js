@@ -29,10 +29,11 @@ function whenLabel(a) { return a.when_attr ? a.when_attr + ' = ' + a.when_val : 
 const blankVal = v => /^(NONE|NA|N\/A|NIL|NO|NO .+|WITHOUT .+)$/.test(String(v || '').trim().toUpperCase().replace(/\s+/g, ' '));
 // how an attribute is filled: one value from its list, several values (a foxing in up to 5 colours),
 // a brand from CDB, an article from the Articles master, or a size typed as length × width × height
-const AT_KINDS = [['list', 'One value'], ['multi', 'Many values (up to 5)'], ['brand', 'Brand (CDB)'], ['article', 'Article (Articles master)'], ['dims', 'Size L × W × H']];
+const AT_KINDS = [['list', 'One value'], ['multi', 'Many values'], ['brand', 'Brand (CDB)'], ['article', 'Article (Articles master)'], ['dims', 'Size L × W × H']];
 const AT_MAX = 5, DIM_UNITS = ['MM', 'CM', 'INCH'];
 const atKind = a => a.kind || 'list';
-const atKindLabel = a => (AT_KINDS.find(k => k[0] === atKind(a)) || AT_KINDS[0])[1];
+const atMax = a => Math.max(1, num(a.max) || AT_MAX);
+const atKindLabel = a => (AT_KINDS.find(k => k[0] === atKind(a)) || AT_KINDS[0])[1] + (atKind(a) === 'multi' ? ' (up to ' + atMax(a) + ')' : '');
 function atValues(a, vals, t) {
   const k = atKind(a);
   if (k === 'brand') return Store.all('customers').map(c => String(c.name || '').trim().toUpperCase()).filter(Boolean).sort();
@@ -44,7 +45,16 @@ function atValues(a, vals, t) {
   return a.values || [];
 }
 const dimVal = d => d && num(d.l) > 0 && num(d.w) > 0 && num(d.h) > 0 ? num(d.l) + 'X' + num(d.w) + 'X' + num(d.h) + (d.u || 'MM') : '';
-function itemNameOf(t, vals) { return [t.name].concat(typeAttrs(t).map(a => vals[a.name] || '').filter(v => !blankVal(v))).filter(Boolean).join(' ').replace(/\s+/g, ' ').trim().toUpperCase(); }
+function itemNameOf(t, vals) {
+  const A = typeAttrs(t); const parts = A.map(a => vals[a.name] || '');
+  // LENGTH, WIDTH, HEIGHT one after another are written as one size: 300X200X115MM
+  const i = A.findIndex(a => /(^| )LENGTH$/.test(String(a.name).toUpperCase()));
+  if (i >= 0 && A[i + 2] && /(^| )WIDTH$/.test(String(A[i + 1].name).toUpperCase()) && /(^| )HEIGHT$/.test(String(A[i + 2].name).toUpperCase()) && parts[i] && parts[i + 1] && parts[i + 2]) {
+    const u = (String(parts[i + 2]).match(/[A-Z]+$/i) || ['MM'])[0];
+    parts.splice(i, 3, [parts[i], parts[i + 1], parts[i + 2]].map(v => String(v).replace(/[A-Z\s]+$/i, '')).join('X') + u);
+  }
+  return [t.name].concat(parts.filter(v => !blankVal(v))).filter(Boolean).join(' ').replace(/\s+/g, ' ').trim().toUpperCase();
+}
 function itemKeyOf(cat, typeName, vals) {
   return norm(cat) + '|' + norm(typeName) + '|' + Object.keys(vals).filter(k => vals[k]).map(k => norm(k) + '=' + norm(vals[k])).sort().join(',');
 }
@@ -76,7 +86,7 @@ VIEWS.itemcreate = {
       if (t.dataset.icmp) { const mt = Store.get('materials', t.dataset.icmp); if (mt) readImg(t.files[0], src => { mt.photo = src; Store.put('materials', mt); audit('item.photo', '', mt.code); flash('Photo saved.'); icRender(); }); }
       if (t.dataset.icMulti && t.value) {
         const k = t.dataset.icMulti; const cur = (IC_UI.vals[k] || '').split('/').filter(Boolean);
-        if (!cur.includes(t.value) && cur.length < AT_MAX) cur.push(t.value);
+        const at = catAttrs(IC_UI.cat).find(x => x.name === k); if (!cur.includes(t.value) && cur.length < (at ? atMax(at) : AT_MAX)) cur.push(t.value);
         IC_UI.vals[k] = cur.join('/'); icRender(); return;
       }
       if (t.dataset.icDim) {
@@ -115,7 +125,7 @@ function icCreateHtml(edit) {
     if (k === 'multi') {
       const cur = v.split('/').filter(Boolean);
       rows += '<tr>' + lab + '<td>' + cur.map((x, j) => '<span class="chip">' + (j + 1) + '. ' + esc(x) + ' <a data-act="ic-mrem" data-a="' + esc(a.name) + '" data-i="' + j + '">×</a></span> ').join('') +
-        (cur.length < AT_MAX ? '<select data-ic-multi="' + esc(a.name) + '"' + dis + '><option value="">' + (open ? (cur.length ? 'Add ' + (cur.length + 1) + ' of ' + AT_MAX + '…' : 'Select…') : 'select step ' + i + ' first') + '</option>' +
+        (cur.length < atMax(a) ? '<select data-ic-multi="' + esc(a.name) + '"' + dis + '><option value="">' + (open ? (cur.length ? 'Add ' + (cur.length + 1) + ' of ' + atMax(a) + '…' : 'Select…') : 'select step ' + i + ' first') + '</option>' +
           atValues(a, IC_UI.vals, t).filter(x => !cur.includes(x)).map(x => '<option>' + esc(x) + '</option>').join('') + '</select>' : '') + '</td></tr>';
     } else if (k === 'dims') {
       const d = IC_UI.dims[a.name] || { u: 'MM' };
@@ -249,13 +259,15 @@ function whenSel(A, a) {
   const cur = a && a.when_attr ? a.when_attr + '|' + a.when_val : '';
   return '<select data-af="when"><option value="">Always</option>' + A.filter(x => !a || x.id !== a.id).map(x => '<optgroup label="' + esc(x.name) + '">' + (x.values || []).map(v => '<option value="' + esc(x.name + '|' + v) + '"' + (cur === x.name + '|' + v ? ' selected' : '') + '>' + esc(x.name + ' = ' + v) + '</option>').join('') + '</optgroup>').join('') + '</select>';
 }
-function kindSel(a) { return '<select data-af="kind">' + AT_KINDS.map(k => '<option value="' + k[0] + '"' + ((a ? atKind(a) : 'list') === k[0] ? ' selected' : '') + '>' + k[1] + '</option>').join('') + '</select>'; }
+function kindSel(a) { return '<select data-af="kind">' + AT_KINDS.map(k => '<option value="' + k[0] + '"' + ((a ? atKind(a) : 'list') === k[0] ? ' selected' : '') + '>' + k[1] + '</option>').join('') + '</select>' +
+  '<label class="small">Max (many values) <input data-af="max" type="number" min="1" max="20" value="' + esc(a ? atMax(a) : AT_MAX) + '" style="width:60px"></label>'; }
 function atRead(tr) {
   const name = $('[data-af="name"]', tr).value.trim().toUpperCase().replace(/\s+/g, ' ');
   const values = Array.from(new Set($('[data-af="vals"]', tr).value.split(/[,\n]/).map(x => x.trim().toUpperCase().replace(/\s+/g, ' ')).filter(Boolean)));
   const w = ($('[data-af="when"]', tr) || { value: '' }).value; const k = w.indexOf('|');
   const kind = ($('[data-af="kind"]', tr) || { value: 'list' }).value || 'list';
-  return { name, kind, values: ['brand', 'article', 'dims'].includes(kind) ? [] : values, when_attr: k > 0 ? w.slice(0, k) : '', when_val: k > 0 ? w.slice(k + 1) : '' };
+  const max = Math.min(20, Math.max(1, num(($('[data-af="max"]', tr) || { value: '' }).value) || AT_MAX));
+  return { name, kind, max, values: ['brand', 'article', 'dims'].includes(kind) ? [] : values, when_attr: k > 0 ? w.slice(0, k) : '', when_val: k > 0 ? w.slice(k + 1) : '' };
 }
 ACTIONS['at-add'] = el => {
   if (!requirePerm('development', 'edit')) return;
@@ -263,7 +275,7 @@ ACTIONS['at-add'] = el => {
   if (!r.name || (!r.values.length && ['list', 'multi'].includes(r.kind))) { flash('Attribute name and at least one value are required.', 'err'); return; }
   if (catAttrs(cat).some(a => norm(a.name) === norm(r.name))) { flash(esc(r.name) + ' already exists in ' + esc(cat) + '.', 'err'); return; }
   if (norm(r.when_attr) === norm(r.name)) { flash('An attribute cannot depend on itself.', 'err'); return; }
-  Store.put('attributes', { id: uid(), category: cat, name: r.name, kind: r.kind, seq: catAttrs(cat).length + 1, values: r.values, when_attr: r.when_attr, when_val: r.when_val });
+  Store.put('attributes', { id: uid(), category: cat, name: r.name, kind: r.kind, max: r.max, seq: catAttrs(cat).length + 1, values: r.values, when_attr: r.when_attr, when_val: r.when_val });
   audit('attribute.add', cat + ' · ' + r.name, r.values.length + ' values'); icRender();
 };
 ACTIONS['at-edit'] = el => { IC_UI.editAttr = el.dataset.id; icRender(); };
@@ -274,7 +286,7 @@ ACTIONS['at-save'] = el => {
   if (!r.name || (!r.values.length && ['list', 'multi'].includes(r.kind))) { flash('Attribute name and at least one value are required.', 'err'); return; }
   if (catAttrs(a.category).some(x => x.id !== a.id && norm(x.name) === norm(r.name))) { flash(esc(r.name) + ' already exists in ' + esc(a.category) + '.', 'err'); return; }
   if (norm(r.when_attr) === norm(r.name)) { flash('An attribute cannot depend on itself.', 'err'); return; }
-  const old = a.name; a.name = r.name; a.kind = r.kind; a.values = r.values; a.when_attr = r.when_attr; a.when_val = r.when_val; Store.put('attributes', a);
+  const old = a.name; a.name = r.name; a.kind = r.kind; a.max = r.max; a.values = r.values; a.when_attr = r.when_attr; a.when_val = r.when_val; Store.put('attributes', a);
   if (norm(old) !== norm(r.name)) {
     typesOf(a.category).forEach(t => { if (usesAttr(t, old)) { t.attrs = t.attrs.map(x => norm(x) === norm(old) ? r.name : x); Store.put('item_types', t); } });
     catAttrs(a.category).forEach(x => { if (norm(x.when_attr || '') === norm(old)) { x.when_attr = r.name; Store.put('attributes', x); } });
