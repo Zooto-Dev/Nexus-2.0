@@ -353,7 +353,7 @@ VIEWS.po = {
       }).join('') : '<tr><td colspan="16" class="empty">No purchase orders</td></tr>') + '</table></div>';
     setMain(h);
     if (PO_UI.form && edit) poFormSetup();
-    onSeg(e => { if (e.target.dataset.seg === 'poMode') { PO_UI.mode = e.detail; poFormSetup(); const v = vendorBy($('#npVen').value); if (v && e.detail === 'jc') poFillJc(v.name); return; } PO_UI.f = e.detail; VIEWS.po.render(); });
+    onSeg(e => { PO_UI.f = e.detail; VIEWS.po.render(); });
     const poQ = $('#poQ'); if (poQ) poQ.addEventListener('input', e => { PO_UI.q = e.target.value; clearTimeout(PO_UI.t); PO_UI.t = setTimeout(() => { VIEWS.po.render(); const i = $('#poQ'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }, 250); });
   }
 };
@@ -369,15 +369,16 @@ function poForm() {
   const lastAmend = ed && (ed.amend_log || []).length ? ed.amend_log[ed.amend_log.length - 1] : null;
   return '<div class="card"><div class="card-b">' + dlVendor() + dlMat('dlMatPo') + '<datalist id="dlBrandPo">' + Store.all('customers').map(c => '<option value="' + esc(c.name) + '">').join('') + '</datalist>' +
     (lastAmend ? '<div class="panel" style="border-left:3px solid var(--late);margin-bottom:10px"><b>' + esc(ed.no) + '</b> \u2014 ' + esc(lastAmend.remark) + ' <span class="muted small">(' + esc(lastAmend.by) + ', ' + fmtDT(lastAmend.at) + ')</span></div>' : '') +
-    '<div class="row">' + (ed ? '' : '<label>Mode' + seg('poMode', [{ v: 'jc', l: 'From JC requirement' }, { v: 'manual', l: 'Manual' }], PO_UI.mode || 'jc') + '</label>') +
+    '<div class="row">' + 
     '<label>Vendor *<input id="npVen" list="dlVen" value="' + esc(ed ? ed.vendor : '') + '"' + (ed ? ' readonly' : '') + '></label><label>PO date<input id="npDate" type="date" value="' + esc(ed ? ed.date : todayYmd()) + '"></label><label>Expected delivery *<input id="npExp" type="date" value="' + esc(ed ? ed.expected : '') + '"></label><label style="flex:1">Remarks<input id="npRem" value="' + esc(ed ? ed.remarks || '' : '') + '"></label></div>' +
     '<div id="npHint" class="muted small" style="margin:6px 0"></div>' +
     '<table style="margin-top:4px"><tr id="npHead"></tr><tbody id="npLines"></tbody></table><a class="small" data-act="po-line" id="npAdd">+ material</a>' +
     '</div><div class="card-f"><button class="btn primary" data-act="po-save">' + (ed ? 'Save & send for approval' : 'Save PO') + '</button><button class="btn" data-act="po-new">Close</button><span id="npMsg" class="small"></span></div></div>';
 }
 function poFormSetup() {
-  if (PO_UI.editId) PO_UI.mode = 'manual';
-  const mode = PO_UI.mode || 'jc';
+  // new POs are made only from the job card requirement; the line editor is used only to amend an existing PO
+  PO_UI.mode = PO_UI.editId ? 'manual' : 'jc';
+  const mode = PO_UI.mode;
   $('#npHead').innerHTML = mode === 'manual'
     ? '<th>Item Name</th><th>Category</th><th>Code</th><th>HSN</th><th>UOM</th><th>Brand *</th><th class="num">Rate</th><th class="num">GST %</th><th>Remark</th><th class="num">Qty</th><th class="num">Amount</th><th class="num">Total</th><th></th>'
     : '<th>Photo</th><th>Item Name</th><th>Category</th><th>Code</th><th>HSN</th><th>UOM</th><th>Brand</th><th class="num" style="width:90px">Rate</th><th class="num" style="width:70px">GST %</th><th style="width:160px">Remark</th><th class="num">Qty</th><th class="num">Amount</th><th class="num">Total</th>';
@@ -489,7 +490,7 @@ ACTIONS['po-save'] = () => {
   if (!requirePerm('purchase', 'edit')) return;
   const ven = $('#npVen').value.trim(); const exp = $('#npExp').value;
   { const vv = vendorBy(ven); if (vv && vendorMissing(vv).length) { vendorDialog(vv); return; } }
-  const mode = PO_UI.mode || 'jc';
+  const mode = PO_UI.editId ? 'manual' : 'jc';
   const lines = mode === 'manual'
     ? $$('#npLines tr[data-mline]').map(tr => { const m = Store.all('materials').find(x => norm(x.name) === norm($('[data-np="mat"]', tr).value) || norm(x.code) === norm($('[data-np="mat"]', tr).value)); return m ? { material: m.code, uom: m.uom, qty: num($('[data-np="qty"]', tr).value), rate: num($('[data-np="rate"]', tr).value), gst: num($('[data-np="gst"]', tr).value), remark: $('[data-np="rem"]', tr).value.trim(), brand: $('[data-np="brand"]', tr).value.trim(), jc_no: '', received: 0, rejected: 0 } : null; }).filter(l => l && l.qty > 0)
     : poJcLines().map(L => { const tr = $('#npLines tr[data-key="' + L.key + '"]'); return { material: L.r.material, uom: L.m.uom || '', qty: L.qty, rate: num($('[data-jrate]', tr).value), gst: num($('[data-jgst]', tr).value), remark: $('[data-jrem]', tr).value.trim(), jc_no: '', brand: L.brand || ($('[data-jbrand]', tr) || { value: '' }).value.trim(), moq: L.moq, net: L.r.net, received: 0, rejected: 0 }; });
