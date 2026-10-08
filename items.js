@@ -5,7 +5,7 @@
    Item Category Configuration; only the first-run footwear defaults live in code. */
 'use strict';
 
-const IC_UI = { cat: '', type: '', vals: {}, extra: {}, scat: '', editAttr: null, editType: null, newCats: [] };
+const IC_UI = { cat: '', type: '', vals: {}, extra: {}, dims: {}, scat: '', editAttr: null, editType: null, newCats: [] };
 const icSlug = s => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '_');
 const squash = s => norm(s).replace(/[^a-z0-9.]/g, '');
 
@@ -26,7 +26,24 @@ function attrOn(a, vals, t) { return !a.when_attr || (t && !usesAttr(t, a.when_a
 function activeAttrs(t, vals) { return typeAttrs(t).filter(a => attrOn(a, vals, t)); }
 function whenLabel(a) { return a.when_attr ? a.when_attr + ' = ' + a.when_val : ''; }
 // "nothing" values (NONE, NA, NO FOAM, WITHOUT …) stay in the item's attributes but are left out of its name
-const blankVal = v => /^(NONE|NA|N\/A|NIL|NO|NO .+|WITHOUT .+)$/.test(norm(v));
+const blankVal = v => /^(NONE|NA|N\/A|NIL|NO|NO .+|WITHOUT .+)$/.test(String(v || '').trim().toUpperCase().replace(/\s+/g, ' '));
+// how an attribute is filled: one value from its list, several values (a foxing in up to 5 colours),
+// a brand from CDB, an article from the Articles master, or a size typed as length × width × height
+const AT_KINDS = [['list', 'One value'], ['multi', 'Many values (up to 5)'], ['brand', 'Brand (CDB)'], ['article', 'Article (Articles master)'], ['dims', 'Size L × W × H']];
+const AT_MAX = 5, DIM_UNITS = ['MM', 'CM', 'INCH'];
+const atKind = a => a.kind || 'list';
+const atKindLabel = a => (AT_KINDS.find(k => k[0] === atKind(a)) || AT_KINDS[0])[1];
+function atValues(a, vals, t) {
+  const k = atKind(a);
+  if (k === 'brand') return Store.all('customers').map(c => String(c.name || '').trim().toUpperCase()).filter(Boolean).sort();
+  if (k === 'article') {
+    // only the articles of the brand chosen above (articles without a brand are shown for every brand)
+    const b = t ? typeAttrs(t).find(x => atKind(x) === 'brand' && vals[x.name]) : null; const bv = b ? vals[b.name] : '';
+    return Store.all('items').filter(i => !bv || !i.brand || norm(i.brand) === norm(bv)).map(i => String(i.code || '').trim().toUpperCase()).filter(Boolean).sort();
+  }
+  return a.values || [];
+}
+const dimVal = d => d && num(d.l) > 0 && num(d.w) > 0 && num(d.h) > 0 ? num(d.l) + 'X' + num(d.w) + 'X' + num(d.h) + (d.u || 'MM') : '';
 function itemNameOf(t, vals) { return [t.name].concat(typeAttrs(t).map(a => vals[a.name] || '').filter(v => !blankVal(v))).filter(Boolean).join(' ').replace(/\s+/g, ' ').trim().toUpperCase(); }
 function itemKeyOf(cat, typeName, vals) {
   return norm(cat) + '|' + norm(typeName) + '|' + Object.keys(vals).filter(k => vals[k]).map(k => norm(k) + '=' + norm(vals[k])).sort().join(',');
@@ -53,10 +70,19 @@ VIEWS.itemcreate = {
     const m = $('#main');
     m.addEventListener('change', e => {
       const t = e.target;
-      if (t.id === 'icCat') { IC_UI.cat = t.value; IC_UI.type = ''; IC_UI.vals = {}; IC_UI.extra = {}; IC_UI.photo = ''; icRender(); }
-      if (t.id === 'icType') { IC_UI.type = t.value; IC_UI.vals = {}; IC_UI.extra = {}; icRender(); }
+      if (t.id === 'icCat') { IC_UI.cat = t.value; IC_UI.type = ''; IC_UI.vals = {}; IC_UI.dims = {}; IC_UI.extra = {}; IC_UI.photo = ''; icRender(); }
+      if (t.id === 'icType') { IC_UI.type = t.value; IC_UI.vals = {}; IC_UI.dims = {}; IC_UI.extra = {}; icRender(); }
       if (t.id === 'icPhoto') readImg(t.files[0], src => { IC_UI.photo = src; icRender(); });
       if (t.dataset.icmp) { const mt = Store.get('materials', t.dataset.icmp); if (mt) readImg(t.files[0], src => { mt.photo = src; Store.put('materials', mt); audit('item.photo', '', mt.code); flash('Photo saved.'); icRender(); }); }
+      if (t.dataset.icMulti && t.value) {
+        const k = t.dataset.icMulti; const cur = (IC_UI.vals[k] || '').split('/').filter(Boolean);
+        if (!cur.includes(t.value) && cur.length < AT_MAX) cur.push(t.value);
+        IC_UI.vals[k] = cur.join('/'); icRender(); return;
+      }
+      if (t.dataset.icDim) {
+        const k = t.dataset.icDim; const d = IC_UI.dims[k] || (IC_UI.dims[k] = { u: 'MM' }); d[t.dataset.d] = t.value;
+        IC_UI.vals[k] = dimVal(d); icRender(); return;
+      }
       if (t.dataset.icAttr) {
         IC_UI.vals[t.dataset.icAttr] = t.value;
         const ty = Store.get('item_types', IC_UI.type); if (ty) typeAttrs(ty).forEach(a => { if (!attrOn(a, IC_UI.vals, ty)) delete IC_UI.vals[a.name]; });
@@ -84,9 +110,21 @@ function icCreateHtml(edit) {
   // attributes open one by one, strictly in the category sequence
   let open = true;
   attrs.forEach((a, i) => {
-    const v = IC_UI.vals[a.name] || '';
-    rows += '<tr><td class="k"><span class="seqn">' + (i + 1) + '</span>' + esc(a.name) + ' *</td><td><select data-ic-attr="' + esc(a.name) + '"' + (open ? '' : ' disabled') + '><option value="">' + (open ? 'Select…' : 'select step ' + i + ' first') + '</option>' +
-      (a.values || []).map(x => '<option' + (x === v ? ' selected' : '') + '>' + esc(x) + '</option>').join('') + '</select></td></tr>';
+    const v = IC_UI.vals[a.name] || ''; const k = atKind(a); const dis = open ? '' : ' disabled';
+    const lab = '<td class="k"><span class="seqn">' + (i + 1) + '</span>' + esc(a.name) + ' *</td>';
+    if (k === 'multi') {
+      const cur = v.split('/').filter(Boolean);
+      rows += '<tr>' + lab + '<td>' + cur.map((x, j) => '<span class="chip">' + (j + 1) + '. ' + esc(x) + ' <a data-act="ic-mrem" data-a="' + esc(a.name) + '" data-i="' + j + '">×</a></span> ').join('') +
+        (cur.length < AT_MAX ? '<select data-ic-multi="' + esc(a.name) + '"' + dis + '><option value="">' + (open ? (cur.length ? 'Add ' + (cur.length + 1) + ' of ' + AT_MAX + '…' : 'Select…') : 'select step ' + i + ' first') + '</option>' +
+          atValues(a, IC_UI.vals, t).filter(x => !cur.includes(x)).map(x => '<option>' + esc(x) + '</option>').join('') + '</select>' : '') + '</td></tr>';
+    } else if (k === 'dims') {
+      const d = IC_UI.dims[a.name] || { u: 'MM' };
+      const box = (p, ph) => '<input type="number" min="0" step="any" data-ic-dim="' + esc(a.name) + '" data-d="' + p + '" value="' + esc(d[p] || '') + '" placeholder="' + ph + '"' + dis + '>';
+      rows += '<tr>' + lab + '<td><div class="icdim">' + box('l', 'Length') + '<span>×</span>' + box('w', 'Width') + '<span>×</span>' + box('h', 'Height') + '<select data-ic-dim="' + esc(a.name) + '" data-d="u"' + dis + '>' + DIM_UNITS.map(u => '<option' + (u === (d.u || 'MM') ? ' selected' : '') + '>' + u + '</option>').join('') + '</select></div></td></tr>';
+    } else {
+      rows += '<tr>' + lab + '<td><select data-ic-attr="' + esc(a.name) + '"' + dis + '><option value="">' + (open ? 'Select…' : 'select step ' + i + ' first') + '</option>' +
+        atValues(a, IC_UI.vals, t).map(x => '<option' + (x === v ? ' selected' : '') + '>' + esc(x) + '</option>').join('') + '</select></td></tr>';
+    }
     if (!v) open = false;
   });
   if (t) {
@@ -140,8 +178,9 @@ ACTIONS['ic-create'] = () => {
   });
   audit('item.create', m.code, m.name);
   flash('Created ' + esc(m.code) + ' · ' + esc(m.name));
-  IC_UI.vals = {}; IC_UI.extra = {}; IC_UI.photo = ''; icRender();
+  IC_UI.vals = {}; IC_UI.dims = {}; IC_UI.extra = {}; IC_UI.photo = ''; icRender();
 };
+ACTIONS['ic-mrem'] = el => { const k = el.dataset.a; const cur = (IC_UI.vals[k] || '').split('/').filter(Boolean); cur.splice(+el.dataset.i, 1); IC_UI.vals[k] = cur.join('/'); icRender(); };
 ACTIONS['ic-photo-clear'] = () => { IC_UI.photo = ''; icRender(); };
 
 /* ================= Category Setup ================= */
@@ -154,20 +193,20 @@ function icSetupHtml(edit) {
 
   // attributes of this category, in name sequence
   h += '<div class="card"><div class="card-h"><b>' + esc(cat) + ' — Attributes</b></div><div class="card-b">' +
-    '<table class="jcbom icgrid"><tr class="hd"><th style="width:56px">Seq</th><th style="width:180px">Attribute</th><th>Allowed Values</th><th style="width:190px">Only when</th><th style="width:220px">Used in Item Types</th>' + (edit ? '<th style="width:190px">Actions</th>' : '') + '</tr>';
+    '<table class="jcbom icgrid"><tr class="hd"><th style="width:56px">Seq</th><th style="width:180px">Attribute</th><th style="width:170px">Type</th><th>Allowed Values</th><th style="width:190px">Only when</th><th style="width:220px">Used in Item Types</th>' + (edit ? '<th style="width:190px">Actions</th>' : '') + '</tr>';
   A.forEach((a, i) => {
     const used = typesOf(cat).filter(t => usesAttr(t, a.name));
     if (edit && IC_UI.editAttr === a.id) {
-      h += '<tr data-arow="' + esc(a.id) + '"><td class="c">' + (i + 1) + '</td><td><input data-af="name" value="' + esc(a.name) + '"></td><td><textarea data-af="vals" rows="3">' + esc(a.values.join(', ')) + '</textarea></td><td>' + whenSel(A, a) + '</td><td class="wrap small">' + used.map(t => esc(t.name)).join(', ') + '</td>' +
+      h += '<tr data-arow="' + esc(a.id) + '"><td class="c">' + (i + 1) + '</td><td><input data-af="name" value="' + esc(a.name) + '"></td><td>' + kindSel(a) + '</td><td><textarea data-af="vals" rows="3">' + esc(a.values.join(', ')) + '</textarea></td><td>' + whenSel(A, a) + '</td><td class="wrap small">' + used.map(t => esc(t.name)).join(', ') + '</td>' +
         '<td class="c"><button class="btn sm primary" data-act="at-save" data-id="' + esc(a.id) + '">Save</button> <button class="btn sm" data-act="at-cancel">Cancel</button></td></tr>';
     } else {
-      h += '<tr><td class="c"><span class="seqn">' + (i + 1) + '</span></td><td><b>' + esc(a.name) + '</b></td><td class="wrap small">' + a.values.map(esc).join(', ') + ' <span class="muted">(' + a.values.length + ')</span></td><td class="small">' + (a.when_attr ? '<b>' + esc(whenLabel(a)) + '</b>' : '<span class="muted">Always</span>') + '</td><td class="wrap small">' + (used.map(t => esc(t.name)).join(', ') || '—') + '</td>' +
+      h += '<tr><td class="c"><span class="seqn">' + (i + 1) + '</span></td><td><b>' + esc(a.name) + '</b></td><td class="small">' + esc(atKindLabel(a)) + '</td><td class="wrap small">' + (['brand', 'article', 'dims'].includes(atKind(a)) ? '<span class="muted">' + (atKind(a) === 'dims' ? 'Typed at item creation' : 'From master') + '</span>' : a.values.map(esc).join(', ') + ' <span class="muted">(' + a.values.length + ')</span>') + '</td><td class="small">' + (a.when_attr ? '<b>' + esc(whenLabel(a)) + '</b>' : '<span class="muted">Always</span>') + '</td><td class="wrap small">' + (used.map(t => esc(t.name)).join(', ') || '—') + '</td>' +
         (edit ? '<td class="c nowrap"><button class="btn sm" data-act="at-move" data-id="' + esc(a.id) + '" data-dir="-1" title="Move up"' + (i ? '' : ' disabled') + '>↑</button> <button class="btn sm" data-act="at-move" data-id="' + esc(a.id) + '" data-dir="1" title="Move down"' + (i < A.length - 1 ? '' : ' disabled') + '>↓</button> ' +
           '<button class="btn sm" data-act="at-edit" data-id="' + esc(a.id) + '">Edit</button> ' + '<button class="btn sm ghost danger" data-act="at-del" data-id="' + esc(a.id) + '" data-confirm="' + (used.length ? 'Delete? Removes from ' + used.length + ' item type' + (used.length > 1 ? 's' : '') : 'Delete?') + '">×</button>' + '</td>' : '') + '</tr>';
     }
   });
-  if (!A.length) h += '<tr><td colspan="6" class="empty">No attributes for ' + esc(cat) + ' yet</td></tr>';
-  if (edit) h += '<tr class="addrow" data-arow="new"><td class="c">' + (A.length + 1) + '</td><td><input data-af="name" placeholder="e.g. COLOUR"></td><td><textarea data-af="vals" rows="2" placeholder="Values, comma separated: BLACK, WHITE, NAVY"></textarea></td><td>' + whenSel(A, null) + '</td><td></td><td class="c"><button class="btn sm primary" data-act="at-add">Add Attribute</button></td></tr>';
+  if (!A.length) h += '<tr><td colspan="7" class="empty">No attributes for ' + esc(cat) + ' yet</td></tr>';
+  if (edit) h += '<tr class="addrow" data-arow="new"><td class="c">' + (A.length + 1) + '</td><td><input data-af="name" placeholder="e.g. COLOUR"></td><td>' + kindSel(null) + '</td><td><textarea data-af="vals" rows="2" placeholder="Values, comma separated: BLACK, WHITE, NAVY"></textarea></td><td>' + whenSel(A, null) + '</td><td></td><td class="c"><button class="btn sm primary" data-act="at-add">Add Attribute</button></td></tr>';
   h += '</table></div></div>';
 
   // item types of this category: one tick column per attribute, in sequence
@@ -210,19 +249,21 @@ function whenSel(A, a) {
   const cur = a && a.when_attr ? a.when_attr + '|' + a.when_val : '';
   return '<select data-af="when"><option value="">Always</option>' + A.filter(x => !a || x.id !== a.id).map(x => '<optgroup label="' + esc(x.name) + '">' + (x.values || []).map(v => '<option value="' + esc(x.name + '|' + v) + '"' + (cur === x.name + '|' + v ? ' selected' : '') + '>' + esc(x.name + ' = ' + v) + '</option>').join('') + '</optgroup>').join('') + '</select>';
 }
+function kindSel(a) { return '<select data-af="kind">' + AT_KINDS.map(k => '<option value="' + k[0] + '"' + ((a ? atKind(a) : 'list') === k[0] ? ' selected' : '') + '>' + k[1] + '</option>').join('') + '</select>'; }
 function atRead(tr) {
   const name = $('[data-af="name"]', tr).value.trim().toUpperCase().replace(/\s+/g, ' ');
   const values = Array.from(new Set($('[data-af="vals"]', tr).value.split(/[,\n]/).map(x => x.trim().toUpperCase().replace(/\s+/g, ' ')).filter(Boolean)));
   const w = ($('[data-af="when"]', tr) || { value: '' }).value; const k = w.indexOf('|');
-  return { name, values, when_attr: k > 0 ? w.slice(0, k) : '', when_val: k > 0 ? w.slice(k + 1) : '' };
+  const kind = ($('[data-af="kind"]', tr) || { value: 'list' }).value || 'list';
+  return { name, kind, values: ['brand', 'article', 'dims'].includes(kind) ? [] : values, when_attr: k > 0 ? w.slice(0, k) : '', when_val: k > 0 ? w.slice(k + 1) : '' };
 }
 ACTIONS['at-add'] = el => {
   if (!requirePerm('development', 'edit')) return;
   const cat = IC_UI.scat; const r = atRead(el.closest('tr'));
-  if (!r.name || !r.values.length) { flash('Attribute name and at least one value are required.', 'err'); return; }
+  if (!r.name || (!r.values.length && ['list', 'multi'].includes(r.kind))) { flash('Attribute name and at least one value are required.', 'err'); return; }
   if (catAttrs(cat).some(a => norm(a.name) === norm(r.name))) { flash(esc(r.name) + ' already exists in ' + esc(cat) + '.', 'err'); return; }
   if (norm(r.when_attr) === norm(r.name)) { flash('An attribute cannot depend on itself.', 'err'); return; }
-  Store.put('attributes', { id: uid(), category: cat, name: r.name, seq: catAttrs(cat).length + 1, values: r.values, when_attr: r.when_attr, when_val: r.when_val });
+  Store.put('attributes', { id: uid(), category: cat, name: r.name, kind: r.kind, seq: catAttrs(cat).length + 1, values: r.values, when_attr: r.when_attr, when_val: r.when_val });
   audit('attribute.add', cat + ' · ' + r.name, r.values.length + ' values'); icRender();
 };
 ACTIONS['at-edit'] = el => { IC_UI.editAttr = el.dataset.id; icRender(); };
@@ -230,15 +271,15 @@ ACTIONS['at-cancel'] = () => { IC_UI.editAttr = null; icRender(); };
 ACTIONS['at-save'] = el => {
   if (!requirePerm('development', 'edit')) return;
   const a = Store.get('attributes', el.dataset.id); const r = atRead(el.closest('tr'));
-  if (!r.name || !r.values.length) { flash('Attribute name and at least one value are required.', 'err'); return; }
+  if (!r.name || (!r.values.length && ['list', 'multi'].includes(r.kind))) { flash('Attribute name and at least one value are required.', 'err'); return; }
   if (catAttrs(a.category).some(x => x.id !== a.id && norm(x.name) === norm(r.name))) { flash(esc(r.name) + ' already exists in ' + esc(a.category) + '.', 'err'); return; }
   if (norm(r.when_attr) === norm(r.name)) { flash('An attribute cannot depend on itself.', 'err'); return; }
-  const old = a.name; a.name = r.name; a.values = r.values; a.when_attr = r.when_attr; a.when_val = r.when_val; Store.put('attributes', a);
+  const old = a.name; a.name = r.name; a.kind = r.kind; a.values = r.values; a.when_attr = r.when_attr; a.when_val = r.when_val; Store.put('attributes', a);
   if (norm(old) !== norm(r.name)) {
     typesOf(a.category).forEach(t => { if (usesAttr(t, old)) { t.attrs = t.attrs.map(x => norm(x) === norm(old) ? r.name : x); Store.put('item_types', t); } });
     catAttrs(a.category).forEach(x => { if (norm(x.when_attr || '') === norm(old)) { x.when_attr = r.name; Store.put('attributes', x); } });
   }
-  audit('attribute.edit', a.category + ' · ' + r.name, r.values.length + ' values' + (a.when_attr ? ' · only when ' + whenLabel(a) : ''));
+  audit('attribute.edit', a.category + ' · ' + r.name, atKindLabel(a) + ' · ' + r.values.length + ' values' + (a.when_attr ? ' · only when ' + whenLabel(a) : ''));
   IC_UI.editAttr = null; icRender();
 };
 ACTIONS['at-move'] = el => {

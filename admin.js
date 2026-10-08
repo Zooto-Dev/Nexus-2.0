@@ -121,7 +121,8 @@ VIEWS.items = {
       col: 'items', mod: 'masters', title: 'Articles', view: VIEWS.items, sort: 'code', paste: true,
       cols: [{ k: 'code', l: 'Article', w: 110, upper: true, ph: 'ZT-601' }, { k: 'name', l: 'Style name', ph: 'Style name' },
         { k: 'group', l: 'Category', opts: () => (fieldOptions('category').length ? fieldOptions('category') : ['Shoes', 'Slider', 'Clogs', 'V Shape', 'Eva Slider']).map(v => ({ v, l: v })) },
-        { k: 'gender', l: 'Gender', opts: () => [''].concat(GENDERS_()).map(v => ({ v, l: v || '—' })) }],
+        { k: 'gender', l: 'Gender', opts: () => [''].concat(GENDERS_()).map(v => ({ v, l: v || '—' })) },
+        { k: 'brand', l: 'Brand', opts: () => [{ v: '', l: '—' }].concat(Store.all('customers').map(c => String(c.name || '').trim().toUpperCase()).filter(Boolean).sort().map(v => ({ v, l: v }))) }],
       validate: (d, old) => uniq('items', 'code', 'Article')(d),
       inUse: d => Store.all('orders').some(o => (o.lines || []).some(l => norm(l.article) === norm(d.code))) ? 'Article is used in orders — cannot delete.' : ''
     });

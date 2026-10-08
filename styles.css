@@ -396,3 +396,8 @@ a.dl:hover { background: #fafbfc; text-decoration: none; }
 @media (max-width: 640px) { .dk, .dk-co { grid-template-columns: repeat(2, 1fr); } .dk-score { grid-column: span 2; } .dk-c .v { font-size: 24px; } }
 .tphotos{margin-top:3px;display:flex;gap:4px;flex-wrap:wrap}
 .tphotos img{height:34px!important;width:34px;object-fit:cover;border-radius:4px;border:1px solid var(--line)}
+.icl .chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; margin: 0 4px 4px 0; border: 1px solid var(--line2); border-radius: 12px; font-size: 12px; background: #f5f8f7; }
+.icl .chip a { cursor: pointer; color: #b91c1c; font-weight: 700; }
+.icdim { display: flex; align-items: center; gap: 6px; }
+.icdim input { width: 84px !important; min-width: 0; }
+.icdim select { width: 84px !important; }
