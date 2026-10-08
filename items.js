@@ -45,14 +45,16 @@ function atValues(a, vals, t) {
   return a.values || [];
 }
 const dimVal = d => d && num(d.l) > 0 && num(d.w) > 0 && num(d.h) > 0 ? num(d.l) + 'X' + num(d.w) + 'X' + num(d.h) + (d.u || 'MM') : '';
+function lwhAt(A) {
+  const i = A.findIndex(a => /(^| )LENGTH$/.test(String(a.name).toUpperCase()));
+  return i >= 0 && A[i + 2] && /(^| )WIDTH$/.test(String(A[i + 1].name).toUpperCase()) && /(^| )HEIGHT$/.test(String(A[i + 2].name).toUpperCase()) ? i : -1;
+}
+const lwhText = (l, w, h) => [l, w, h].map(v => String(v || '').replace(/[A-Z\s]+$/i, '') || '?').join('*');
 function itemNameOf(t, vals) {
   const A = typeAttrs(t); const parts = A.map(a => vals[a.name] || '');
-  // LENGTH, WIDTH, HEIGHT one after another are written as one size: 300X200X115MM
-  const i = A.findIndex(a => /(^| )LENGTH$/.test(String(a.name).toUpperCase()));
-  if (i >= 0 && A[i + 2] && /(^| )WIDTH$/.test(String(A[i + 1].name).toUpperCase()) && /(^| )HEIGHT$/.test(String(A[i + 2].name).toUpperCase()) && parts[i] && parts[i + 1] && parts[i + 2]) {
-    const u = (String(parts[i + 2]).match(/[A-Z]+$/i) || ['MM'])[0];
-    parts.splice(i, 3, [parts[i], parts[i + 1], parts[i + 2]].map(v => String(v).replace(/[A-Z\s]+$/i, '')).join('X') + u);
-  }
+  // LENGTH, WIDTH, HEIGHT one after another are written as one size: 585*210*320
+  const i = lwhAt(A);
+  if (i >= 0 && parts[i] && parts[i + 1] && parts[i + 2]) parts.splice(i, 3, lwhText(parts[i], parts[i + 1], parts[i + 2]));
   return [t.name].concat(parts.filter(v => !blankVal(v))).filter(Boolean).join(' ').replace(/\s+/g, ' ').trim().toUpperCase();
 }
 function itemKeyOf(cat, typeName, vals) {
@@ -118,8 +120,19 @@ function icCreateHtml(edit) {
   let rows = '<tr><td class="k">Category *</td><td><select id="icCat"><option value="">Select category…</option>' + cats.map(c => '<option' + (c === IC_UI.cat ? ' selected' : '') + '>' + esc(c) + '</option>').join('') + '</select></td></tr>' +
     '<tr><td class="k">Item Type *</td><td><select id="icType"' + (types.length ? '' : ' disabled') + '><option value="">' + (IC_UI.cat ? 'Select item type…' : '—') + '</option>' + types.map(x => '<option value="' + esc(x.id) + '"' + (x.id === IC_UI.type ? ' selected' : '') + '>' + esc(x.name) + '</option>').join('') + '</select></td></tr>';
   // attributes open one by one, strictly in the category sequence
-  let open = true;
+  let open = true; const lwh = lwhAt(attrs);
   attrs.forEach((a, i) => {
+    if (lwh >= 0 && (i === lwh + 1 || i === lwh + 2)) return;
+    if (i === lwh) {
+      // length, width and height on one line: L * W * H
+      const three = [a, attrs[i + 1], attrs[i + 2]]; let o = open;
+      rows += '<tr><td class="k"><span class="seqn">' + (i + 1) + '</span>L * W * H (MM) *</td><td><div class="icdim lwh">' + three.map((x, n) => {
+        const xv = IC_UI.vals[x.name] || ''; const h = (n ? '<span>*</span>' : '') + '<select data-ic-attr="' + esc(x.name) + '"' + (o ? '' : ' disabled') + ' title="' + esc(x.name) + '"><option value="">' + esc(x.name.slice(0, 1)) + '</option>' +
+          atValues(x, IC_UI.vals, t).map(y => '<option value="' + esc(y) + '"' + (y === xv ? ' selected' : '') + '>' + esc(String(y).replace(/[A-Z\s]+$/i, '') || y) + '</option>').join('') + '</select>';
+        if (!xv) o = false; return h; }).join('') + '</div></td></tr>';
+      if (three.some(x => !IC_UI.vals[x.name])) open = false;
+      return;
+    }
     const v = IC_UI.vals[a.name] || ''; const k = atKind(a); const dis = open ? '' : ' disabled';
     const lab = '<td class="k"><span class="seqn">' + (i + 1) + '</span>' + esc(a.name) + ' *</td>';
     if (k === 'multi') {
@@ -150,7 +163,10 @@ function icCreateHtml(edit) {
   if (t) {
     right += '<table class="jcbom"><tr class="hd"><th style="width:60px">Seq</th><th>Name Part</th><th>Value</th></tr>' +
       '<tr><td class="c">—</td><td>ITEM TYPE</td><td><b>' + esc(t.name) + '</b></td></tr>' +
-      attrs.map((a, i) => '<tr><td class="c">' + (i + 1) + '</td><td>' + esc(a.name) + '</td><td>' + (IC_UI.vals[a.name] ? '<b>' + esc(IC_UI.vals[a.name]) + '</b>' : '<span class="muted">pending</span>') + '</td></tr>').join('') + '</table>' +
+      (() => { const j = lwhAt(attrs); const V = IC_UI.vals; const cell = v => v ? '<b>' + esc(v) + '</b>' : '<span class="muted">pending</span>'; return attrs.map((a, i) => {
+        if (j >= 0 && (i === j + 1 || i === j + 2)) return '';
+        if (i === j) return '<tr><td class="c">' + (i + 1) + '-' + (i + 3) + '</td><td>LENGTH * WIDTH * HEIGHT</td><td>' + cell(V[a.name] && V[attrs[i + 1].name] && V[attrs[i + 2].name] ? lwhText(V[a.name], V[attrs[i + 1].name], V[attrs[i + 2].name]) : '') + '</td></tr>';
+        return '<tr><td class="c">' + (i + 1) + '</td><td>' + esc(a.name) + '</td><td>' + cell(V[a.name]) + '</td></tr>'; }).join(''); })() + '</table>' +
       '<div class="icres-f"><span>Item Code <b>' + esc(itemCodeAuto(IC_UI.cat)) + '</b></span>' +
       (missing.length ? '<span class="st Pending">Next: select ' + esc(missing[0].name) + '</span>'
         : dup ? '<span class="st Late">Already exists: ' + esc(dup.code) + '</span>' : '<span class="st Done">New item — ready</span>') +

@@ -401,3 +401,5 @@ a.dl:hover { background: #fafbfc; text-decoration: none; }
 .icdim { display: flex; align-items: center; gap: 6px; }
 .icdim input { width: 84px !important; min-width: 0; }
 .icdim select { width: 84px !important; }
+.icdim.lwh { gap: 3px; }
+.icdim.lwh select { width: 62px !important; min-width: 0; padding-right: 2px; }
