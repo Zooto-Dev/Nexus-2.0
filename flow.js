@@ -212,6 +212,28 @@ ACTIONS['phone-cam'] = async el => {
   d.addEventListener('keydown', ev => { if (ev.key === 'Escape') { finish(); if (!done) SB.from('nx_cam').delete().eq('id', rq.id).then(() => {}); } });
 };
 
+// Photos sent from the phone without a request (no "Phone" button pressed) go into the photo box that is open:
+// Item Creation's photo, else the only empty photo box on the screen.
+let CAM_LISTEN = null;
+async function camListen() {
+  if (CAM_LISTEN || !CLOUD || !SB) return; CAM_LISTEN = 'starting';
+  const { data: ses } = await SB.auth.getSession(); const uid = ses && ses.session && ses.session.user.id; if (!uid) { CAM_LISTEN = null; return; }
+  CAM_LISTEN = SB.channel('cam-free-' + uid).on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'nx_cam', filter: 'uid=eq.' + uid }, async p => {
+    if (p.new.kind !== 'photo' || p.new.req_id) return;
+    const vis = i => !!(i && i.closest('.attach-wrap') && i.closest('.attach-wrap').offsetParent);
+    let target = curView().v === 'itemcreate' ? $('#icPhoto') : null;
+    if (!vis(target)) { const empty = $$('.attach-wrap input[type=file]').filter(i => vis(i) && /image/.test(i.accept || '') && !i.closest('.attach').classList.contains('has')); target = empty.length === 1 ? empty[0] : null; }
+    if (!target) { flash('Photo from the phone not attached — open the screen with the photo box first.', 'err'); SB.from('nx_cam').delete().eq('id', p.new.id).then(() => {}); return; }
+    const { data: row } = await SB.from('nx_cam').select('img').eq('id', p.new.id).single();
+    if (!row || !row.img) return;
+    const bin = atob(row.img.split(',')[1]); const u8 = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+    const dt = new DataTransfer(); dt.items.add(new File([u8], 'phone-' + Date.now() + '.jpg', { type: 'image/jpeg' }));
+    target.files = dt.files; target.dispatchEvent(new Event('change', { bubbles: true }));
+    SB.from('nx_cam').delete().eq('id', p.new.id).then(() => {});
+    flash('Photo from the phone attached.');
+  }).subscribe();
+}
+
 /* ================= Camera capture ================= */
 // Opens a live camera (any webcam the computer sees, including a phone in USB webcam mode), captures a photo and
 // hands it to the attach box's file input as if the file had been chosen, so every screen works unchanged.

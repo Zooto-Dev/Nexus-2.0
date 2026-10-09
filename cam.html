@@ -71,7 +71,7 @@
       <div class="err" id="serr"></div>
     </div>
     <div class="card" id="idle">
-      <div class="mut">Keep this screen open. On the laptop, press <b>📱 Phone</b> next to any photo box — the request appears here and the photo you take goes straight into Nexus.</div>
+      <div class="mut">Keep this screen open. Photos you take go straight into the photo box open on the laptop.</div>
       <div class="ok hidden" id="sent" style="margin-top:10px">✓ Photo sent to the laptop</div>
     </div>
     <div id="crop" class="crop hidden">
@@ -96,9 +96,11 @@ let uid = '', req = null, chan = null;
 function show(id) { ['login', 'app'].forEach(x => $('#' + x).classList.toggle('hidden', x !== id)); $('#out').classList.toggle('hidden', id !== 'app'); }
 function live(on, txt) { $('#dot').classList.toggle('on', on); $('#stt').textContent = txt; }
 function setReq(r) {
-  req = r; $('#reqCard').classList.toggle('hidden', !r); $('#idle').classList.toggle('hidden', !!r);
-  if (r) { $('#reqLbl').textContent = r.label || 'Photo needed'; $('#reqAt').textContent = 'Asked at ' + new Date(r.created_at).toLocaleTimeString(); $('#prev').classList.add('hidden'); $('#serr').textContent = '';
-    if (navigator.vibrate) navigator.vibrate([120, 60, 120]); }
+  // no request: the photo goes straight to the photo box open on the laptop (Item Creation)
+  req = r || { id: null, label: '' }; $('#reqCard').classList.remove('hidden');
+  $('#reqLbl').textContent = r ? (r.label || 'Photo needed') : 'Photo for the laptop';
+  $('#reqAt').textContent = r ? 'Asked at ' + new Date(r.created_at).toLocaleTimeString() : '';
+  if (r) { $('#prev').classList.add('hidden'); $('#serr').textContent = ''; if (navigator.vibrate) navigator.vibrate([120, 60, 120]); }
 }
 async function latestReq() {
   const since = new Date(Date.now() - 10 * 60000).toISOString();
@@ -113,7 +115,7 @@ async function start(session) {
   if (chan) SB.removeChannel(chan);
   chan = SB.channel('cam-' + uid).on('postgres_changes', { event: '*', schema: 'public', table: 'nx_cam', filter: 'uid=eq.' + uid }, p => {
     if (p.eventType === 'INSERT' && p.new.kind === 'req') setReq(p.new);
-    if (p.eventType === 'DELETE' && req && p.old && p.old.id === req.id) setReq(null);
+    if (p.eventType === 'DELETE' && req && req.id && p.old && p.old.id === req.id) setReq(null);
   }).subscribe(s => live(s === 'SUBSCRIBED', s === 'SUBSCRIBED' ? 'Connected — waiting for the laptop' : 'Reconnecting…'));
 }
 /* ---- crop: drag the box (or its corners), rotate, then send only the chosen part ---- */
@@ -165,7 +167,7 @@ async function sendData(img) {
   if (!img || !req) return; $('#serr').textContent = ''; $('#shoot').disabled = $('#pick').disabled = true; $('#shoot').textContent = 'Sending…';
   try {
     $('#prev').src = img; $('#prev').classList.remove('hidden');
-    const { error } = await SB.from('nx_cam').insert({ kind: 'photo', req_id: req.id, label: req.label, img });
+    const { error } = await SB.from('nx_cam').insert({ kind: 'photo', req_id: req.id || null, label: req.label || null, img });
     if (error) throw error;
     setReq(null); $('#sent').classList.remove('hidden'); setTimeout(() => $('#sent').classList.add('hidden'), 6000);
   } catch (e) { $('#serr').textContent = 'Not sent: ' + (e.message || e); }

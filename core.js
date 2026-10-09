@@ -606,6 +606,7 @@ function renderNav() {
 
 function route() {
   if (!ME) return;
+  if (CLOUD && typeof camListen === 'function') camListen();
   const { v, param } = curView(); const view = VIEWS[v];
   $('#nav').classList.remove('open');
   if (!view) { go('home'); return; }
