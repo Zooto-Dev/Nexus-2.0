@@ -720,7 +720,7 @@ function startApp(u) {
 async function boot() {
   Store.loadLocal();
   if (CLOUD) { SB = window.supabase.createClient(CFG.SUPABASE_URL, CFG.SUPABASE_ANON_KEY); $('#pinLabel').textContent = 'Password'; }
-  $('#loginMsg').innerHTML = CLOUD ? 'Cloud mode — sign in with your Supabase account.' : 'Local mode — demo login: <b>admin@nexus.local</b> / PIN <b>1234</b>';
+  $('#loginMsg').innerHTML = CLOUD ? '' : 'Local mode — demo login: <b>admin@nexus.local</b> / PIN <b>1234</b>';
   const saved = localStorage.getItem('nexus2_me');
   if (saved) {
     if (CLOUD) { const { data } = await SB.auth.getSession(); if (data && data.session) { try { await cloudLoad(); } catch (e) { flash('Cloud load failed: ' + esc(e.message), 'err'); } } else localStorage.removeItem('nexus2_me'); }
@@ -728,9 +728,17 @@ async function boot() {
     if (u && u.active !== false) return startApp(u);
   }
   $('#login').classList.remove('hidden');
-  $('#loginForm').addEventListener('submit', async ev => {
-    ev.preventDefault(); const f = ev.target; $('#loginMsg').textContent = 'Signing in…';
-    try { startApp(await doLogin(f.email.value, f.pin.value)); } catch (e) { $('#loginMsg').innerHTML = '<span class="late-txt">' + esc(e.message) + '</span>'; }
+  const f0 = $('#loginForm'); let rem = ''; try { rem = localStorage.getItem('nexus2_email') || ''; } catch (e) { }
+  if (rem) { f0.email.value = rem; f0.pin.focus(); }
+  $('#lgEye').addEventListener('click', () => { const show = f0.pin.type === 'password'; f0.pin.type = show ? 'text' : 'password'; $('#lgEye').classList.toggle('on', show); f0.pin.focus(); });
+  f0.addEventListener('submit', async ev => {
+    ev.preventDefault(); const f = ev.target; const btn = $('#lgGo'); $('#loginMsg').textContent = ''; btn.disabled = true; btn.classList.add('busy'); btn.firstChild.textContent = 'Signing in…';
+    try {
+      const u = await doLogin(f.email.value, f.pin.value);
+      try { if ($('#lgRem').checked) localStorage.setItem('nexus2_email', f.email.value.trim()); else localStorage.removeItem('nexus2_email'); } catch (e) { }
+      startApp(u);
+    } catch (e) { $('#loginMsg').innerHTML = '<span class="lg-err">' + esc(e.message) + '</span>'; f.pin.select(); }
+    btn.disabled = false; btn.classList.remove('busy'); btn.firstChild.textContent = 'Sign in';
   });
 }
 

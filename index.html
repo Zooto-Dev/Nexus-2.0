@@ -5,19 +5,30 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Nexus 2.0</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230d7377'/%3E%3Ctext x='16' y='22' font-family='Arial' font-size='18' font-weight='bold' fill='white' text-anchor='middle'%3EN%3C/text%3E%3C/svg%3E">
-<link rel="stylesheet" href="styles.css?v=100">
+<link rel="stylesheet" href="styles.css?v=101">
 </head>
 <body>
 <div id="login" class="hidden">
-  <form id="loginForm" class="login-box" autocomplete="on">
-    <div class="brand"><span class="logo-mark">N</span>Nexus <b>2.0</b></div>
-    <div class="login-sub">Sign in to your workspace</div>
-    <label>Email<input name="email" type="email" required autofocus></label>
-    <label><span id="pinLabel">PIN</span><input name="pin" type="password" required></label>
-    <button class="btn primary" type="submit">Sign in</button>
-    <div id="loginMsg" class="muted small"></div>
-    <div class="muted small" id="buildTagLogin"></div>
-  </form>
+  <div class="lg-brand">
+    <div class="lg-brand-in">
+      <div class="lg-logo"><span>N</span></div>
+      <div class="lg-name">Nexus <b>2.0</b></div>
+      <div class="lg-co">Zooto Fashion Pvt Ltd</div>
+    </div>
+  </div>
+  <div class="lg-side">
+    <form id="loginForm" class="lg-card" autocomplete="on">
+      <div class="lg-h">Sign in</div>
+      <label class="lg-f"><span>Email</span>
+        <div class="lg-in"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16v12H4z" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="m4 7 8 6 8-6" fill="none" stroke="currentColor" stroke-width="1.8"/></svg><input name="email" type="email" autocomplete="username" required autofocus></div></label>
+      <label class="lg-f"><span id="pinLabel">PIN</span>
+        <div class="lg-in"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M8 10V7a4 4 0 0 1 8 0v3" fill="none" stroke="currentColor" stroke-width="1.8"/></svg><input name="pin" type="password" autocomplete="current-password" required><button type="button" class="lg-eye" id="lgEye" aria-label="Show password"><svg viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.8"/></svg></button></div></label>
+      <label class="lg-rem"><input type="checkbox" id="lgRem" checked> Remember my email</label>
+      <button class="lg-btn" type="submit" id="lgGo"><span>Sign in</span></button>
+      <div id="loginMsg" class="lg-msg"></div>
+      <div class="lg-foot" id="buildTagLogin"></div>
+    </form>
+  </div>
 </div>
 
 <div id="app" class="hidden">
@@ -36,24 +47,24 @@
   </div>
 </div>
 
-<script>window.NX_BUILD = 'build 100';</script>
-<script src="config.js?v=100"></script>
+<script>window.NX_BUILD = 'build 101';</script>
+<script src="config.js?v=101"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="engine.js?v=100"></script>
-<script src="core.js?v=100"></script>
-<script src="seed.js?v=100"></script>
-<script src="ops.js?v=100"></script>
-<script src="sample.js?v=100"></script>
-<script src="fms.js?v=100"></script>
-<script src="modules.js?v=100"></script>
-<script src="checklist.js?v=100"></script>
-<script src="colours.js?v=100"></script>
-<script src="items.js?v=100"></script>
-<script src="flow.js?v=100"></script>
-<script src="track.js?v=100"></script>
-<script src="tasks.js?v=100"></script>
-<script src="wa.js?v=100"></script>
-<script src="admin.js?v=100"></script>
+<script src="engine.js?v=101"></script>
+<script src="core.js?v=101"></script>
+<script src="seed.js?v=101"></script>
+<script src="ops.js?v=101"></script>
+<script src="sample.js?v=101"></script>
+<script src="fms.js?v=101"></script>
+<script src="modules.js?v=101"></script>
+<script src="checklist.js?v=101"></script>
+<script src="colours.js?v=101"></script>
+<script src="items.js?v=101"></script>
+<script src="flow.js?v=101"></script>
+<script src="track.js?v=101"></script>
+<script src="tasks.js?v=101"></script>
+<script src="wa.js?v=101"></script>
+<script src="admin.js?v=101"></script>
 <script>
 document.getElementById('buildTag').textContent = window.NX_BUILD;
 document.getElementById('buildTagLogin').textContent = window.NX_BUILD;
