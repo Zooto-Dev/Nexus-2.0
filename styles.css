@@ -413,3 +413,26 @@ a.dl:hover { background: #fafbfc; text-decoration: none; }
 .icsw-b { border: 1px solid rgba(0,0,0,.18); border-radius: 6px; padding: 3px 7px; font-size: 11px; font-weight: 600; cursor: pointer; line-height: 1.3; }
 .icsw-b:hover { outline: 2px solid #0e6a73; outline-offset: 1px; }
 .icsw-dot { display: inline-block; width: 11px; height: 11px; border-radius: 50%; border: 1px solid rgba(0,0,0,.25); margin-right: 3px; vertical-align: -1px; }
+.icsw-top { display: flex; gap: 6px; align-items: center; }
+.icsw-top input { flex: 1; }
+.dlg.cm { max-width: min(1280px, 96vw); width: 96vw; }
+.cm .dlg-h { display: flex; align-items: center; gap: 8px; }
+.cm-x { font-size: 22px; cursor: pointer; color: #6b7280; }
+.cm-bar { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+.cm-bar #cmQ { flex: 1; }
+.cm-body { display: grid; grid-template-columns: 1fr 380px; gap: 12px; }
+.cm-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); grid-auto-rows: max-content; align-content: start; gap: 6px; max-height: 66vh; overflow: auto; padding-right: 4px; }
+.cm-t { cursor: pointer; border: 1px solid #e3e6e4; border-radius: 6px; overflow: hidden; background: #fff; }
+.cm-t i { display: block; height: 42px; }
+.cm-t span { display: block; font-size: 10px; font-weight: 600; padding: 3px 4px; line-height: 1.2; height: 26px; overflow: hidden; }
+.cm-t:hover, .cm-t.on { outline: 3px solid #0e6a73; }
+.cm-side { display: flex; flex-direction: column; gap: 8px; }
+.cm-big { height: 40vh; border-radius: 10px; border: 1px solid #ccc; display: flex; align-items: center; justify-content: center; color: #9ca3af; background: repeating-conic-gradient(#eee 0 25%, #fff 0 50%) 0 0/16px 16px; }
+.cm-btns { display: flex; gap: 8px; }
+.cm-can { max-width: 100%; max-height: 30vh; object-fit: contain; border-radius: 6px; cursor: crosshair; border: 1px solid #ddd; }
+.cm-near { display: flex; flex-wrap: wrap; gap: 4px; }
+.cm-nb { border: 1px solid #ddd; border-radius: 14px; background: #fff; padding: 2px 8px; font-size: 11px; cursor: pointer; }
+.cm-dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; border: 1px solid rgba(0,0,0,.25); margin-right: 4px; vertical-align: -2px; }
+.cm-fs { position: fixed; inset: 0; z-index: 9999; display: flex; align-items: flex-end; justify-content: center; padding-bottom: 18px; cursor: pointer; }
+.cm-fs span { font-size: 13px; opacity: .7; }
+@media (max-width: 800px) { .cm-body { grid-template-columns: 1fr; } .cm-big { height: 26vh; } }

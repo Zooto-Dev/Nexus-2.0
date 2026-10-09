@@ -62,7 +62,8 @@ const SW_FAM = [['BLACK', /BLACK|CHARCOAL|JET/], ['WHITE', /WHITE|IVORY/], ['GRE
   ['METALLIC', /SILVER|GOLD|BRONZE|COPPER|METAL|PLATINUM|PEWTER|CHAMPAGNE/], ['SPECIAL', /MULTI|TRANSPARENT|CRYSTAL|CAMO|LEOPARD|SNAKE|ZEBRA|TIE DYE|GLITTER|HOLOGRAPHIC|PRINT/], ['OTHER', /./]];
 function swFamily(v) {
   const u = String(v).toUpperCase(); const f = (SW_FAM.find(x => x[1].test(u)) || SW_FAM[SW_FAM.length - 1])[0];
-  return f !== 'OTHER' || !COLOUR_LIB[u] ? f : hueFamily(COLOUR_LIB[u]);
+  const hx = COLOUR_LIB[u] || (typeof COLOUR_MORE !== 'undefined' && COLOUR_MORE[u]);
+  return f !== 'OTHER' || !hx ? f : hueFamily(hx);
 }
 // family from the colour itself, for names that say nothing (PERU, TIFFANY, AMBER)
 function hueFamily(hex) {
@@ -75,7 +76,7 @@ function hueFamily(hex) {
   return h < 15 || h >= 345 ? 'RED' : h < 45 ? 'ORANGE' : h < 70 ? 'YELLOW' : h < 165 ? 'GREEN' : h < 255 ? 'BLUE' : h < 290 ? 'PURPLE' : 'PINK';
 }
 function swHex(v) {
-  const u = String(v).toUpperCase().trim(); if (SW_HEX[u]) return SW_HEX[u]; if (COLOUR_LIB[u]) return COLOUR_LIB[u];
+  const u = String(v).toUpperCase().trim(); if (SW_HEX[u]) return SW_HEX[u]; if (COLOUR_LIB[u]) return COLOUR_LIB[u]; if (typeof COLOUR_MORE !== 'undefined' && COLOUR_MORE[u]) return COLOUR_MORE[u];
   const base = Object.keys(SW_HEX).sort((a, b) => b.length - a.length).find(k => new RegExp('\\b' + k + '\\b').test(u));
   let h = base ? SW_HEX[base] : (SW_HEX[swFamily(u)] || '#bbb');
   if (/\b(DARK|DEEP)\b/.test(u) && base && !/DARK/.test(base)) h = swShade(h, -0.3); else if (/\b(LIGHT|PALE|BABY)\b/.test(u) && base && !/LIGHT/.test(base)) h = swShade(h, 0.45);
@@ -86,7 +87,7 @@ function swInk(hex) { const n = parseInt(hex.slice(1), 16); const l = (0.299 * (
 function swGrid(a, values, picked, disabled) {
   const q = (IC_UI.swq || {})[a.name] || ''; const fams = {};
   values.forEach(v => { (fams[swFamily(v)] = fams[swFamily(v)] || []).push(v); });
-  return '<div class="icsw"' + (disabled ? ' data-off="1"' : '') + '><input data-swq="' + esc(a.name) + '" placeholder="Search colour…" value="' + esc(q) + '"' + (disabled ? ' disabled' : '') + '>' +
+  return '<div class="icsw"' + (disabled ? ' data-off="1"' : '') + '><div class="icsw-top"><input data-swq="' + esc(a.name) + '" placeholder="Search colour…" value="' + esc(q) + '"' + (disabled ? ' disabled' : '') + '><button type="button" class="btn sm" data-act="cm-open" data-a="' + esc(a.name) + '"' + (disabled ? ' disabled' : '') + '>Colour Matcher</button></div>' +
     SW_FAM.map(f => f[0]).filter(f => fams[f]).map(f => '<div class="icsw-row" data-fam="' + f + '"><span class="icsw-f">' + f + '</span><div class="icsw-bs">' + fams[f].map(v => {
       const hx = swHex(v); const on = picked.includes(v); const hide = q && !String(v).toUpperCase().includes(q.toUpperCase()) && !f.includes(q.toUpperCase());
       const bg = /MULTI|TIE DYE|HOLOGRAPHIC/.test(String(v).toUpperCase()) ? 'linear-gradient(90deg,#e53935,#fdd835,#43a047,#1e88e5,#8e24aa)' : /TRANSPARENT|CRYSTAL/.test(String(v).toUpperCase()) ? 'repeating-conic-gradient(#ddd 0 25%,#fff 0 50%) 0 0/10px 10px' : hx;
@@ -264,6 +265,74 @@ ACTIONS['ic-create'] = () => {
   audit('item.create', m.code, m.name);
   flash('Created ' + esc(m.code) + ' · ' + esc(m.name));
   IC_UI.vals = {}; IC_UI.dims = {}; IC_UI.extra = {}; IC_UI.photo = ''; icRender();
+};
+/* ---- Colour Matcher: every named colour in big tiles, a large / full-screen preview to hold a swatch against,
+   and matching from a photo of the swatch (tap the photo → nearest named colours) ---- */
+const CM = { a: '', sel: '' };
+function cmAll(a) {
+  const m = new Map(); const add = (n, h) => { const k = String(n).toUpperCase().trim(); if (k && !m.has(k)) m.set(k, h || swHex(k)); };
+  (a.values || []).forEach(v => add(v)); Object.keys(COLOUR_LIB).forEach(k => add(k, COLOUR_LIB[k]));
+  if (typeof COLOUR_MORE !== 'undefined') Object.keys(COLOUR_MORE).forEach(k => add(k, COLOUR_MORE[k]));
+  return Array.from(m, ([n, hex]) => ({ n, hex, fam: swFamily(n) }));
+}
+const cmRgb = h => { const n = parseInt(h.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; };
+// perceptual-ish distance ("redmean")
+function cmDist(a, b) { const r = (a[0] + b[0]) / 2, dr = a[0] - b[0], dg = a[1] - b[1], db = a[2] - b[2]; return Math.sqrt((2 + r / 256) * dr * dr + 4 * dg * dg + (2 + (255 - r) / 256) * db * db); }
+ACTIONS['cm-open'] = el => {
+  const at = catAttrs(IC_UI.cat).find(x => x.name === el.dataset.a); if (!at) return;
+  CM.a = at.name; CM.sel = ''; const all = cmAll(at); CM.all = all;
+  const old = $('#cmDlg'); if (old) old.remove();
+  const d = document.createElement('div'); d.id = 'cmDlg'; d.className = 'dlg-back';
+  const fams = SW_FAM.map(f => f[0]).filter(f => all.some(c => c.fam === f));
+  d.innerHTML = '<div class="dlg cm"><div class="dlg-h">Colour Matcher · ' + esc(at.name) + ' <span class="muted small">' + all.length + ' colours</span><span class="grow"></span><a data-cm="x" class="cm-x">×</a></div>' +
+    '<div class="cm-bar"><input id="cmQ" placeholder="Search colour…"><select id="cmFam"><option value="">All families</option>' + fams.map(f => '<option>' + f + '</option>').join('') + '</select>' +
+    '<label class="btn sm">Match from photo<input id="cmPhoto" type="file" accept="image/*" capture="environment" style="display:none"></label></div>' +
+    '<div class="cm-body"><div class="cm-grid" id="cmGrid">' + all.map(c => '<div class="cm-t" data-n="' + esc(c.n) + '" data-f="' + c.fam + '" title="' + esc(c.n) + '"><i style="background:' + c.hex + '"></i><span>' + esc(c.n) + '</span></div>').join('') + '</div>' +
+    '<div class="cm-side"><div id="cmBig" class="cm-big"><span>Tap a colour</span></div><div id="cmName" class="cm-name"></div>' +
+    '<div class="cm-btns"><button class="btn" data-cm="full" disabled>Full screen</button><button class="btn primary" data-cm="use" disabled>Use this colour</button></div>' +
+    '<canvas id="cmCan" class="cm-can hidden"></canvas><div id="cmNear" class="cm-near"></div></div></div></div>';
+  document.body.appendChild(d);
+  const pick = n => { CM.sel = n; const c = CM.all.find(x => x.n === n); if (!c) return; $('#cmBig', d).style.background = c.hex; $('#cmBig', d).innerHTML = '';
+    $('#cmName', d).innerHTML = '<b>' + esc(c.n) + '</b> <span class="muted">' + c.hex.toUpperCase() + ' · ' + c.fam + '</span>'; $$('[data-cm=full],[data-cm=use]', d).forEach(b => { b.disabled = false; });
+    $$('.cm-t.on', d).forEach(t => t.classList.remove('on')); const t = $('.cm-t[data-n="' + CSS.escape(n) + '"]', d); if (t) t.classList.add('on'); };
+  const filt = () => { const q = $('#cmQ', d).value.trim().toUpperCase(), f = $('#cmFam', d).value;
+    $$('.cm-t', d).forEach(t => { t.style.display = (!f || t.dataset.f === f) && (!q || t.dataset.n.includes(q) || t.dataset.f.includes(q)) ? '' : 'none'; }); };
+  $('#cmQ', d).addEventListener('input', filt); $('#cmFam', d).addEventListener('change', filt);
+  const use = () => { if (!CM.sel) return; d.remove(); ACTIONS['ic-col']({ dataset: { a: CM.a, v: CM.sel } }); };
+  d.addEventListener('click', ev => {
+    const t = ev.target.closest('.cm-t'); if (t) { pick(t.dataset.n); return; }
+    const nr = ev.target.closest('[data-near]'); if (nr) { pick(nr.dataset.near); return; }
+    const b = ev.target.closest('[data-cm]'); if (!b) { if (ev.target === d) d.remove(); return; }
+    if (b.dataset.cm === 'x') d.remove();
+    if (b.dataset.cm === 'use') use();
+    if (b.dataset.cm === 'full' && CM.sel) {
+      const c = CM.all.find(x => x.n === CM.sel); const fs = document.createElement('div'); fs.className = 'cm-fs'; fs.style.background = c.hex;
+      fs.innerHTML = '<span style="color:' + swInk(c.hex) + '">' + esc(c.n) + ' · tap to close</span>'; document.body.appendChild(fs);
+      const close = () => { if (document.fullscreenElement) document.exitFullscreen().catch(() => {}); fs.remove(); };
+      fs.addEventListener('click', close); if (fs.requestFullscreen) fs.requestFullscreen().catch(() => {});
+      document.addEventListener('fullscreenchange', function h() { if (!document.fullscreenElement) { fs.remove(); document.removeEventListener('fullscreenchange', h); } });
+    }
+  });
+  d.addEventListener('dblclick', ev => { const t = ev.target.closest('.cm-t'); if (t) { pick(t.dataset.n); use(); } });
+  d.addEventListener('keydown', ev => { if (ev.key === 'Escape') d.remove(); });
+  // photo of the swatch: tap a spot, get the nearest named colours
+  $('#cmPhoto', d).addEventListener('change', e => {
+    const f = e.target.files[0]; if (!f) return; const img = new Image();
+    img.onload = () => { const cv = $('#cmCan', d); const w = Math.min(360, img.width); cv.width = w; cv.height = Math.round(img.height * w / img.width); cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height); cv.classList.remove('hidden');
+      $('#cmNear', d).innerHTML = '<span class="small muted">Tap the swatch in the photo</span>'; URL.revokeObjectURL(img.src); };
+    img.src = URL.createObjectURL(f);
+  });
+  $('#cmCan', d).addEventListener('click', e => {
+    const cv = e.target; const r = cv.getBoundingClientRect(); const x = Math.round((e.clientX - r.left) * cv.width / r.width), y = Math.round((e.clientY - r.top) * cv.height / r.height);
+    const px = cv.getContext('2d').getImageData(Math.max(0, x - 4), Math.max(0, y - 4), 9, 9).data; let s3 = [0, 0, 0], n = 0;
+    for (let i = 0; i < px.length; i += 4) { s3[0] += px[i]; s3[1] += px[i + 1]; s3[2] += px[i + 2]; n++; }
+    const rgb = s3.map(v => Math.round(v / n)); const hex = '#' + rgb.map(v => v.toString(16).padStart(2, '0')).join('');
+    const near = CM.all.map(c => ({ c, dd: cmDist(rgb, cmRgb(c.hex)) })).sort((p1, p2) => p1.dd - p2.dd).slice(0, 8);
+    $('#cmNear', d).innerHTML = '<div class="small">From photo <i class="cm-dot" style="background:' + hex + '"></i> ' + hex.toUpperCase() + ' — nearest:</div>' +
+      near.map(o => '<button type="button" class="cm-nb" data-near="' + esc(o.c.n) + '"><i class="cm-dot" style="background:' + o.c.hex + '"></i>' + esc(o.c.n) + '</button>').join('');
+    pick(near[0].c.n);
+  });
+  $('#cmQ', d).focus();
 };
 ACTIONS['ic-col'] = el => {
   const k = el.dataset.a, v = el.dataset.v; const at = catAttrs(IC_UI.cat).find(x => x.name === k); if (!at) return;
