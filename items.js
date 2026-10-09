@@ -238,15 +238,28 @@ function icCreateHtml(edit) {
   // existing items: one column per attribute so values line up
   if (t) {
     const list = Store.all('materials').filter(m => norm(m.group) === norm(IC_UI.cat) && norm(m.item_type || '') === norm(t.name)).sort((a, b) => a.code.localeCompare(b.code));
-    const attrs = typeAttrs(t);
-    h += '<h2>' + esc(t.name) + ' — existing items (' + list.length + ')</h2><div class="tbl-wrap"><table><tr><th>Photo</th><th>Item Code</th><th>Item Name</th>' + attrs.map((a, i) => '<th>' + (i + 1) + '. ' + esc(a.name) + '</th>').join('') + '<th>UOM</th><th class="num">Price</th></tr>' +
-      (list.length ? list.map(m => '<tr><td>' + (can('development', 'edit') ? '<label class="icphoto sm" title="Add / change photo">' + (m.photo ? '<img src="' + m.photo + '">' : '<span class="muted small">+ Photo</span>') + '<input type="file" accept="image/*" data-icmp="' + esc(m.id) + '" style="display:none"></label>' : photoThumb(m.photo)) + '</td><td><b>' + esc(m.code) + '</b></td><td>' + esc(m.name) + '</td>' + attrs.map(a => '<td>' + esc((m.attrs || {})[a.name] || '') + '</td>').join('') + '<td>' + esc(m.uom || '') + '</td><td class="num">' + (m.price ? money(m.price) : '') + '</td></tr>').join('')
-        : '<tr><td colspan="' + (attrs.length + 5) + '" class="empty">No items of this type yet</td></tr>') + '</table></div>';
+    const attrs = typeAttrs(t); const hasCol = attrs.some(isColourAttr);
+    h += '<h2>' + esc(t.name) + ' — existing items (' + list.length + ')</h2><div class="tbl-wrap"><table><tr><th>Photo</th>' + (hasCol ? '<th>Colour</th>' : '') + '<th>Item Code</th><th>Item Name</th>' + attrs.map((a, i) => '<th>' + (i + 1) + '. ' + esc(a.name) + '</th>').join('') + '<th>UOM</th><th class="num">Price</th></tr>' +
+      (list.length ? list.map(m => '<tr><td>' + (can('development', 'edit') ? '<label class="icphoto sm" title="Add / change photo">' + (m.photo ? '<img src="' + m.photo + '">' : '<span class="muted small">+ Photo</span>') + '<input type="file" accept="image/*" data-icmp="' + esc(m.id) + '" style="display:none"></label>' : photoThumb(m.photo)) + '</td>' + (hasCol ? '<td>' + photoThumb(m.colour_photo) + '</td>' : '') + '<td><b>' + esc(m.code) + '</b></td><td>' + esc(m.name) + '</td>' + attrs.map(a => '<td>' + esc((m.attrs || {})[a.name] || '') + '</td>').join('') + '<td>' + esc(m.uom || '') + '</td><td class="num">' + (m.price ? money(m.price) : '') + '</td></tr>').join('')
+        : '<tr><td colspan="' + (attrs.length + 5 + (hasCol ? 1 : 0)) + '" class="empty">No items of this type yet</td></tr>') + '</table></div>';
   } else if (IC_UI.cat) {
     h += '<h2>' + esc(IC_UI.cat) + ' — item types</h2>' + icTypeMatrix(IC_UI.cat, false);
   }
   return h;
 }
+// picture of the chosen colour(s), saved with the item: one stripe per colour, names under it
+function colourSwatchImg(cols) {
+  if (!cols.length) return '';
+  const cv = document.createElement('canvas'); cv.width = 240; cv.height = 150; const g = cv.getContext('2d');
+  const w = cv.width / cols.length;
+  cols.forEach((c, i) => { g.fillStyle = c.hex; g.fillRect(Math.round(i * w), 0, Math.ceil(w), 118); });
+  g.fillStyle = '#fff'; g.fillRect(0, 118, cv.width, 32); g.strokeStyle = 'rgba(0,0,0,.25)'; g.strokeRect(0.5, 0.5, cv.width - 1, cv.height - 1);
+  g.fillStyle = '#111'; g.font = 'bold 12px Arial'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  let txt = cols.map(c => c.name).join(' / '); while (g.measureText(txt).width > cv.width - 10 && txt.length > 4) txt = txt.slice(0, -2);
+  g.fillText(txt + (txt.length < cols.map(c => c.name).join(' / ').length ? '…' : ''), cv.width / 2, 134);
+  return cv.toDataURL('image/png');
+}
+function itemColours(t, vals) { const out = []; typeAttrs(t).filter(isColourAttr).forEach(a => String(vals[a.name] || '').split('/').filter(Boolean).forEach(n => out.push({ name: n, hex: swHex(n) }))); return out; }
 ACTIONS['ic-create'] = () => {
   if (!requirePerm('development', 'edit')) return;
   const t = Store.get('item_types', IC_UI.type); if (!t) return;
@@ -260,7 +273,7 @@ ACTIONS['ic-create'] = () => {
     id: uid(), code: itemCodeAuto(IC_UI.cat), name: itemNameOf(t, vals), group: IC_UI.cat, item_type: t.name,
     attrs: vals, attr_key: itemKeyOf(IC_UI.cat, t.name, vals), uom: X.uom || t.uom || 'PCS',
     price: num(X.price) || 0, gst: num(X.gst != null ? X.gst : t.gst) || 0, hsn: String(X.hsn != null ? X.hsn : t.hsn || '').trim(),
-    rack: String(X.rack || '').trim().toUpperCase(), min_level: num(X.min) || 0, photo: IC_UI.photo || '', created_at: nowIso(), created_by: ME.name
+    rack: String(X.rack || '').trim().toUpperCase(), min_level: num(X.min) || 0, photo: IC_UI.photo || '', colours: itemColours(t, vals), colour_photo: colourSwatchImg(itemColours(t, vals)), created_at: nowIso(), created_by: ME.name
   });
   audit('item.create', m.code, m.name);
   flash('Created ' + esc(m.code) + ' · ' + esc(m.name));
