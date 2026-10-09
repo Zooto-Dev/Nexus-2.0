@@ -403,7 +403,7 @@ a.dl:hover { background: #fafbfc; text-decoration: none; }
 .icdim select { width: 84px !important; }
 .icdim.lwh { gap: 3px; }
 .icdim.lwh select { width: 62px !important; min-width: 0; padding-right: 2px; }
-.icsw { display: flex; flex-direction: column; gap: 4px; max-height: 260px; overflow: auto; padding: 4px 0; }
+.icsw { display: flex; flex-direction: column; gap: 4px; max-height: 360px; overflow: auto; padding: 4px 0; }
 .icsw input[data-swq] { width: 100% !important; margin-bottom: 2px; }
 .icsw[data-off] { opacity: .45; pointer-events: none; }
 .icsw-row { display: grid; grid-template-columns: 58px 1fr; align-items: start; gap: 4px; }
