@@ -33,6 +33,16 @@
   img.prev { width: 100%; border-radius: 10px; margin-top: 10px; }
   .ok { color: #15803d; font-weight: 700; }
   .hidden { display: none !important; }
+  .crop { position: fixed; inset: 0; background: #000; z-index: 50; display: flex; flex-direction: column; }
+  .crop-stage { position: relative; flex: 1; display: flex; align-items: center; justify-content: center; overflow: hidden; touch-action: none; }
+  .crop-stage canvas { max-width: 100%; max-height: 100%; display: block; }
+  .crop-box { position: absolute; border: 2px solid #fff; box-shadow: 0 0 0 9999px rgba(0,0,0,.55); touch-action: none; }
+  .crop-box i { position: absolute; width: 28px; height: 28px; border: 4px solid #2dd4bf; }
+  .crop-box i[data-h=nw] { left: -6px; top: -6px; border-right: 0; border-bottom: 0; } .crop-box i[data-h=ne] { right: -6px; top: -6px; border-left: 0; border-bottom: 0; }
+  .crop-box i[data-h=sw] { left: -6px; bottom: -6px; border-right: 0; border-top: 0; } .crop-box i[data-h=se] { right: -6px; bottom: -6px; border-left: 0; border-top: 0; }
+  .crop-bar { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; padding: 12px; padding-bottom: max(12px, env(safe-area-inset-bottom)); background: #111; }
+  .cb { padding: 14px 4px; font-size: 15px; font-weight: 700; border: 0; border-radius: 10px; background: #2a2f31; color: #fff; }
+  .cb.send { background: var(--teal); }
   @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --ink: #eee; --mut: #9ca3af; --bg: #0f1415; } :root:not([data-theme="light"]) .card { background: #182022; } :root:not([data-theme="light"]) input { background: #0f1415; color: #eee; border-color: #2c3638; } :root:not([data-theme="light"]) .btn.ghost { background: #1f2b2d; color: #7fd0d6; } }
 </style>
 </head>
@@ -63,6 +73,10 @@
     <div class="card" id="idle">
       <div class="mut">Keep this screen open. On the laptop, press <b>📱 Phone</b> next to any photo box — the request appears here and the photo you take goes straight into Nexus.</div>
       <div class="ok hidden" id="sent" style="margin-top:10px">✓ Photo sent to the laptop</div>
+    </div>
+    <div id="crop" class="crop hidden">
+      <div class="crop-stage" id="cStage"><canvas id="cCan"></canvas><div class="crop-box" id="cBox"><i data-h="nw"></i><i data-h="ne"></i><i data-h="sw"></i><i data-h="se"></i></div></div>
+      <div class="crop-bar"><button class="cb" id="cRot">↻ Rotate</button><button class="cb" id="cAll">Full photo</button><button class="cb" id="cRe">Retake</button><button class="cb send" id="cSend">Send ✓</button></div>
     </div>
     <input id="cam" type="file" accept="image/*" capture="environment" class="hidden">
     <input id="gal" type="file" accept="image/*" class="hidden">
@@ -102,19 +116,55 @@ async function start(session) {
     if (p.eventType === 'DELETE' && req && p.old && p.old.id === req.id) setReq(null);
   }).subscribe(s => live(s === 'SUBSCRIBED', s === 'SUBSCRIBED' ? 'Connected — waiting for the laptop' : 'Reconnecting…'));
 }
-// make the photo small enough to send fast: longest side 1600 px, JPEG
-function shrink(file) {
-  return new Promise((ok, bad) => {
-    const img = new Image();
-    img.onload = () => { const k = Math.min(1, 1600 / Math.max(img.width, img.height)); const c = document.createElement('canvas'); c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
-      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height); URL.revokeObjectURL(img.src); ok(c.toDataURL('image/jpeg', 0.85)); };
-    img.onerror = () => bad(new Error('Could not read the photo')); img.src = URL.createObjectURL(file);
-  });
+/* ---- crop: drag the box (or its corners), rotate, then send only the chosen part ---- */
+const CR = { img: null, rot: 0, base: null, box: null, from: '' };
+function loadImg(file) { return new Promise((ok, bad) => { const im = new Image(); im.onload = () => ok(im); im.onerror = () => bad(new Error('Could not read the photo')); im.src = URL.createObjectURL(file); }); }
+function drawBase() {
+  // rotated copy of the photo, at most 2400 px on the long side (keeps phones from running out of memory)
+  const im = CR.img; const k = Math.min(1, 2400 / Math.max(im.width, im.height)); const w = Math.round(im.width * k), h = Math.round(im.height * k);
+  const side = CR.rot % 180 !== 0; const c = $('#cCan'); c.width = side ? h : w; c.height = side ? w : h;
+  const g = c.getContext('2d'); g.save(); g.translate(c.width / 2, c.height / 2); g.rotate(CR.rot * Math.PI / 180); g.drawImage(im, -w / 2, -h / 2, w, h); g.restore();
+  requestAnimationFrame(() => { const r = c.getBoundingClientRect(), st = $('#cStage').getBoundingClientRect(); CR.view = { x: r.left - st.left, y: r.top - st.top, w: r.width, h: r.height }; boxAll(); });
 }
-async function send(file) {
-  if (!file || !req) return; $('#serr').textContent = ''; $('#shoot').disabled = $('#pick').disabled = true; $('#shoot').textContent = 'Sending…';
+function boxAll() { const v = CR.view; CR.box = { x: v.x + v.w * 0.05, y: v.y + v.h * 0.05, w: v.w * 0.9, h: v.h * 0.9 }; boxDraw(); }
+function boxDraw() { const b = CR.box, el = $('#cBox'); el.style.left = b.x + 'px'; el.style.top = b.y + 'px'; el.style.width = b.w + 'px'; el.style.height = b.h + 'px'; }
+async function openCrop(file, from) {
+  if (!file || !req) return; $('#serr').textContent = '';
+  try { CR.img = await loadImg(file); } catch (e) { $('#serr').textContent = e.message; return; }
+  CR.rot = 0; CR.from = from; $('#crop').classList.remove('hidden'); drawBase();
+}
+(() => {
+  // one pointer drags the box or a corner; the box stays inside the photo and at least 40 px
+  let drag = null;
+  $('#cBox').addEventListener('pointerdown', e => { e.preventDefault(); $('#cBox').setPointerCapture(e.pointerId); drag = { h: e.target.dataset.h || 'move', x: e.clientX, y: e.clientY, b: Object.assign({}, CR.box) }; });
+  $('#cBox').addEventListener('pointermove', e => {
+    if (!drag) return; const v = CR.view, dx = e.clientX - drag.x, dy = e.clientY - drag.y, o = drag.b, MIN = 40; let { x, y, w, h } = o;
+    if (drag.h === 'move') { x = Math.min(Math.max(v.x, o.x + dx), v.x + v.w - o.w); y = Math.min(Math.max(v.y, o.y + dy), v.y + v.h - o.h); }
+    else {
+      if (drag.h.includes('w')) { x = Math.min(Math.max(v.x, o.x + dx), o.x + o.w - MIN); w = o.x + o.w - x; }
+      if (drag.h.includes('e')) { w = Math.min(Math.max(MIN, o.w + dx), v.x + v.w - o.x); }
+      if (drag.h.includes('n')) { y = Math.min(Math.max(v.y, o.y + dy), o.y + o.h - MIN); h = o.y + o.h - y; }
+      if (drag.h.includes('s')) { h = Math.min(Math.max(MIN, o.h + dy), v.y + v.h - o.y); }
+    }
+    CR.box = { x, y, w, h }; boxDraw();
+  });
+  ['pointerup', 'pointercancel'].forEach(t => $('#cBox').addEventListener(t, () => { drag = null; }));
+  $('#cRot').onclick = () => { CR.rot = (CR.rot + 90) % 360; drawBase(); };
+  $('#cAll').onclick = () => { const v = CR.view; CR.box = { x: v.x, y: v.y, w: v.w, h: v.h }; boxDraw(); };
+  $('#cRe').onclick = () => { $('#crop').classList.add('hidden'); (CR.from === 'gal' ? $('#pick') : $('#shoot')).click(); };
+  $('#cSend').onclick = () => {
+    const c = $('#cCan'), v = CR.view, b = CR.box, k = c.width / v.w;
+    const sx = Math.round((b.x - v.x) * k), sy = Math.round((b.y - v.y) * k), sw = Math.round(b.w * k), sh = Math.round(b.h * k);
+    const z = Math.min(1, 1600 / Math.max(sw, sh)); const o = document.createElement('canvas'); o.width = Math.round(sw * z); o.height = Math.round(sh * z);
+    o.getContext('2d').drawImage(c, sx, sy, sw, sh, 0, 0, o.width, o.height);
+    $('#crop').classList.add('hidden'); URL.revokeObjectURL(CR.img.src); sendData(o.toDataURL('image/jpeg', 0.85));
+  };
+  window.addEventListener('resize', () => { if (!$('#crop').classList.contains('hidden') && CR.img) drawBase(); });
+})();
+async function sendData(img) {
+  if (!img || !req) return; $('#serr').textContent = ''; $('#shoot').disabled = $('#pick').disabled = true; $('#shoot').textContent = 'Sending…';
   try {
-    const img = await shrink(file); $('#prev').src = img; $('#prev').classList.remove('hidden');
+    $('#prev').src = img; $('#prev').classList.remove('hidden');
     const { error } = await SB.from('nx_cam').insert({ kind: 'photo', req_id: req.id, label: req.label, img });
     if (error) throw error;
     setReq(null); $('#sent').classList.remove('hidden'); setTimeout(() => $('#sent').classList.add('hidden'), 6000);
@@ -123,8 +173,8 @@ async function send(file) {
 }
 $('#shoot').onclick = () => { $('#cam').value = ''; $('#cam').click(); };
 $('#pick').onclick = () => { $('#gal').value = ''; $('#gal').click(); };
-$('#cam').onchange = e => send(e.target.files[0]);
-$('#gal').onchange = e => send(e.target.files[0]);
+$('#cam').onchange = e => openCrop(e.target.files[0], 'cam');
+$('#gal').onchange = e => openCrop(e.target.files[0], 'gal');
 $('#go').onclick = async () => {
   $('#lerr').textContent = ''; $('#go').disabled = true;
   const { data, error } = await SB.auth.signInWithPassword({ email: $('#em').value.trim().toLowerCase(), password: $('#pw').value });
