@@ -170,8 +170,56 @@ document.addEventListener('change', e => {
 /* ================= Attach control ================= */
 // A clear drop-zone style picker: paper-clip + "Attach …" when empty, thumbnail + "Change" when filled.
 function attachBox(attrs, src, label) {
-  return '<label class="attach' + (src ? ' has' : '') + '">' + (src ? docThumb(src) + '<span class="attach-t">Change</span>' : '<span class="attach-i">&#128206;</span><span class="attach-t">' + esc(label || 'Attach file') + '</span>') + '<input type="file" ' + attrs + ' style="display:none"></label>';
+  const box = '<label class="attach' + (src ? ' has' : '') + '">' + (src ? docThumb(src) + '<span class="attach-t">Change</span>' : '<span class="attach-i">&#128206;</span><span class="attach-t">' + esc(label || 'Attach file') + '</span>') + '<input type="file" ' + attrs + ' style="display:none"></label>';
+  // image boxes also get a Camera button: a phone connected as a webcam (USB) or the laptop camera
+  return /accept="[^"]*image/.test(attrs) ? '<span class="attach-wrap">' + box + '<button type="button" class="btn sm cam-btn" data-act="cam-open" title="Take a photo with a camera (phone as webcam)">&#128247; Camera</button></span>' : box;
 }
+
+/* ================= Camera capture ================= */
+// Opens a live camera (any webcam the computer sees, including a phone in USB webcam mode), captures a photo and
+// hands it to the attach box's file input as if the file had been chosen, so every screen works unchanged.
+const CAM_KEY = 'nexus2_cam';
+ACTIONS['cam-open'] = async el => {
+  const input = el.closest('.attach-wrap') && el.closest('.attach-wrap').querySelector('input[type=file]'); if (!input) return;
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { flash('This browser cannot open a camera here.', 'err'); return; }
+  const old = $('#camDlg'); if (old) old.remove();
+  const d = document.createElement('div'); d.id = 'camDlg'; d.className = 'dlg-back';
+  d.innerHTML = '<div class="dlg cam"><div class="dlg-h">Camera</div><div class="cam-bar"><select id="camDev"><option>Opening camera…</option></select></div>' +
+    '<div class="cam-view"><video id="camVid" autoplay playsinline muted></video><img id="camShot" class="hidden"></div>' +
+    '<div class="dlg-f"><span id="camMsg" class="small late-txt"></span><span class="grow"></span><button class="btn" data-cam="x">Cancel</button><button class="btn hidden" data-cam="again">Retake</button><button class="btn primary" data-cam="snap">Capture</button><button class="btn primary hidden" data-cam="use">Use photo</button></div></div>';
+  document.body.appendChild(d);
+  const vid = $('#camVid', d), sel = $('#camDev', d), shot = $('#camShot', d); let stream = null, blob = null;
+  const stop = () => { if (stream) stream.getTracks().forEach(t => t.stop()); stream = null; };
+  const close = () => { stop(); d.remove(); };
+  const start = async id => {
+    stop(); $('#camMsg', d).textContent = '';
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ video: Object.assign({ width: { ideal: 1920 }, height: { ideal: 1080 } }, id ? { deviceId: { exact: id } } : { facingMode: 'environment' }), audio: false });
+      vid.srcObject = stream; const cur = stream.getVideoTracks()[0].getSettings().deviceId || id || '';
+      try { localStorage.setItem(CAM_KEY, cur); } catch (e) { }
+      const cams = (await navigator.mediaDevices.enumerateDevices()).filter(x => x.kind === 'videoinput');
+      sel.innerHTML = cams.map((c, k) => '<option value="' + esc(c.deviceId) + '"' + (c.deviceId === cur ? ' selected' : '') + '>' + esc(c.label || 'Camera ' + (k + 1)) + '</option>').join('');
+    } catch (e) { $('#camMsg', d).textContent = e.name === 'NotAllowedError' ? 'Allow the camera in the browser (camera icon in the address bar).' : e.name === 'NotFoundError' ? 'No camera found — connect the phone in webcam mode.' : 'Camera: ' + e.message; }
+  };
+  sel.addEventListener('change', () => start(sel.value));
+  d.addEventListener('click', ev => {
+    const b = ev.target.closest('[data-cam]'); if (!b) return; const k = b.dataset.cam;
+    if (k === 'x') close();
+    if (k === 'snap') {
+      if (!stream || !vid.videoWidth) return; const cv = document.createElement('canvas'); cv.width = vid.videoWidth; cv.height = vid.videoHeight; cv.getContext('2d').drawImage(vid, 0, 0);
+      cv.toBlob(bl => { blob = bl; shot.src = URL.createObjectURL(bl); shot.classList.remove('hidden'); vid.classList.add('hidden');
+        ['snap'].forEach(x => $('[data-cam=' + x + ']', d).classList.add('hidden')); ['again', 'use'].forEach(x => $('[data-cam=' + x + ']', d).classList.remove('hidden')); }, 'image/jpeg', 0.9);
+    }
+    if (k === 'again') { blob = null; shot.classList.add('hidden'); vid.classList.remove('hidden'); $('[data-cam=snap]', d).classList.remove('hidden'); ['again', 'use'].forEach(x => $('[data-cam=' + x + ']', d).classList.add('hidden')); }
+    if (k === 'use' && blob) {
+      const f = new File([blob], 'camera-' + Date.now() + '.jpg', { type: 'image/jpeg' }); const dt = new DataTransfer(); dt.items.add(f);
+      input.files = dt.files; close(); input.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+  });
+  d.addEventListener('keydown', ev => { if (ev.key === 'Escape') close(); });
+  let last = ''; try { last = localStorage.getItem(CAM_KEY) || ''; } catch (e) { }
+  await start(last); if (!stream && last) await start('');
+};
 
 /* ================= GRN number (reserved at gate entry) ================= */
 function reserveGrnNo() {
