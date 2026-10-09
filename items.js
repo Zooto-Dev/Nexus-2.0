@@ -44,6 +44,38 @@ function atValues(a, vals, t) {
   }
   return a.values || [];
 }
+/* ---- colour swatch grid: colour attributes are picked from coloured boxes grouped by family ---- */
+const isColourAttr = a => /COLOU?RS?\b/.test(String(a.name || '').toUpperCase());
+const SW_HEX = { BLACK: '#1b1b1b', WHITE: '#ffffff', 'OFF WHITE': '#f4f1e8', IVORY: '#fffbea', CREAM: '#f3e5c0', BEIGE: '#d9c3a0', NUDE: '#e3bc9a', TAN: '#c8a165', CAMEL: '#c19a6b', KHAKI: '#b9a77a', TAUPE: '#8b7d6b', STONE: '#a39e93', NATURAL: '#e6d5b8',
+  BROWN: '#795548', 'DARK BROWN': '#4e342e', COFFEE: '#6f4e37', RUST: '#b7410e', NAVY: '#1f2a5a', BLUE: '#1e66d0', 'SKY BLUE': '#87ceeb', TEAL: '#00808a', TURQUOISE: '#30c5c5', MINT: '#98e0c0',
+  GREY: '#9e9e9e', 'DARK GREY': '#555', 'LIGHT GREY': '#cfcfcf', CHARCOAL: '#36454f', GUNMETAL: '#53565b', RED: '#d32f2f', MAROON: '#7b1e2b', WINE: '#722f37', CHERRY: '#b11226',
+  PINK: '#ec5f97', 'DARK PINK': '#c2185b', 'LIGHT PINK': '#f8bbd0', 'NEON PINK': '#ff3fa4', PEACH: '#ffcba4', LILAC: '#c8a2c8', PURPLE: '#7b1fa2', YELLOW: '#fdd835', 'LIGHT YELLOW': '#fff59d', MUSTARD: '#d4a017',
+  ORANGE: '#fb8c00', GREEN: '#2e9d4a', 'LIGHT GREEN': '#a5d6a7', 'PISTA GREEN': '#93c572', OLIVE: '#6b7a2a', LIME: '#b5e61d', 'NEON GREEN': '#39ff14',
+  SILVER: '#c0c0c0', GOLD: '#d4af37', 'ROSE GOLD': '#b76e79', BRONZE: '#a97142', COPPER: '#b87333' };
+// family order and the words that put a shade in it ("RED 101", "DARK RED" -> RED)
+const SW_FAM = [['BLACK', /BLACK|CHARCOAL|JET/], ['WHITE', /WHITE|IVORY/], ['GREY', /GR[AE]Y|GUNMETAL|ASH|SMOKE/], ['BEIGE', /BEIGE|CREAM|NUDE|TAN\b|CAMEL|KHAKI|TAUPE|STONE|NATURAL|SAND/],
+  ['BROWN', /BROWN|COFFEE|RUST|CHOCO|COGNAC/], ['RED', /RED|MAROON|WINE|CHERRY|BURGUNDY/], ['PINK', /PINK|PEACH|ROSE(?! GOLD)|FUCHSIA|MAGENTA/], ['ORANGE', /ORANGE|CORAL/], ['YELLOW', /YELLOW|MUSTARD|LEMON/],
+  ['GREEN', /GREEN|OLIVE|LIME|MINT|PISTA|SAGE/], ['BLUE', /BLUE|NAVY|TEAL|TURQUOISE|AQUA|DENIM|COBALT/], ['PURPLE', /PURPLE|LILAC|VIOLET|LAVENDER|MAUVE/],
+  ['METALLIC', /SILVER|GOLD|BRONZE|COPPER|METAL/], ['OTHER', /./]];
+function swFamily(v) { const u = String(v).toUpperCase(); return (SW_FAM.find(f => f[1].test(u)) || SW_FAM[SW_FAM.length - 1])[0]; }
+function swHex(v) {
+  const u = String(v).toUpperCase().trim(); if (SW_HEX[u]) return SW_HEX[u];
+  const base = Object.keys(SW_HEX).sort((a, b) => b.length - a.length).find(k => new RegExp('\\b' + k + '\\b').test(u));
+  let h = base ? SW_HEX[base] : (SW_HEX[swFamily(u)] || '#bbb');
+  if (/\b(DARK|DEEP)\b/.test(u) && base && !/DARK/.test(base)) h = swShade(h, -0.3); else if (/\b(LIGHT|PALE|BABY)\b/.test(u) && base && !/LIGHT/.test(base)) h = swShade(h, 0.45);
+  return h;
+}
+function swShade(hex, f) { const n = parseInt(hex.slice(1).padEnd(6, hex.slice(1)), 16); const c = [16, 8, 0].map(sh => (n >> sh) & 255).map(x => Math.round(f < 0 ? x * (1 + f) : x + (255 - x) * f)); return '#' + c.map(x => x.toString(16).padStart(2, '0')).join(''); }
+function swInk(hex) { const n = parseInt(hex.slice(1), 16); const l = (0.299 * ((n >> 16) & 255) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)); return l > 150 ? '#111' : '#fff'; }
+function swGrid(a, values, picked, disabled) {
+  const q = (IC_UI.swq || {})[a.name] || ''; const fams = {};
+  values.forEach(v => { (fams[swFamily(v)] = fams[swFamily(v)] || []).push(v); });
+  return '<div class="icsw"' + (disabled ? ' data-off="1"' : '') + '><input data-swq="' + esc(a.name) + '" placeholder="Search colour…" value="' + esc(q) + '"' + (disabled ? ' disabled' : '') + '>' +
+    SW_FAM.map(f => f[0]).filter(f => fams[f]).map(f => '<div class="icsw-row" data-fam="' + f + '"><span class="icsw-f">' + f + '</span><div class="icsw-bs">' + fams[f].map(v => {
+      const hx = swHex(v); const on = picked.includes(v); const hide = q && !String(v).toUpperCase().includes(q.toUpperCase()) && !f.includes(q.toUpperCase());
+      return '<button type="button" class="icsw-b' + (on ? ' on' : '') + '" data-act="ic-col" data-a="' + esc(a.name) + '" data-v="' + esc(v) + '" style="background:' + hx + ';color:' + swInk(hx) + (hide ? ';display:none' : '') + '"' + (disabled ? ' disabled' : '') + ' title="' + esc(v) + '">' + esc(v) + '</button>';
+    }).join('') + '</div></div>').join('') + '</div>';
+}
 const dimVal = d => d && num(d.l) > 0 && num(d.w) > 0 && num(d.h) > 0 ? num(d.l) + 'X' + num(d.w) + 'X' + num(d.h) + (d.u || 'MM') : '';
 function lwhAt(A) {
   const i = A.findIndex(a => /(^| )LENGTH$/.test(String(a.name).toUpperCase()));
@@ -100,7 +132,15 @@ VIEWS.itemcreate = {
         const ty = Store.get('item_types', IC_UI.type); if (ty) typeAttrs(ty).forEach(a => { if (!attrOn(a, IC_UI.vals, ty)) delete IC_UI.vals[a.name]; });
         icRender(); const nx = $$('select[data-ic-attr]').find(s => !s.value && !s.disabled); if (nx) nx.focus(); }
     });
-    m.addEventListener('input', e => { if (e.target.dataset.icx) IC_UI.extra[e.target.dataset.icx] = e.target.value; });
+    m.addEventListener('input', e => {
+      if (e.target.dataset.icx) IC_UI.extra[e.target.dataset.icx] = e.target.value;
+      if (e.target.dataset.swq != null) {
+        const q = e.target.value.trim().toUpperCase(); (IC_UI.swq = IC_UI.swq || {})[e.target.dataset.swq] = e.target.value;
+        const box = e.target.closest('.icsw');
+        $$('.icsw-b', box).forEach(b => { b.style.display = !q || b.dataset.v.toUpperCase().includes(q) || b.closest('.icsw-row').dataset.fam.includes(q) ? '' : 'none'; });
+        $$('.icsw-row', box).forEach(r => { r.style.display = $$('.icsw-b', r).some(b => b.style.display !== 'none') ? '' : 'none'; });
+      }
+    });
   }
 };
 VIEWS.itemconfig = {
@@ -137,13 +177,15 @@ function icCreateHtml(edit) {
     const lab = '<td class="k"><span class="seqn">' + (i + 1) + '</span>' + esc(a.name) + ' *</td>';
     if (k === 'multi') {
       const cur = v.split('/').filter(Boolean);
-      rows += '<tr>' + lab + '<td>' + cur.map((x, j) => '<span class="chip">' + (j + 1) + '. ' + esc(x) + ' <a data-act="ic-mrem" data-a="' + esc(a.name) + '" data-i="' + j + '">×</a></span> ').join('') +
-        (cur.length < atMax(a) ? '<select data-ic-multi="' + esc(a.name) + '"' + dis + '><option value="">' + (open ? (cur.length ? 'Add ' + (cur.length + 1) + ' of ' + atMax(a) + '…' : 'Select…') : 'select step ' + i + ' first') + '</option>' +
+      rows += '<tr>' + lab + '<td>' + cur.map((x, j) => '<span class="chip">' + (isColourAttr(a) ? '<span class="icsw-dot" style="background:' + swHex(x) + '"></span>' : '') + (j + 1) + '. ' + esc(x) + ' <a data-act="ic-mrem" data-a="' + esc(a.name) + '" data-i="' + j + '">×</a></span> ').join('') +
+        (isColourAttr(a) ? (cur.length < atMax(a) ? swGrid(a, atValues(a, IC_UI.vals, t).filter(x => !cur.includes(x)), [], !open) : '') : cur.length < atMax(a) ? '<select data-ic-multi="' + esc(a.name) + '"' + dis + '><option value="">' + (open ? (cur.length ? 'Add ' + (cur.length + 1) + ' of ' + atMax(a) + '…' : 'Select…') : 'select step ' + i + ' first') + '</option>' +
           atValues(a, IC_UI.vals, t).filter(x => !cur.includes(x)).map(x => '<option>' + esc(x) + '</option>').join('') + '</select>' : '') + '</td></tr>';
     } else if (k === 'dims') {
       const d = IC_UI.dims[a.name] || { u: 'MM' };
       const box = (p, ph) => '<input type="number" min="0" step="any" data-ic-dim="' + esc(a.name) + '" data-d="' + p + '" value="' + esc(d[p] || '') + '" placeholder="' + ph + '"' + dis + '>';
       rows += '<tr>' + lab + '<td><div class="icdim">' + box('l', 'Length') + '<span>×</span>' + box('w', 'Width') + '<span>×</span>' + box('h', 'Height') + '<select data-ic-dim="' + esc(a.name) + '" data-d="u"' + dis + '>' + DIM_UNITS.map(u => '<option' + (u === (d.u || 'MM') ? ' selected' : '') + '>' + u + '</option>').join('') + '</select></div></td></tr>';
+    } else if (isColourAttr(a)) {
+      rows += '<tr>' + lab + '<td>' + (v ? '<span class="chip"><span class="icsw-dot" style="background:' + swHex(v) + '"></span>' + esc(v) + ' <a data-act="ic-col-x" data-a="' + esc(a.name) + '">×</a></span>' : swGrid(a, atValues(a, IC_UI.vals, t), [], !open)) + '</td></tr>';
     } else {
       rows += '<tr>' + lab + '<td><select data-ic-attr="' + esc(a.name) + '"' + dis + '><option value="">' + (open ? 'Select…' : 'select step ' + i + ' first') + '</option>' +
         atValues(a, IC_UI.vals, t).map(x => '<option' + (x === v ? ' selected' : '') + '>' + esc(x) + '</option>').join('') + '</select></td></tr>';
@@ -206,6 +248,14 @@ ACTIONS['ic-create'] = () => {
   flash('Created ' + esc(m.code) + ' · ' + esc(m.name));
   IC_UI.vals = {}; IC_UI.dims = {}; IC_UI.extra = {}; IC_UI.photo = ''; icRender();
 };
+ACTIONS['ic-col'] = el => {
+  const k = el.dataset.a, v = el.dataset.v; const at = catAttrs(IC_UI.cat).find(x => x.name === k); if (!at) return;
+  if (atKind(at) === 'multi') { const cur = (IC_UI.vals[k] || '').split('/').filter(Boolean); if (!cur.includes(v) && cur.length < atMax(at)) cur.push(v); IC_UI.vals[k] = cur.join('/'); }
+  else { IC_UI.vals[k] = v; const ty = Store.get('item_types', IC_UI.type); if (ty) typeAttrs(ty).forEach(a => { if (!attrOn(a, IC_UI.vals, ty)) delete IC_UI.vals[a.name]; }); }
+  if (IC_UI.swq) delete IC_UI.swq[k];
+  icRender(); const nx = $$('select[data-ic-attr]').find(s2 => !s2.value && !s2.disabled); if (nx) nx.focus();
+};
+ACTIONS['ic-col-x'] = el => { delete IC_UI.vals[el.dataset.a]; icRender(); };
 ACTIONS['ic-mrem'] = el => { const k = el.dataset.a; const cur = (IC_UI.vals[k] || '').split('/').filter(Boolean); cur.splice(+el.dataset.i, 1); IC_UI.vals[k] = cur.join('/'); icRender(); };
 ACTIONS['ic-photo-clear'] = () => { IC_UI.photo = ''; icRender(); };
 
