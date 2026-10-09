@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0e6a73">
+<title>Nexus Camera</title>
+<link rel="manifest" href="cam.webmanifest">
+<link rel="icon" href="cam-192.png">
+<link rel="apple-touch-icon" href="cam-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<style>
+  :root { --teal: #0e6a73; --ink: #111; --mut: #6b7280; --bg: #f3f6f6; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font: 16px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { background: var(--teal); color: #fff; padding: 14px 16px; padding-top: max(14px, env(safe-area-inset-top)); display: flex; align-items: center; gap: 10px; }
+  header b { font-size: 18px; } header .grow { flex: 1; } header a { color: #cfe; font-size: 13px; }
+  main { padding: 16px; max-width: 520px; margin: 0 auto; }
+  .card { background: #fff; border-radius: 14px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,.08); margin-bottom: 14px; }
+  label { display: block; font-size: 13px; color: var(--mut); margin: 10px 0 4px; }
+  input { width: 100%; padding: 12px; font-size: 16px; border: 1px solid #cfd6d6; border-radius: 10px; }
+  .btn { display: block; width: 100%; padding: 15px; font-size: 17px; font-weight: 700; border: 0; border-radius: 12px; background: var(--teal); color: #fff; margin-top: 14px; cursor: pointer; }
+  .btn.big { padding: 26px; font-size: 21px; }
+  .btn.ghost { background: #e6efef; color: var(--teal); }
+  .btn:disabled { opacity: .5; }
+  .st { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--mut); }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: #9ca3af; }
+  .dot.on { background: #16a34a; box-shadow: 0 0 0 4px #dcfce7; }
+  .req { border: 2px solid var(--teal); }
+  .req h2 { margin: 0 0 4px; font-size: 19px; color: var(--teal); }
+  .mut { color: var(--mut); font-size: 14px; }
+  .err { color: #b91c1c; font-size: 14px; min-height: 18px; margin-top: 8px; }
+  img.prev { width: 100%; border-radius: 10px; margin-top: 10px; }
+  .ok { color: #15803d; font-weight: 700; }
+  .hidden { display: none !important; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --ink: #eee; --mut: #9ca3af; --bg: #0f1415; } :root:not([data-theme="light"]) .card { background: #182022; } :root:not([data-theme="light"]) input { background: #0f1415; color: #eee; border-color: #2c3638; } :root:not([data-theme="light"]) .btn.ghost { background: #1f2b2d; color: #7fd0d6; } }
+</style>
+</head>
+<body>
+<header><b>Nexus Camera</b><span class="grow"></span><a id="out" class="hidden" href="#">Sign out</a></header>
+<main>
+  <section id="login" class="card hidden">
+    <div class="mut">Sign in with your Nexus email and password. Use the same login as on the laptop.</div>
+    <label>Email</label><input id="em" type="email" autocomplete="username" inputmode="email">
+    <label>Password</label><input id="pw" type="password" autocomplete="current-password">
+    <button class="btn" id="go">Sign in</button>
+    <div class="err" id="lerr"></div>
+  </section>
+
+  <section id="app" class="hidden">
+    <div class="card">
+      <div class="st"><span class="dot" id="dot"></span><span id="stt">Connecting…</span></div>
+      <div class="mut" id="who" style="margin-top:6px"></div>
+    </div>
+    <div class="card req hidden" id="reqCard">
+      <h2 id="reqLbl">Photo needed</h2>
+      <div class="mut" id="reqAt"></div>
+      <button class="btn big" id="shoot">📷 Take photo</button>
+      <button class="btn ghost" id="pick">Choose from gallery</button>
+      <img class="prev hidden" id="prev" alt="">
+      <div class="err" id="serr"></div>
+    </div>
+    <div class="card" id="idle">
+      <div class="mut">Keep this screen open. On the laptop, press <b>📱 Phone</b> next to any photo box — the request appears here and the photo you take goes straight into Nexus.</div>
+      <div class="ok hidden" id="sent" style="margin-top:10px">✓ Photo sent to the laptop</div>
+    </div>
+    <input id="cam" type="file" accept="image/*" capture="environment" class="hidden">
+    <input id="gal" type="file" accept="image/*" class="hidden">
+  </section>
+</main>
+<script src="config.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+'use strict';
+// Nexus Camera: the phone side of the laptop's "📱 Phone" button.
+// Only this user's own requests and photos are visible (table nx_cam, row-level security on auth.uid()).
+const $ = s => document.querySelector(s);
+const CFG = window.NEXUS_CONFIG || {};
+const SB = window.supabase && CFG.SUPABASE_URL ? window.supabase.createClient(CFG.SUPABASE_URL, CFG.SUPABASE_ANON_KEY) : null;
+let uid = '', req = null, chan = null;
+
+function show(id) { ['login', 'app'].forEach(x => $('#' + x).classList.toggle('hidden', x !== id)); $('#out').classList.toggle('hidden', id !== 'app'); }
+function live(on, txt) { $('#dot').classList.toggle('on', on); $('#stt').textContent = txt; }
+function setReq(r) {
+  req = r; $('#reqCard').classList.toggle('hidden', !r); $('#idle').classList.toggle('hidden', !!r);
+  if (r) { $('#reqLbl').textContent = r.label || 'Photo needed'; $('#reqAt').textContent = 'Asked at ' + new Date(r.created_at).toLocaleTimeString(); $('#prev').classList.add('hidden'); $('#serr').textContent = '';
+    if (navigator.vibrate) navigator.vibrate([120, 60, 120]); }
+}
+async function latestReq() {
+  const since = new Date(Date.now() - 10 * 60000).toISOString();
+  const { data } = await SB.from('nx_cam').select('id,label,created_at').eq('kind', 'req').gte('created_at', since).order('created_at', { ascending: false }).limit(1);
+  setReq(data && data[0] ? data[0] : null);
+}
+async function start(session) {
+  uid = session.user.id; show('app'); $('#who').textContent = session.user.email;
+  // tidy up anything older than a day
+  SB.from('nx_cam').delete().lt('created_at', new Date(Date.now() - 86400000).toISOString()).then(() => {});
+  await latestReq();
+  if (chan) SB.removeChannel(chan);
+  chan = SB.channel('cam-' + uid).on('postgres_changes', { event: '*', schema: 'public', table: 'nx_cam', filter: 'uid=eq.' + uid }, p => {
+    if (p.eventType === 'INSERT' && p.new.kind === 'req') setReq(p.new);
+    if (p.eventType === 'DELETE' && req && p.old && p.old.id === req.id) setReq(null);
+  }).subscribe(s => live(s === 'SUBSCRIBED', s === 'SUBSCRIBED' ? 'Connected — waiting for the laptop' : 'Reconnecting…'));
+}
+// make the photo small enough to send fast: longest side 1600 px, JPEG
+function shrink(file) {
+  return new Promise((ok, bad) => {
+    const img = new Image();
+    img.onload = () => { const k = Math.min(1, 1600 / Math.max(img.width, img.height)); const c = document.createElement('canvas'); c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height); URL.revokeObjectURL(img.src); ok(c.toDataURL('image/jpeg', 0.85)); };
+    img.onerror = () => bad(new Error('Could not read the photo')); img.src = URL.createObjectURL(file);
+  });
+}
+async function send(file) {
+  if (!file || !req) return; $('#serr').textContent = ''; $('#shoot').disabled = $('#pick').disabled = true; $('#shoot').textContent = 'Sending…';
+  try {
+    const img = await shrink(file); $('#prev').src = img; $('#prev').classList.remove('hidden');
+    const { error } = await SB.from('nx_cam').insert({ kind: 'photo', req_id: req.id, label: req.label, img });
+    if (error) throw error;
+    setReq(null); $('#sent').classList.remove('hidden'); setTimeout(() => $('#sent').classList.add('hidden'), 6000);
+  } catch (e) { $('#serr').textContent = 'Not sent: ' + (e.message || e); }
+  $('#shoot').disabled = $('#pick').disabled = false; $('#shoot').textContent = '📷 Take photo';
+}
+$('#shoot').onclick = () => { $('#cam').value = ''; $('#cam').click(); };
+$('#pick').onclick = () => { $('#gal').value = ''; $('#gal').click(); };
+$('#cam').onchange = e => send(e.target.files[0]);
+$('#gal').onchange = e => send(e.target.files[0]);
+$('#go').onclick = async () => {
+  $('#lerr').textContent = ''; $('#go').disabled = true;
+  const { data, error } = await SB.auth.signInWithPassword({ email: $('#em').value.trim().toLowerCase(), password: $('#pw').value });
+  $('#go').disabled = false; if (error) { $('#lerr').textContent = 'Sign-in failed: ' + error.message; return; } start(data.session);
+};
+$('#pw').addEventListener('keydown', e => { if (e.key === 'Enter') $('#go').click(); });
+$('#out').onclick = async e => { e.preventDefault(); if (chan) SB.removeChannel(chan); await SB.auth.signOut(); show('login'); };
+document.addEventListener('visibilitychange', () => { if (!document.hidden && uid) latestReq(); });
+(async () => {
+  if (!SB) { show('login'); $('#go').disabled = true; $('#lerr').textContent = CFG.SUPABASE_URL ? 'No internet — could not reach Nexus. Check the connection and reload.' : 'Nexus is not in cloud mode.'; return; }
+  const { data } = await SB.auth.getSession();
+  if (data.session) start(data.session); else show('login');
+})();
+</script>
+</body>
+</html>

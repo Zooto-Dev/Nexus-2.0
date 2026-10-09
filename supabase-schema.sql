@@ -166,3 +166,22 @@ alter table public.nx_wa_msgs add column if not exists event text;
 alter table public.nx_wa_msgs add column if not exists rid text;
 alter table public.nx_wa_msgs add column if not exists ref text;
 alter table public.nx_wa_msgs add column if not exists reply_to text;
+
+-- Phone camera link (cam.html): a laptop asks for a photo, the same user's phone sends it. Each user sees only their own rows.
+create table if not exists public.nx_cam (
+  id uuid primary key default gen_random_uuid(),
+  uid uuid not null default auth.uid() references auth.users(id) on delete cascade,
+  kind text not null check (kind in ('req','photo')),
+  label text,
+  req_id uuid,
+  img text check (img is null or length(img) < 4000000),
+  created_at timestamptz not null default now()
+);
+create index if not exists nx_cam_uid_idx on public.nx_cam(uid, created_at desc);
+alter table public.nx_cam enable row level security;
+revoke all on public.nx_cam from anon;
+grant select, insert, delete on public.nx_cam to authenticated;
+create policy "cam own read" on public.nx_cam for select to authenticated using (uid = (select auth.uid()));
+create policy "cam own insert" on public.nx_cam for insert to authenticated with check (uid = (select auth.uid()));
+create policy "cam own delete" on public.nx_cam for delete to authenticated using (uid = (select auth.uid()));
+alter publication supabase_realtime add table public.nx_cam;

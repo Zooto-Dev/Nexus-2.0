@@ -443,3 +443,10 @@ a.dl:hover { background: #fafbfc; text-decoration: none; }
 .cam-bar select { width: 100%; }
 .cam-view { background: #111; border-radius: 8px; overflow: hidden; display: flex; align-items: center; justify-content: center; min-height: 300px; max-height: 65vh; }
 .cam-view video, .cam-view img { max-width: 100%; max-height: 65vh; display: block; }
+.dlg.pc { max-width: 520px; }
+.pc-wait { display: flex; align-items: center; gap: 10px; padding: 14px; background: #e8f3f2; border-radius: 10px; font-size: 15px; }
+.pc-spin { width: 18px; height: 18px; border: 3px solid #0e6a73; border-top-color: transparent; border-radius: 50%; animation: pcspin 1s linear infinite; flex: none; }
+@keyframes pcspin { to { transform: rotate(360deg); } }
+.pc-help { display: flex; gap: 14px; align-items: center; margin-top: 12px; }
+.pc-qr img { display: block; width: 150px; height: 150px; }
+.pc-help a { word-break: break-all; }

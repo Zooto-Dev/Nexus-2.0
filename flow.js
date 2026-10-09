@@ -172,8 +172,45 @@ document.addEventListener('change', e => {
 function attachBox(attrs, src, label) {
   const box = '<label class="attach' + (src ? ' has' : '') + '">' + (src ? docThumb(src) + '<span class="attach-t">Change</span>' : '<span class="attach-i">&#128206;</span><span class="attach-t">' + esc(label || 'Attach file') + '</span>') + '<input type="file" ' + attrs + ' style="display:none"></label>';
   // image boxes also get a Camera button: a phone connected as a webcam (USB) or the laptop camera
-  return /accept="[^"]*image/.test(attrs) ? '<span class="attach-wrap">' + box + '<button type="button" class="btn sm cam-btn" data-act="cam-open" title="Take a photo with a camera (phone as webcam)">&#128247; Camera</button></span>' : box;
+  return /accept="[^"]*image/.test(attrs) ? '<span class="attach-wrap">' + box + '<button type="button" class="btn sm cam-btn" data-act="cam-open" title="Take a photo with a camera (phone as webcam)">&#128247; Camera</button>' +
+    (CLOUD ? '<button type="button" class="btn sm cam-btn" data-act="phone-cam" data-lbl="' + esc(label || 'Photo') + '" title="Take the photo on your phone (Nexus Camera app)">&#128241; Phone</button>' : '') + '</span>' : box;
 }
+
+/* ================= Phone camera (cam.html) ================= */
+// The laptop asks, the same user's phone (Nexus Camera, cam.html) takes the photo, and it lands in this attach box.
+// Requests and photos live in table nx_cam, readable only by their own user.
+const camUrl = () => new URL('cam.html', location.href).href;
+function loadQr() { return window.qrcode ? Promise.resolve() : new Promise(ok => { const sc = document.createElement('script'); sc.src = 'https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js'; sc.onload = ok; sc.onerror = ok; document.head.appendChild(sc); }); }
+ACTIONS['phone-cam'] = async el => {
+  const input = el.closest('.attach-wrap') && el.closest('.attach-wrap').querySelector('input[type=file]'); if (!input || !SB) return;
+  const { data: ses } = await SB.auth.getSession(); const uid = ses && ses.session && ses.session.user.id; if (!uid) { flash('Sign in again to use the phone camera.', 'err'); return; }
+  const cv = curView().v; const navIt = NAV.reduce((a, g) => a.concat(g.items || []), []).find(x => x.v === cv); const where = navIt ? navIt.l : ''; const label = (el.dataset.lbl || 'Photo') + (where ? ' · ' + where : '');
+  const { data: rq, error } = await SB.from('nx_cam').insert({ kind: 'req', label: label.slice(0, 120) }).select('id').single();
+  if (error) { flash('Phone camera: ' + esc(error.message), 'err'); return; }
+  const old = $('#pcDlg'); if (old) old.remove();
+  const d = document.createElement('div'); d.id = 'pcDlg'; d.className = 'dlg-back';
+  d.innerHTML = '<div class="dlg pc"><div class="dlg-h">&#128241; Take the photo on your phone</div>' +
+    '<div class="pc-wait"><span class="pc-spin"></span> Waiting for the phone… <b>' + esc(el.dataset.lbl || 'Photo') + '</b></div>' +
+    '<div class="pc-help"><div id="pcQr" class="pc-qr"></div><div class="small">Open <b>Nexus Camera</b> on your phone and sign in with the same login. First time: scan this code or open<br><a href="' + esc(camUrl()) + '" target="_blank">' + esc(camUrl()) + '</a><br>then <i>Add to Home screen</i> so it is one tap next time.</div></div>' +
+    '<div class="dlg-f"><span id="pcMsg" class="small late-txt"></span><span class="grow"></span><button class="btn" data-pc="x">Cancel</button></div></div>';
+  document.body.appendChild(d);
+  loadQr().then(() => { try { if (!window.qrcode) return; const q = window.qrcode(0, 'M'); q.addData(camUrl()); q.make(); const box = $('#pcQr', d); if (box) box.innerHTML = q.createImgTag(4, 8); } catch (e) { } });
+  let done = false;
+  const ch = SB.channel('pc-' + rq.id).on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'nx_cam', filter: 'uid=eq.' + uid }, async p => {
+    if (done || p.new.kind !== 'photo' || p.new.req_id !== rq.id) return; done = true;
+    $('.pc-wait', d).innerHTML = '<span class="pc-spin"></span> Photo received — attaching…';
+    const { data: row } = await SB.from('nx_cam').select('img').eq('id', p.new.id).single();
+    const img = row && row.img; if (!img) { $('#pcMsg', d).textContent = 'The photo could not be read — try again.'; done = false; return; }
+    const bin = atob(img.split(',')[1]); const u8 = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+    const dt = new DataTransfer(); dt.items.add(new File([u8], 'phone-' + Date.now() + '.jpg', { type: 'image/jpeg' }));
+    finish(); input.files = dt.files; input.dispatchEvent(new Event('change', { bubbles: true }));
+    SB.from('nx_cam').delete().in('id', [rq.id, p.new.id]).then(() => {});
+    flash('Photo from the phone attached.');
+  }).subscribe();
+  const finish = () => { SB.removeChannel(ch); d.remove(); };
+  d.addEventListener('click', ev => { const b = ev.target.closest('[data-pc]'); if (b && b.dataset.pc === 'x') { finish(); if (!done) SB.from('nx_cam').delete().eq('id', rq.id).then(() => {}); } });
+  d.addEventListener('keydown', ev => { if (ev.key === 'Escape') { finish(); if (!done) SB.from('nx_cam').delete().eq('id', rq.id).then(() => {}); } });
+};
 
 /* ================= Camera capture ================= */
 // Opens a live camera (any webcam the computer sees, including a phone in USB webcam mode), captures a photo and
