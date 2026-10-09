@@ -80,7 +80,7 @@ function readCond(box) {
 VIEWS.builder = {
   mod: 'builder', render() {
     if (!B.draft || !Store.get('processes', B.pid)) bldLoad();
-    if (!B.draft) { setMain('<div class="panel">No process yet.</div>'); return; }
+    if (!B.draft) { setMain('<div class="toolbar">' + (can('builder', 'edit') ? '<button class="btn primary" data-act="bld-new">+ New FMS</button>' : '') + '</div><div class="panel empty">No FMS yet.</div>'); return; }
     const edit = can('builder', 'edit'); const proc = Store.get('processes', B.pid);
     const versions = Store.all('processes').filter(p => p.code === proc.code).sort((a, b) => a.version - b.version);
     const v = validateSpec(B.draft);
@@ -90,7 +90,8 @@ VIEWS.builder = {
       (edit ? '<button class="btn sm" data-act="bld-new">+ New FMS</button>' : '') + '<span class="grow"></span>' +
       '<span class="muted small">Version</span>' + seg('ver', versions.map(p => ({ v: p.id, l: 'v' + p.version + (p.active ? ' ✓' : '') })), B.pid) + '</div>';
     h += '<div class="toolbar"><span class="small">' + (proc.active ? '<b>v' + proc.version + ' is live</b> — new orders use it.' : 'v' + proc.version + ' is not live.') + ' ' + (B.dirty ? '<span class="late-txt">Unsaved changes.</span>' : '') + '</span><span class="grow"></span>' +
-      (edit ? (B.dirty ? '<button class="btn" data-act="bld-discard" data-confirm="Discard?">Discard</button><button class="btn primary" data-save data-act="bld-save"' + (v.errors.length ? ' disabled title="Fix errors first"' : '') + '>Save as v' + (versions[versions.length - 1].version + 1) + '</button>' : '') +
+      (edit ? (B.dirty ? '<button class="btn" data-act="bld-discard" data-confirm="Discard?">Discard</button><button class="btn" data-act="bld-save" data-new="1"' + (v.errors.length ? ' disabled title="Fix errors first"' : '') + '>Save as new version (v' + (versions[versions.length - 1].version + 1) + ')</button><button class="btn primary" data-save data-act="bld-save"' + (v.errors.length ? ' disabled title="Fix errors first"' : '') + '>Save v' + proc.version + '</button>' : '') +
+        (!B.dirty && isSuperAdmin() ? (versions.length > 1 && !proc.active ? '<button class="btn ghost danger" data-act="bld-delver" data-confirm="Delete v' + proc.version + '?">Delete v' + proc.version + '</button>' : '') + '<button class="btn ghost danger" data-act="bld-delfms" data-confirm="Delete the whole FMS ' + esc(proc.name || proc.code) + '?">Delete FMS</button>' : '') +
         (!B.dirty && !proc.active ? '<button class="btn primary" data-act="bld-activate" data-confirm="Make live?"' + (v.errors.length ? ' disabled' : '') + '>Activate v' + proc.version + '</button>' : '') : '<span class="muted small">Read only</span>') + '</div>' +
       (B.dirty && v.errors.length ? '<ul class="val" style="margin:0 0 6px;padding-left:18px">' + v.errors.map(x => '<li class="e">' + esc(x) + '</li>').join('') + '</ul>' : '') + '</div>';
     h += '<div class="tabs">' + [['flow', 'Flow'], ['tables', 'Doer Tables'], ['sim', 'Simulate'], ['fields', 'Fields & JSON']].map(([k, l]) => '<a data-act="bld-tab" data-t="' + k + '" class="' + (B.tab === k ? 'on' : '') + '">' + l + '</a>').join('') + '</div>';
@@ -371,13 +372,33 @@ ACTIONS['bld-new'] = () => {
   audit('fms.new', code, name); bldLoad(p.id); B.tab = 'flow'; VIEWS.builder.render(); flash(name + ' created. Add its steps, then Save and Activate.');
 };
 ACTIONS['bld-discard'] = () => { bldLoad(B.pid); VIEWS.builder.render(); };
-ACTIONS['bld-save'] = () => {
+ACTIONS['bld-save'] = el => {
   if (!bldEditAllowed()) return; if ($('#bEd')) bldCollect();
   const v = validateSpec(B.draft); if (v.errors.length) { flash('Fix ' + v.errors.length + ' error(s) first.', 'err'); return; }
-  const proc = Store.get('processes', B.pid); const max = Math.max(...Store.all('processes').filter(p => p.code === proc.code).map(p => p.version));
+  const proc = Store.get('processes', B.pid);
+  if (!(el && el.dataset && el.dataset.new)) {
+    // Save = update this version (live orders follow the change); a new version only when asked for
+    proc.spec = clone(B.draft); proc.name = B.draft.process.name; proc.updated_at = nowIso(); proc.updated_by = ME.name; Store.put('processes', proc); RES_CACHE.clear();
+    audit('fms.save', proc.code + ' v' + proc.version, 'updated in place'); B.dirty = false; flash('v' + proc.version + ' saved.' + (proc.active ? ' Running orders follow the change.' : '')); VIEWS.builder.render(); return;
+  }
+  const max = Math.max(...Store.all('processes').filter(p => p.code === proc.code).map(p => p.version));
   const np = Store.put('processes', { id: uid(), code: proc.code, version: max + 1, name: B.draft.process.name, spec: clone(B.draft), active: false, created_at: nowIso(), created_by: ME.name });
   audit('fms.version', proc.code + ' v' + np.version, 'Saved from v' + proc.version);
   B.pid = np.id; B.dirty = false; flash('Saved as v' + np.version + '. It is not live yet — click Activate when ready.'); VIEWS.builder.render();
+};
+// delete one version (not live, no orders on it) or the whole FMS (no orders on any version)
+const fmsUsers = ids => fmsDocs().filter(o => ids.includes(o.process_id));
+ACTIONS['bld-delver'] = () => {
+  if (!isSuperAdmin()) return; const p = Store.get('processes', B.pid); if (!p || p.active) { flash('The live version cannot be deleted.', 'err'); return; }
+  const n = fmsUsers([p.id]).length; if (n) { flash(n + ' order(s)/sample(s) run on v' + p.version + ' — it cannot be deleted.', 'err'); return; }
+  Store.del('processes', p.id); audit('fms.delete_version', p.code + ' v' + p.version, '');
+  const rest = Store.all('processes').filter(x => x.code === p.code); bldLoad((rest.find(x => x.active) || rest[0]).id); flash('v' + p.version + ' deleted.'); VIEWS.builder.render();
+};
+ACTIONS['bld-delfms'] = () => {
+  if (!isSuperAdmin()) return; const p = Store.get('processes', B.pid); const all = Store.all('processes').filter(x => x.code === p.code);
+  const n = fmsUsers(all.map(x => x.id)).length; if (n) { flash(n + ' order(s)/sample(s) run on this FMS — close or delete them first.', 'err'); return; }
+  all.forEach(x => Store.del('processes', x.id)); audit('fms.delete', p.code, (p.name || p.code) + ' · ' + all.length + ' version(s)');
+  const left = Store.all('processes'); if (left.length) bldLoad((left.find(x => x.active) || left[0]).id); flash((p.name || p.code) + ' deleted.'); VIEWS.builder.render();
 };
 ACTIONS['bld-activate'] = () => {
   if (!bldEditAllowed()) return;

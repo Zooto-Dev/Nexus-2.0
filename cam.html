@@ -183,7 +183,7 @@ $('#go').onclick = async () => {
   $('#go').disabled = false; if (error) { $('#lerr').textContent = 'Sign-in failed: ' + error.message; return; } start(data.session);
 };
 $('#pw').addEventListener('keydown', e => { if (e.key === 'Enter') $('#go').click(); });
-$('#out').onclick = async e => { e.preventDefault(); if (chan) SB.removeChannel(chan); await SB.auth.signOut(); show('login'); };
+$('#out').onclick = async e => { e.preventDefault(); if (chan) SB.removeChannel(chan); await SB.auth.signOut({ scope: 'local' }); show('login'); };
 document.addEventListener('visibilitychange', () => { if (!document.hidden && uid) latestReq(); });
 (async () => {
   if (!SB) { show('login'); $('#go').disabled = true; $('#lerr').textContent = CFG.SUPABASE_URL ? 'No internet — could not reach Nexus. Check the connection and reload.' : 'Nexus is not in cloud mode.'; return; }

@@ -151,6 +151,22 @@ const Store = {
 
 /* ---- cloud (Supabase): one generic table nx_docs(collection, id, data) ---- */
 let pendingWrites = 0;
+let REAUTH = false;
+async function reauth() {
+  if (REAUTH) return; REAUTH = true;
+  try { const { data } = await SB.auth.refreshSession(); if (data && data.session) { REAUTH = false; return; } } catch (e) { }
+  const d = document.createElement('div'); d.className = 'dlg-back'; d.id = 'reDlg';
+  d.innerHTML = '<div class="dlg" style="max-width:380px"><div class="dlg-h">Sign in again</div><div class="small">Your login has ended. Unsaved changes are kept and save as soon as you sign in.</div>' +
+    '<table class="jckv"><tr><td class="k">Email</td><td class="v"><input id="reEm" value="' + esc((ME && ME.email) || '') + '"></td></tr><tr><td class="k">Password</td><td class="v"><input id="rePw" type="password"></td></tr></table>' +
+    '<div class="dlg-f"><span id="reMsg" class="small late-txt"></span><span class="grow"></span><button class="btn primary" id="reGo">Sign in</button></div></div>';
+  document.body.appendChild(d); $('#rePw', d).focus();
+  const go = async () => {
+    const { error } = await SB.auth.signInWithPassword({ email: $('#reEm', d).value.trim().toLowerCase(), password: $('#rePw', d).value });
+    if (error) { $('#reMsg', d).textContent = error.message; return; }
+    d.remove(); REAUTH = false; flash('Signed in — saving your changes.'); retryNow();
+  };
+  $('#reGo', d).onclick = go; $('#rePw', d).addEventListener('keydown', ev => { if (ev.key === 'Enter') go(); });
+}
 const RETRY_Q = new Map();   // failed writes: key col|id -> {col, id, isDelete}
 function syncBadge() { const s = $('#syncState'); if (s) s.textContent = CLOUD ? (pendingWrites ? 'Saving…' : RETRY_Q.size ? RETRY_Q.size + ' change(s) retrying…' : 'Synced') : 'Local mode'; }
 async function cloudWrite(col, doc, isDelete) {
@@ -162,18 +178,21 @@ async function cloudWrite(col, doc, isDelete) {
     RETRY_Q.delete(col + '|' + doc.id);
   } catch (e) {
     RETRY_Q.set(col + '|' + doc.id, { col, id: doc.id, isDelete: !!isDelete });
-    flash('Cloud save failed: ' + esc(e.message || e) + ' — will retry automatically; keep this page open.', 'err');
+    // "permission denied" = the login has ended (signed out elsewhere / expired): renew it or ask for the password
+    if (/permission denied|JWT|not authenticated/i.test(String(e.message || e)) || e.code === '42501' || e.code === 'PGRST301') reauth();
+    else flash('Cloud save failed: ' + esc(e.message || e) + ' — will retry automatically; keep this page open.', 'err');
   }
   pendingWrites--; syncBadge();
 }
 // retry failed writes every 20s (sends the latest local copy)
-setInterval(() => {
-  if (!CLOUD || !SB || !RETRY_Q.size) return;
+function retryNow() {
+  if (!CLOUD || !SB || !RETRY_Q.size || REAUTH) return;
   Array.from(RETRY_Q.values()).forEach(r => {
     const doc = r.isDelete ? { id: r.id } : (r.col === 'settings' ? DB.settings : Store.get(r.col, r.id));
     if (doc) cloudWrite(r.col, doc, r.isDelete); else RETRY_Q.delete(r.col + '|' + r.id);
   });
-}, 20000);
+}
+setInterval(retryNow, 20000);
 window.addEventListener('beforeunload', ev => { if (CLOUD && (pendingWrites > 0 || RETRY_Q.size)) { ev.preventDefault(); ev.returnValue = ''; } });
 async function cloudLoad() {
   const out = { settings: null }; COLS.forEach(c => out[c] = []);
@@ -635,7 +654,7 @@ ACTIONS['menu'] = el => { const m = el.parentElement; const was = m.classList.co
 document.addEventListener('click', ev => { if (!ev.target.closest('.menu')) $$('#nav .menu.open').forEach(x => x.classList.remove('open')); }, true);
 ACTIONS['go'] = el => go(el.dataset.v, el.dataset.p);
 ACTIONS['undo-step'] = el => undoStep(el.dataset.o, el.dataset.s);
-ACTIONS['logout'] = async () => { localStorage.removeItem('nexus2_me'); if (SB) await SB.auth.signOut(); location.reload(); };
+ACTIONS['logout'] = async () => { localStorage.removeItem('nexus2_me'); if (SB) await SB.auth.signOut({ scope: 'local' }); location.reload(); };   // this device only, other devices stay signed in
 document.addEventListener('keydown', ev => {
   const typing = /INPUT|TEXTAREA|SELECT/.test((document.activeElement || {}).tagName || '');
   if (ev.key === '/' && !typing) { ev.preventDefault(); $('#gsearch').focus(); }
