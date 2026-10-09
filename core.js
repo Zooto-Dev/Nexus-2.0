@@ -47,6 +47,14 @@ function flash(msg, type) {
 
 /* ================= store ================= */
 const DB_KEY = 'nexus2_db_v8';
+// browser copy of the data: local mode only. In cloud mode the data always loads fresh from Supabase,
+// so no copy is kept in the browser (it can be too big for browser storage, and data stays off the device)
+function saveLocal() {
+  try {
+    if (CLOUD) { localStorage.removeItem(DB_KEY); return; }
+    localStorage.setItem(DB_KEY, JSON.stringify(DB));
+  } catch (e) { flash('Browser storage full — export a backup from Settings.', 'err'); }
+}
 const COLS = ['users', 'roles', 'customers', 'items', 'materials', 'processes', 'orders', 'samples', 'dispatches', 'purchase_orders', 'sourcing', 'grns', 'inwards', 'vendors', 'issues', 'rsjw', 'rtvs', 'boms', 'job_cards', 'requisitions', 'tickets', 'checklist', 'checklist_log', 'escalations', 'attributes', 'item_types', 'mail_queue', 'prod_reports', 'wa_log', 'audit'];
 let DB = null;
 const CFG = window.NEXUS_CONFIG || {};
@@ -138,12 +146,12 @@ const Store = {
   },
   setSettings(s) { s.id = 'main'; changeLog('settings', s, false); DB.settings = s; s.updated_at = nowIso(); s.updated_by = ME ? ME.name : 'System'; this.persist('settings', s); RES_CACHE.clear(); },
   persist(col, doc, isDelete) {
-    try { localStorage.setItem(DB_KEY, JSON.stringify(DB)); } catch (e) { flash('Browser storage full — export a backup from Settings.', 'err'); }
+    saveLocal();
     if (CLOUD && SB) cloudWrite(col, doc, isDelete);
   },
   loadLocal() {
     try { DB = JSON.parse(localStorage.getItem(DB_KEY) || 'null'); } catch (e) { DB = null; }
-    if (!DB || !DB.settings) { DB = seedData(); localStorage.setItem(DB_KEY, JSON.stringify(DB)); }
+    if (!DB || !DB.settings) { DB = seedData(); saveLocal(); }
     COLS.forEach(c => { if (!DB[c]) DB[c] = []; });
     snapAll();
   }
@@ -205,10 +213,10 @@ async function cloudLoad() {
   }
   if (!out.settings) {                      // empty project → seed masters (no demo orders) and push
     const seed = seedData(true);
-    DB = seed; localStorage.setItem(DB_KEY, JSON.stringify(DB));
+    DB = seed; saveLocal();
     await SB.from('nx_docs').upsert([{ collection: 'settings', id: 'main', data: seed.settings }]
       .concat(COLS.flatMap(c => seed[c].map(d => ({ collection: c, id: d.id, data: d })))));
-  } else { DB = out; localStorage.setItem(DB_KEY, JSON.stringify(DB)); }
+  } else { DB = out; saveLocal(); }
   snapAll();
   SB.channel('nx_docs').on('postgres_changes', { event: '*', schema: 'public', table: 'nx_docs' }, p => {
     const r = p.new && p.new.collection ? p.new : p.old; if (!r || !r.collection) return;
@@ -605,7 +613,7 @@ function renderNav() {
   const cntHtml = k => k && k.n ? '<span class="cnt' + (k.late ? ' late' : '') + '">' + k.n + '</span>' : '';
   const itemOk = n => can(n.mod, n.edit ? 'edit' : 'view');
   const itemOn = n => cur === n.v && (n.v === 'dispatch' ? (n.p || '') === (curP || '') : true);
-  let html = '<div class="brand"><span class="logo-mark">N</span>Nexus <b>2.0</b></div>';
+  let html = '<div class="brand"><img class="logo-mark" src="nexus-mark.png" alt="">Nexus <b>2.0</b></div>';
   NAV.forEach(n => {
     if (!n.menu) {
       if (!itemOk(n)) return;
