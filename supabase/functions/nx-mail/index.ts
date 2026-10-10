@@ -27,6 +27,19 @@ function jwtUser(jwt: string): string {
     return p.role === 'authenticated' ? String(p.sub || '') : '';
   } catch (_e) { return ''; }
 }
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+// can this domain receive mail? '' = yes (or DNS not reachable: the bounce check still runs), else the reason
+async function domainError(dom: string): Promise<string> {
+  const ask = async (type: string) => (await (await fetch('https://cloudflare-dns.com/dns-query?name=' + encodeURIComponent(dom) + '&type=' + type, { headers: { accept: 'application/dns-json' } })).json()) as Doc;
+  try {
+    const mx = await ask('MX');
+    if (mx.Status === 3) return 'the domain ' + dom + ' does not exist';
+    const recs = (mx.Answer || []).filter((a: Doc) => a.type === 15);
+    if (recs.length) return recs.every((a: Doc) => /^0\s+\.?$/.test(String(a.data).trim())) ? dom + ' does not accept mail' : '';
+    const a = await ask('A');
+    return (a.Answer || []).some((x: Doc) => x.type === 1) ? '' : dom + ' has no mail server';
+  } catch (_e) { return ''; }
+}
 const db = createClient(Deno.env.get('SUPABASE_URL')!, adminKey(), { auth: { persistSession: false } });
 
 Deno.serve(async (req) => {
@@ -76,6 +89,45 @@ Deno.serve(async (req) => {
       return { id: row.id, status, error };
     };
 
+    // email check (vendor email IDs): domain takes mail → a short mail is sent → no bounce within ~35 s = OK
+    if (b.action === 'verify') {
+      const emails = [...new Set((Array.isArray(b.emails) ? b.emails : []).map((x: unknown) => String(x).trim().toLowerCase()))].filter(Boolean).slice(0, 10) as string[];
+      if (!emails.length) return out({ error: 'No email' }, 400);
+      const since = new Date(Date.now() - 864e5).toISOString();
+      const { count } = await db.from('nx_docs').select('id', { count: 'exact', head: true }).eq('collection', 'mail_queue').eq('data->>kind', 'verify').eq('data->>uid', uid).gte('updated_at', since);
+      if ((count || 0) + emails.length > 60) return out({ error: 'Daily limit of 60 email checks reached — try tomorrow' }, 429);
+      const s = (settingsRow.data?.data || {}) as Doc;
+      const company = String(s.company || 'Zooto Fashion Pvt Ltd').replace(/[\r\n<>"]+/g, ' ').slice(0, 80);
+      const subject = 'Email ID registered with ' + company;
+      const body = 'Dear Sir / Madam,\n\nThis email ID has been registered with ' + company + ' for purchase orders and other communication.\n\nNo reply is needed.\n\nRegards,\n' + company;
+      const res: Record<string, { ok: boolean; reason: string }> = {};
+      const sent: string[] = [];
+      for (const e of emails) {
+        if (!EMAIL.test(e)) { res[e] = { ok: false, reason: 'Email ID is not valid' }; continue; }
+        const de = await domainError(e.split('@')[1]);
+        if (de) { res[e] = { ok: false, reason: de }; continue; }
+        try {
+          // sent from the mailbox itself (not no-reply) so that a bounce comes back to it and can be found
+          const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ secret, to: e, subject, body, name: company, ref: 'email-check' }), redirect: 'follow' });
+          const j = await r.json().catch(() => ({}));
+          if (j.ok) sent.push(e); else res[e] = { ok: false, reason: 'mail could not be sent: ' + String(j.error || r.status).slice(0, 200) };
+        } catch (x) { res[e] = { ok: false, reason: 'mail could not be sent: ' + String((x as Error).message || x).slice(0, 200) }; }
+      }
+      if (sent.length) {
+        await sleep(35000);
+        let bounced: string[] = [], note = '';
+        try {
+          const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ secret, action: 'bounces', emails: sent }), redirect: 'follow' });
+          const j = await r.json().catch(() => ({}));
+          if (j.ok && Array.isArray(j.bounced)) bounced = j.bounced.map((x: unknown) => String(x).toLowerCase()); else note = ' (bounce check not available — update the Apps Script)';
+        } catch (_x) { note = ' (bounce check failed)'; }
+        sent.forEach((e) => { res[e] = bounced.includes(e) ? { ok: false, reason: 'mail bounced — this address does not exist' } : { ok: true, reason: 'mail delivered' + note }; });
+      }
+      const now = new Date().toISOString();
+      await db.from('nx_docs').upsert(emails.map((e) => ({ collection: 'mail_queue', id: 'vchk_' + crypto.randomUUID(), updated_at: now,
+        data: { kind: 'verify', uid, to: e, subject, body, ref: 'email-check', status: res[e].ok ? 'sent' : 'failed', error: res[e].ok ? '' : res[e].reason, at: now, sent_at: res[e].ok ? now : '', by: me.email || '', name: company } })).map((r) => ({ ...r, data: { ...r.data, id: r.id } })));
+      return out({ ok: true, results: emails.map((e) => ({ email: e, ...res[e] })) });
+    }
     // one queued mail (normal use, right after it is queued); a failed one only by Admin
     if (b.id) {
       const { data: rec } = await db.from('nx_docs').select('data').eq('collection', 'mail_queue').eq('id', String(b.id)).maybeSingle();

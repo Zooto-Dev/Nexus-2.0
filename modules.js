@@ -38,6 +38,14 @@ function poVendorNeeds() {
   netReqRows().filter(r => r.net > 0.0001).forEach(r => Array.from(r.suppliers).forEach(v => { const k = norm(v); (need[k] = need[k] || { name: (vendorBy(v) || {}).name || v, items: 0 }).items++; }));
   return Object.values(need).sort((a, b) => a.name.localeCompare(b.name));
 }
+// supplier dropdown: only vendors from the Vendors master; an old name that is not in the master shows as "not in Vendors" and blocks saving
+function vendorSel(attr, cur) {
+  const v = cur ? vendorBy(cur) : null;
+  return '<select ' + attr + '><option value=""></option>' + (cur && !v ? '<option value="' + esc(cur) + '" selected data-notven>' + esc(cur) + ' — not in Vendors</option>' : '') +
+    vendorNames().map(n => '<option' + (v && v.name === n ? ' selected' : '') + '>' + esc(n) + '</option>').join('') + '</select>';
+}
+function supplierOf(text) { const v = vendorBy(text); return v ? v.name : String(text || '').trim(); }
+function badSuppliers(lines) { return Array.from(new Set(lines.filter(l => l.supplier && !vendorBy(l.supplier)).map(l => l.supplier))); }
 function dlVendor() { return '<datalist id="dlVen">' + vendorNames().map(v => '<option value="' + esc(v) + '">').join('') + '</datalist>'; }
 // stk = good stock; rej = GRN rejection (goes back to the vendor);
 // rejLine = line rejection that is unused and can go back to the vendor; rejScrap = line rejection that cannot
@@ -741,7 +749,7 @@ function jcfBomRow(l) {
   l = l || {}; const m = matBy(l.material) || {};
   return '<tr data-bomrow><td class="c" data-idx></td><td><input data-b="process" value="' + esc(l.process || '') + '"></td><td><input data-b="section" value="' + esc(l.section || '') + '"></td><td><input data-b="category" list="dlCatJc" value="' + esc(l.category || m.group || '') + '"></td>' +
     '<td><input data-b="mat" list="dlMatJc" value="' + esc(m.name || l.material || '') + '"></td><td class="c muted" data-b-code>' + esc(l.material || '') + '</td><td class="c muted" data-b-uom>' + esc(l.uom || m.uom || '') + '</td>' +
-    '<td><input data-b="norms" type="number" min="0" step="any" class="right" value="' + esc(l.norms || l.qty || '') + '"></td><td class="c" data-b-req>0</td><td><input data-b="supplier" list="dlVen" value="' + esc(l.supplier || '') + '"></td><td class="c"><a data-act="jcf-bom-del" title="Remove">×</a></td></tr>';
+    '<td><input data-b="norms" type="number" min="0" step="any" class="right" value="' + esc(l.norms || l.qty || '') + '"></td><td class="c" data-b-req>0</td><td>' + vendorSel('data-b="supplier"', l.supplier || '') + '</td><td class="c"><a data-act="jcf-bom-del" title="Remove">×</a></td></tr>';
 }
 function jcfRecalc() {
   let act = 0, ext = 0;
@@ -827,7 +835,7 @@ function jcfImportText(text) {
       process: before[0] || '', section: before[1] || '',
       material: m.code, uom: m.uom,
       norms: ni >= 0 ? after[ni] : '',
-      supplier: after.find((c, k) => k !== ni && c && !isNum(c)) || ''
+      supplier: supplierOf(after.find((c, k) => k !== ni && c && !isNum(c)) || '')
     })); ok++;
   });
   if (ok) $$('#jfBom tr[data-bomrow]').forEach(tr => { if (!$('[data-b="mat"]', tr).value.trim() && !$('[data-b="norms"]', tr).value) tr.remove(); });
@@ -852,6 +860,7 @@ ACTIONS['jc-save'] = () => {
   const badNorm = $$('#jfBom tr[data-bomrow]').some(tr => matBy($('[data-b="mat"]', tr).value) && num($('[data-b="norms"]', tr).value) <= 0);
   if (badNorm) { $('#njMsg').innerHTML = '<span class="late-txt">Norms must be greater than 0 for every item.</span>'; return; }
   if (!lines.length) { $('#njMsg').innerHTML = '<span class="late-txt">At least one BOM item (from the master) is required.</span>'; return; }
+  const badSup = badSuppliers(lines); if (badSup.length) { $('#njMsg').innerHTML = '<span class="late-txt">Supplier not in Vendors master: ' + esc(badSup.join(', ')) + ' — select a vendor from the list.</span>'; return; }
   const wantNo = (($('#jfNo') || {}).value || l.jc_no || '').trim();
   const useNo = wantNo && !Store.all('job_cards').some(x => norm(x.no) === norm(wantNo)) ? wantNo : jcNo();
   const j = Store.put('job_cards', {
@@ -1262,7 +1271,7 @@ VIEWS.bom = {
 function bomRow(l) {
   l = l || {}; const m = matBy(l.material) || {};
   return '<tr data-bline><td class="c" data-sr></td><td><input data-nb="process" value="' + esc(l.process || '') + '"></td><td><input data-nb="section" value="' + esc(l.section || '') + '"></td><td><input data-nb="cat" list="dlCatJc2" value="' + esc(l.category || m.group || '') + '"></td><td><input data-nb="mat" list="dlMatB" value="' + esc(m.name || '') + '"></td><td class="c muted" data-nb-code>' + esc(l.material || '') + '</td><td class="c muted" data-nb-uom>' + esc(l.uom || '') + '</td>' +
-    '<td><input data-nb="qty" type="number" min="0" step="any" class="right" value="' + esc(l.qty || '') + '"></td><td><input data-nb="price" type="number" min="0" step="any" class="right" value="' + esc(l.price || '') + '"></td><td class="c muted" data-nb-cost>0</td><td><input data-nb="sup" list="dlVen" value="' + esc(l.supplier || '') + '"></td><td><input data-nb="rem" value="' + esc(l.remark || '') + '"></td><td class="c"><a data-act="bom-line-del" title="Remove">×</a></td></tr>';
+    '<td><input data-nb="qty" type="number" min="0" step="any" class="right" value="' + esc(l.qty || '') + '"></td><td><input data-nb="price" type="number" min="0" step="any" class="right" value="' + esc(l.price || '') + '"></td><td class="c muted" data-nb-cost>0</td><td>' + vendorSel('data-nb="sup"', l.supplier || '') + '</td><td><input data-nb="rem" value="' + esc(l.remark || '') + '"></td><td class="c"><a data-act="bom-line-del" title="Remove">×</a></td></tr>';
 }
 function bomRecalc() {
   let rmc = 0;
@@ -1292,7 +1301,7 @@ function bomImportText(text) {
       section: before.length >= 2 ? before[before.length - 2] : '',
       category: before.length >= 1 ? before[before.length - 1] : (m.group || ''),
       material: m.code, uom: m.uom, qty: nums[0] || '', price: nums[1] || m.price || '',
-      supplier: txts[0] || '', remark: txts[1] || ''
+      supplier: supplierOf(txts[0] || ''), remark: txts[1] || ''
     })); ok++;
   });
   if (ok) $$('#nbTable tr[data-bline]').forEach(tr => { if (!$('[data-nb="mat"]', tr).value.trim() && !$('[data-nb="qty"]', tr).value) tr.remove(); });
@@ -1310,6 +1319,7 @@ ACTIONS['bom-save'] = () => {
     return m ? { process: $('[data-nb="process"]', tr).value.trim(), section: $('[data-nb="section"]', tr).value.trim(), category: $('[data-nb="cat"]', tr).value.trim() || m.group || '', material: m.code, uom: m.uom, qty: num($('[data-nb="qty"]', tr).value), price: num($('[data-nb="price"]', tr).value), supplier: $('[data-nb="sup"]', tr).value.trim(), remark: $('[data-nb="rem"]', tr).value.trim() } : null;
   }).filter(l => l && l.qty > 0);
   if (!brand || !art || !lines.length) { $('#nbMsg').innerHTML = '<span class="late-txt">Brand, Article and at least one item line (Norms > 0) are required.</span>'; return; }
+  const badSup = badSuppliers(lines); if (badSup.length) { $('#nbMsg').innerHTML = '<span class="late-txt">Supplier not in Vendors master: ' + esc(badSup.join(', ')) + ' — select a vendor from the list.</span>'; return; }
   const dupKey = lines.map(l => norm(l.section + '|' + l.material)).filter((x, i, a2) => a2.indexOf(x) !== i);
   if (dupKey.length) { $('#nbMsg').innerHTML = '<span class="late-txt">Duplicate Section + Item — remove it.</span>'; return; }
   const ver = Store.all('boms').filter(b2 => norm(b2.article) === norm(art) && norm(b2.brand || '') === norm(brand) && norm(b2.style || '') === norm(style) && norm(b2.colour || '') === norm(col)).reduce((mx, b2) => Math.max(mx, b2.version), 0) + 1;
@@ -1586,8 +1596,11 @@ VIEWS.vendors = {
   mod: 'purchase', render() {
     masterView({
       col: 'vendors', mod: 'purchase', title: 'Vendors', view: VIEWS.vendors, sort: 'name', paste: true,
-      cols: [{ k: 'name', l: 'Vendor Name', ph: 'e.g. ABC Textiles' }, { k: 'address', l: 'Address' }, { k: 'state', l: 'State', w: 130 }, { k: 'gstin', l: 'GST No', w: 160, upper: true }, { k: 'email', l: 'Email ID', w: 180 }, { k: 'mobile', l: 'Mobile No.', w: 120 }, { k: 'qc_required', l: 'QC Report', w: 90, opts: () => [{ v: '', l: 'No' }, { v: 'Yes', l: 'Yes' }] }],
-      validate: d => uniq('vendors', 'name', 'Vendor')(d),
+      cols: [{ k: 'name', l: 'Vendor Name', ph: 'e.g. ABC Textiles' }, { k: 'address', l: 'Address' }, { k: 'gstin', l: 'GST No', w: 160, upper: true }, { k: 'state', l: 'State', w: 150, opts: () => [{ v: '', l: '' }].concat(stateNames().map(n => ({ v: n, l: n }))) }, { k: 'email', l: 'Email ID', w: 180 }, { k: 'mobile', l: 'Mobile No.', w: 120 }, { k: 'qc_required', l: 'QC Report', w: 90, opts: () => [{ v: '', l: 'No' }, { v: 'Yes', l: 'Yes' }] }],
+      emailKey: 'email',
+      // the state comes from the GST No (first 2 digits)
+      normalize: (d, k) => { d.gstin = String(d.gstin || '').trim().toUpperCase(); const st = gstState(d.gstin); if (st && !gstinError(d.gstin) && k !== 'state') d.state = st; d.mobile = String(d.mobile || '').replace(/\D/g, '').replace(/^(91|0)(?=\d{10}$)/, ''); d.email = String(d.email || '').trim().toLowerCase(); },
+      validate: d => uniq('vendors', 'name', 'Vendor')(d) || gstinError(d.gstin) || (d.gstin && d.state && gstState(d.gstin) !== d.state ? 'State does not match the GST No (' + d.gstin.slice(0, 2) + ' = ' + gstState(d.gstin) + ').' : '') || mobileError(d.mobile) || emailSyntaxError(d.email),
       inUse: d => Store.all('purchase_orders').some(p => norm(p.vendor) === norm(d.name)) ? 'Vendor has POs — cannot delete.' : ''
     });
     $('#main').insertAdjacentHTML('beforeend', '');

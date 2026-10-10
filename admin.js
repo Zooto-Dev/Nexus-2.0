@@ -10,7 +10,7 @@ function masterView(cfg) {
   const cell = (c, d) => {
     const v = d ? d[c.k] : (cfg.defaults || {})[c.k];
     if (!edit || (d && c.lock)) return '<td>' + esc(c.fmt ? c.fmt(v) : v) + '</td>';
-    if (c.opts) return '<td><select data-c="' + c.k + '">' + c.opts().map(o => '<option value="' + esc(o.v) + '"' + (String(o.v) === String(v == null ? '' : v) ? ' selected' : '') + '>' + esc(o.l) + '</option>').join('') + '</select></td>';
+    if (c.opts) { const os = c.opts(); if (v && !os.some(o => String(o.v) === String(v))) os.unshift({ v, l: v }); return '<td><select data-c="' + c.k + '">' + os.map(o => '<option value="' + esc(o.v) + '"' + (String(o.v) === String(v == null ? '' : v) ? ' selected' : '') + '>' + esc(o.l) + '</option>').join('') + '</select></td>'; }
     if (c.type === 'check') return '<td><input type="checkbox" data-c="' + c.k + '"' + (v !== false ? ' checked' : '') + '></td>';
     return '<td><input data-c="' + c.k + '" value="' + esc(v) + '"' + (c.type === 'number' ? ' type="number" step="any" class="right"' : '') + (c.w ? ' style="width:' + c.w + 'px"' : '') + (!d && c.ph ? ' placeholder="' + esc(c.ph) + '"' : '') + '></td>';
   };
@@ -23,26 +23,45 @@ function masterView(cfg) {
   h += (rows.length ? '' : '<tr><td colspan="' + (cfg.cols.length + 1) + '" class="empty">No records</td></tr>') + '</table></div>';
   const m = setMain(h); MT_CFG[cfg.col] = cfg;
   $('#mtQ').addEventListener('input', e => { ui.q = e.target.value; clearTimeout(ui.t); ui.t = setTimeout(() => { cfg.view.render(); const i = $('#mtQ'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }, 250); });
-  m.addEventListener('change', e => {
+  m.addEventListener('change', async e => {
     const tr = e.target.closest('tr[data-id]'); if (!tr || !e.target.dataset.c) return;
     const d = Store.get(cfg.col, tr.dataset.id); const k = e.target.dataset.c; const c = cfg.cols.find(x => x.k === k);
     let v = c.type === 'check' ? e.target.checked : c.type === 'number' ? num(e.target.value) : e.target.value.trim();
     if (c.upper) v = String(v).toUpperCase();
-    const err = cfg.validate && cfg.validate(Object.assign({}, d, { [k]: v }), d);
+    const nd = Object.assign({}, d, { [k]: v }); if (cfg.normalize) cfg.normalize(nd, k);
+    const err = cfg.validate && cfg.validate(nd, d);
     if (err) { flash(esc(err), 'err'); e.target.value = d[k] == null ? '' : d[k]; return; }
-    const old = d[k]; d[k] = v; Store.put(cfg.col, d); if (cfg.after) cfg.after(d, k, old);
-    audit(cfg.col + '.edit', d[cfg.cols[0].k], c.l + ': ' + (c.secret ? '•••' : (old == null ? '' : old) + ' → ' + v));
-    flash('Saved.');
+    // a new email address is kept only when the mail check passes
+    if (k === cfg.emailKey && v && norm(v) !== norm(d[k] || '')) {
+      emailBusy(true, 'Checking ' + v + ' — a short mail is sent to it (about 40 seconds)…');
+      const r = (await verifyEmails([v]))[v.toLowerCase()]; emailBusy(false);
+      if (!r || !r.ok) { flash('Email not saved — ' + esc(v) + ': ' + esc((r && r.reason) || 'check failed'), 'err'); e.target.value = d[k] == null ? '' : d[k]; audit(cfg.col + '.email_rejected', d[cfg.cols[0].k], v + ' · ' + ((r && r.reason) || '')); return; }
+      nd.email_verified_at = nowIso();
+    }
+    const cur = Store.get(cfg.col, d.id) || d; const old = cur[k];
+    Object.keys(nd).forEach(x => { if (nd[x] !== cur[x]) cur[x] = nd[x]; });
+    Store.put(cfg.col, cur); if (cfg.after) cfg.after(cur, k, old);
+    audit(cfg.col + '.edit', cur[cfg.cols[0].k], c.l + ': ' + (c.secret ? '•••' : (old == null ? '' : old) + ' → ' + v) + (nd.email_verified_at && k === cfg.emailKey ? ' (mail check passed)' : ''));
+    flash('Saved.'); if (cfg.normalize) cfg.view.render();
   });
 }
 const MT_CFG = {};
-ACTIONS['mt-add'] = el => {
+ACTIONS['mt-add'] = async el => {
   const cfg = MT_CFG[el.dataset.col]; if (!requirePerm(cfg.mod, 'edit')) return; const tr = el.closest('tr');
   const d = Object.assign({ id: uid() }, cfg.defaults || {});
   cfg.cols.forEach(c => { const i = $('[data-c="' + c.k + '"]', tr); if (!i) return; let v = c.type === 'check' ? i.checked : c.type === 'number' ? num(i.value) : i.value.trim(); if (c.upper) v = String(v).toUpperCase(); d[c.k] = v; });
+  if (cfg.normalize) cfg.normalize(d);
   const err = cfg.validate && cfg.validate(d, null); if (err) { flash(esc(err), 'err'); return; }
   if (cfg.beforeAdd) cfg.beforeAdd(d);
-  Store.put(cfg.col, d); audit(cfg.col + '.create', d[cfg.cols[0].k], d[cfg.cols[1].k] || ''); flash('Added.'); cfg.view.render();
+  let emailMsg = '';
+  if (cfg.emailKey && d[cfg.emailKey]) {
+    const em = d[cfg.emailKey]; el.disabled = true;
+    emailBusy(true, 'Checking ' + em + ' — a short mail is sent to it (about 40 seconds)…');
+    const r = (await verifyEmails([em]))[em.toLowerCase()]; emailBusy(false); el.disabled = false;
+    if (r && r.ok) d.email_verified_at = nowIso();
+    else { d[cfg.emailKey] = ''; emailMsg = ' Email not saved — ' + esc(em) + ': ' + esc((r && r.reason) || 'check failed'); audit(cfg.col + '.email_rejected', d[cfg.cols[0].k], em + ' · ' + ((r && r.reason) || '')); }
+  }
+  Store.put(cfg.col, d); audit(cfg.col + '.create', d[cfg.cols[0].k], d[cfg.cols[1].k] || ''); flash('Added.' + emailMsg, emailMsg ? 'err' : ''); cfg.view.render();
   const f = $('tr[data-new] input'); if (f) f.focus();
 };
 ACTIONS['mt-del'] = el => {
@@ -51,17 +70,32 @@ ACTIONS['mt-del'] = el => {
   Store.del(cfg.col, d.id); audit(cfg.col + '.delete', d[cfg.cols[0].k], d[cfg.cols[1].k] || ''); cfg.view.render();
 };
 ACTIONS['mt-paste-toggle'] = el => { const ui = MT_UI[el.dataset.col]; ui.paste = !ui.paste; MT_CFG[el.dataset.col].view.render(); };
-ACTIONS['mt-paste'] = el => {
-  const cfg = MT_CFG[el.dataset.col]; const cols = cfg.cols.filter(c => !c.noPaste); let add = 0, upd = 0, bad = 0;
+ACTIONS['mt-paste'] = async el => {
+  const cfg = MT_CFG[el.dataset.col]; const cols = cfg.cols.filter(c => !c.noPaste); let add = 0, upd = 0, bad = 0; const emails = [];
   $('#mtPaste').value.split(/\r?\n/).map(l => l.split('\t')).filter(r => r.join('').trim()).forEach(r => {
     const d0 = {}; cols.forEach((c, i) => { let v = (r[i] || '').replace(/\u00a0/g, ' ').trim(); if (c.type === 'number') v = num(v.replace(/,/g, '')); if (c.upper) v = String(v).toUpperCase(); d0[c.k] = v; });
     const key = cols[0].k; const ex = Store.all(cfg.col).find(x => norm(x[key]) === norm(d0[key]));
-    const d = Object.assign(ex ? ex : Object.assign({ id: uid() }, cfg.defaults || {}), d0);
+    const d = Object.assign(ex ? Object.assign({}, ex) : Object.assign({ id: uid() }, cfg.defaults || {}), d0);
+    if (cfg.normalize) cfg.normalize(d);
     if (!d[key] || (cfg.validate && cfg.validate(d, ex))) { bad++; return; }
+    // a new / changed email is kept only after the mail check below
+    const ek = cfg.emailKey;
+    if (ek && d[ek] && norm(d[ek]) !== norm((ex || {})[ek] || '')) { emails.push({ id: d.id, email: d[ek] }); d[ek] = (ex || {})[ek] || ''; }
     Store.put(cfg.col, d); ex ? upd++ : add++;
   });
   audit(cfg.col + '.import', '', add + ' added, ' + upd + ' updated'); MT_UI[cfg.col].paste = false;
   flash(add + ' added, ' + upd + ' updated' + (bad ? ', ' + bad + ' skipped (missing / invalid)' : '') + '.', bad ? 'err' : ''); cfg.view.render();
+  if (emails.length) {
+    emailBusy(true, 'Checking ' + emails.length + ' email address(es) — a short mail is sent to each (about 40 seconds per 10)…');
+    const res = await verifyEmails(emails.map(x => x.email)); emailBusy(false);
+    const failed = [];
+    emails.forEach(x => {
+      const r = res[x.email.toLowerCase()]; const d = Store.get(cfg.col, x.id); if (!d) return;
+      if (r && r.ok) { d[cfg.emailKey] = x.email; d.email_verified_at = nowIso(); Store.put(cfg.col, d); }
+      else { failed.push(x.email + ' (' + ((r && r.reason) || 'check failed') + ')'); audit(cfg.col + '.email_rejected', d[cfg.cols[0].k], x.email + ' · ' + ((r && r.reason) || '')); }
+    });
+    flash((emails.length - failed.length) + ' email(s) passed the check' + (failed.length ? '. Not saved: ' + esc(failed.join(', ')) : '.'), failed.length ? 'err' : ''); cfg.view.render();
+  }
 };
 ACTIONS['mt-csv'] = el => { const cfg = MT_CFG[el.dataset.col]; downloadCsv(cfg.col + '-' + todayYmd() + '.csv', [cfg.cols.filter(c => !c.secret).map(c => c.l)].concat(Store.all(cfg.col).map(d => cfg.cols.filter(c => !c.secret).map(c => c.fmt ? c.fmt(d[c.k]) : d[c.k])))); };
 function uniq(col, key, label) { return (d, old) => { if (!String(d[key] || '').trim()) return label + ' is required.'; if (Store.all(col).some(x => x.id !== d.id && norm(x[key]) === norm(d[key]))) return label + ' "' + d[key] + '" already exists.'; return ''; }; }

@@ -146,17 +146,26 @@ function vendorDialog(v, done) {
   const old = $('#venDlg'); if (old) old.remove();
   const d = document.createElement('div'); d.id = 'venDlg'; d.className = 'dlg-back';
   d.innerHTML = '<div class="dlg"><div class="dlg-h">' + esc(v.name) + '</div><table class="jckv">' +
-    VEN_REQ.map(([k, l]) => '<tr><td class="k">' + l + ' *</td><td class="v"><input data-vd="' + k + '" value="' + esc(v[k] || '') + '"' + (k === 'gstin' ? ' style="text-transform:uppercase" maxlength="15"' : k === 'mobile' ? ' inputmode="numeric" maxlength="10"' : '') + '></td></tr>').join('') +
+    VEN_REQ.map(([k, l]) => '<tr><td class="k">' + l + ' *</td><td class="v">' + (k === 'state' ? '<select data-vd="state"><option value=""></option>' + (v.state && !stateNames().includes(v.state) ? '<option selected>' + esc(v.state) + '</option>' : '') + stateNames().map(n => '<option' + (n === v.state ? ' selected' : '') + '>' + esc(n) + '</option>').join('') + '</select>' : '<input data-vd="' + k + '" value="' + esc(v[k] || '') + '"' + (k === 'gstin' ? ' style="text-transform:uppercase" maxlength="15"' : k === 'mobile' ? ' inputmode="numeric" maxlength="10"' : '') + '>') + '</td></tr>').join('') +
     '</table><div class="dlg-f"><span id="vdMsg" class="small late-txt"></span><span class="grow"></span><button class="btn" data-vd-cancel>Cancel</button><button class="btn primary" data-vd-save>Save</button></div></div>';
   document.body.appendChild(d);
   const first = VEN_REQ.map(([k]) => $('[data-vd="' + k + '"]', d)).find(i => !i.value.trim()); (first || $('[data-vd]', d)).focus();
-  d.addEventListener('click', ev => {
+  // the state follows the GST No (first 2 digits)
+  $('[data-vd="gstin"]', d).addEventListener('input', ev => { const g = ev.target.value.trim().toUpperCase(); if (g.length === 15 && !gstinError(g)) $('[data-vd="state"]', d).value = gstState(g); });
+  d.addEventListener('click', async ev => {
     if (ev.target.closest('[data-vd-cancel]')) { d.remove(); return; }
-    if (!ev.target.closest('[data-vd-save]')) return;
-    const val = {}; VEN_REQ.forEach(([k]) => { val[k] = $('[data-vd="' + k + '"]', d).value.trim(); }); val.gstin = val.gstin.toUpperCase();
+    const btn = ev.target.closest('[data-vd-save]'); if (!btn || btn.disabled) return;
+    const val = {}; VEN_REQ.forEach(([k]) => { val[k] = $('[data-vd="' + k + '"]', d).value.trim(); }); val.gstin = val.gstin.toUpperCase(); val.email = val.email.toLowerCase();
     const err = VEN_REQ.filter(([k]) => !val[k]).map(x => x[1]).join(', ');
-    const bad = err ? 'Required: ' + err : !/^[0-9]{2}[A-Z0-9]{13}$/.test(val.gstin) ? 'GST No must be 15 characters.' : !/^[6-9][0-9]{9}$/.test(val.mobile) ? 'Mobile No. must be 10 digits.' : !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(val.email) ? 'Email ID is not valid.' : '';
+    const bad = err ? 'Required: ' + err : gstinError(val.gstin) || (gstState(val.gstin) !== val.state ? 'State does not match the GST No (' + val.gstin.slice(0, 2) + ' = ' + gstState(val.gstin) + ').' : '') || mobileError(val.mobile) || emailSyntaxError(val.email);
     if (bad) { $('#vdMsg', d).textContent = bad; return; }
+    // a new email is kept only when the mail check passes
+    if (norm(val.email) !== norm(v.email || '')) {
+      btn.disabled = true; $('#vdMsg', d).textContent = 'Checking email — a short mail is sent to it (about 40 seconds)…';
+      const r = (await verifyEmails([val.email]))[val.email]; btn.disabled = false;
+      if (!r || !r.ok) { $('#vdMsg', d).textContent = 'Email not accepted: ' + ((r && r.reason) || 'check failed') + '. Enter a working email ID.'; audit('vendors.email_rejected', v.name, val.email + ' · ' + ((r && r.reason) || '')); return; }
+      val.email_verified_at = nowIso();
+    }
     const cur = vendorBy(v.name); Object.assign(cur, val); Store.put('vendors', cur); audit('vendor.edit', cur.name, 'details completed from PO');
     d.remove(); flash(esc(cur.name) + ' updated.'); if (done) done(cur);
   });
@@ -164,7 +173,9 @@ function vendorDialog(v, done) {
 }
 document.addEventListener('change', e => {
   if (e.target.id !== 'npVen') return;
-  const v = vendorBy(e.target.value); if (v && vendorMissing(v).length) vendorDialog(v);
+  const v = vendorBy(e.target.value);
+  if (!v && e.target.value) flash(esc(e.target.value) + ' is not in the Vendors master — add it in Purchase › Vendors first.', 'err');
+  if (v && vendorMissing(v).length) vendorDialog(v);
 });
 
 /* ================= Attach control ================= */

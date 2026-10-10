@@ -59,6 +59,33 @@ async function mailSend(id, resend, extra) {
     else if (resend && data && data.ok) flash('Mail sent.');
   } catch (e) { flash('Mail not sent: ' + esc(e.message), 'err'); }
 }
+// Email check before an address is kept (vendors): domain must take mail, a short mail is sent to it,
+// and a bounce ("address not found") in the next ~40 s means the address is dropped. Returns {email: {ok, reason}}.
+async function verifyEmails(list) {
+  const out = {}; const todo = [];
+  Array.from(new Set(list.map(e => String(e || '').trim().toLowerCase()).filter(Boolean))).forEach(e => { const er = emailSyntaxError(e); if (er) out[e] = { ok: false, reason: er }; else todo.push(e); });
+  if (!todo.length) return out;
+  if (!CLOUD || !SB) { todo.forEach(e => out[e] = { ok: true, reason: 'local mode — not checked' }); return out; }
+  for (let i = 0; i < todo.length; i += 10) {
+    const part = todo.slice(i, i + 10);
+    try {
+      await waSynced();
+      const { data, error } = await SB.functions.invoke('nx-mail', { body: { action: 'verify', emails: part } });
+      let msg = data && data.error;
+      if (error) { msg = error.message; try { const j = await error.context.json(); msg = j.error || msg; } catch (e) { } }
+      if (msg) part.forEach(e => out[e] = { ok: false, reason: 'could not check: ' + msg });
+      else (data.results || []).forEach(r => out[String(r.email).toLowerCase()] = { ok: !!r.ok, reason: r.reason || '' });
+    } catch (e) { part.forEach(x => out[x] = { ok: false, reason: 'could not check: ' + e.message }); }
+    part.forEach(e => { if (!out[e]) out[e] = { ok: false, reason: 'no answer from mail check' }; });
+  }
+  return out;
+}
+function emailBusy(on, text) {
+  let d = $('#emChk');
+  if (!on) { if (d) d.remove(); return; }
+  if (!d) { d = document.createElement('div'); d.id = 'emChk'; d.className = 'dlg-back'; document.body.appendChild(d); }
+  d.innerHTML = '<div class="dlg" style="max-width:380px;text-align:center"><div class="spin"></div><div style="margin-top:10px">' + esc(text) + '</div></div>';
+}
 const ML_UI = { st: '' };
 VIEWS.maillog = {
   mod: 'audit', render() {

@@ -808,3 +808,21 @@ function applyPagination(root) {
 }
 function onSeg(fn) { SEG_HANDLER = fn; }
 document.addEventListener('segchange', e => { if (SEG_HANDLER && e.target.closest('#main') && !e.target.hasAttribute('data-own')) SEG_HANDLER(e); });
+
+/* ---- GST No (GSTIN): 2-digit state code + PAN (5 letters, 4 digits, 1 letter) + entity no + Z + check character ---- */
+const GST_STATES = { '01': 'Jammu & Kashmir', '02': 'Himachal Pradesh', '03': 'Punjab', '04': 'Chandigarh', '05': 'Uttarakhand', '06': 'Haryana', '07': 'Delhi', '08': 'Rajasthan', '09': 'Uttar Pradesh', '10': 'Bihar', '11': 'Sikkim', '12': 'Arunachal Pradesh', '13': 'Nagaland', '14': 'Manipur', '15': 'Mizoram', '16': 'Tripura', '17': 'Meghalaya', '18': 'Assam', '19': 'West Bengal', '20': 'Jharkhand', '21': 'Odisha', '22': 'Chhattisgarh', '23': 'Madhya Pradesh', '24': 'Gujarat', '26': 'Dadra & Nagar Haveli and Daman & Diu', '27': 'Maharashtra', '29': 'Karnataka', '30': 'Goa', '31': 'Lakshadweep', '32': 'Kerala', '33': 'Tamil Nadu', '34': 'Puducherry', '35': 'Andaman & Nicobar Islands', '36': 'Telangana', '37': 'Andhra Pradesh', '38': 'Ladakh', '97': 'Other Territory' };
+function stateNames() { return Array.from(new Set(Object.values(GST_STATES))).sort(); }
+function gstinError(g) {
+  g = String(g || '').trim().toUpperCase();
+  if (!g) return '';
+  if (g.length !== 15) return 'GST No must be exactly 15 characters (now ' + g.length + ').';
+  if (!/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/.test(g)) return 'GST No format is wrong — it should look like 08ABCDE1234F1Z5.';
+  if (!GST_STATES[g.slice(0, 2)]) return 'GST No starts with ' + g.slice(0, 2) + ' — that is not a valid state code.';
+  const A = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ'; let sum = 0;
+  for (let i = 0; i < 14; i++) { const p = A.indexOf(g[i]) * (i % 2 ? 2 : 1); sum += Math.floor(p / 36) + p % 36; }
+  if (A[(36 - sum % 36) % 36] !== g[14]) return 'GST No is not valid (last character does not match) — check for a typing mistake.';
+  return '';
+}
+function gstState(g) { return GST_STATES[String(g || '').slice(0, 2)] || ''; }
+function mobileError(m) { m = String(m || '').trim(); return !m || /^[6-9][0-9]{9}$/.test(m) ? '' : 'Mobile No. must be 10 digits starting with 6–9.'; }
+function emailSyntaxError(e) { e = String(e || '').trim(); return !e || /^[^@\s,;<>"]+@[^@\s,;<>"]+\.[A-Za-z]{2,}$/.test(e) ? '' : 'Email ID is not valid.'; }

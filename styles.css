@@ -482,3 +482,5 @@ a.dl:hover { background: #fafbfc; text-decoration: none; }
 .pc-help { display: flex; gap: 14px; align-items: center; margin-top: 12px; }
 .pc-qr img { display: block; width: 150px; height: 150px; }
 .pc-help a { word-break: break-all; }
+.spin { width: 30px; height: 30px; margin: 4px auto 0; border: 3px solid #d8e0ee; border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }

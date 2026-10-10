@@ -21,6 +21,16 @@ function doPost(e) {
     var secret = PropertiesService.getScriptProperties().getProperty('NEXUS_MAIL_SECRET');
     if (!secret || !safeEqual_(String(p.secret || ''), secret)) return json_({ ok: false, error: 'Not allowed' });
 
+    // bounce check for Nexus email verification: which of these addresses got a "delivery failed" mail today
+    if (p.action === 'bounces') {
+      var want = cleanList_((p.emails || []).join ? p.emails.join(',') : p.emails).toLowerCase().split(',').filter(String);
+      var hit = {};
+      GmailApp.search('newer_than:1d (from:mailer-daemon OR from:postmaster OR subject:"Delivery Status Notification" OR subject:Undeliverable OR subject:"delivery failed")', 0, 50).forEach(function (t) {
+        t.getMessages().forEach(function (m) { var b = String(m.getPlainBody() || '').toLowerCase(); want.forEach(function (e) { if (b.indexOf(e) > -1) hit[e] = 1; }); });
+      });
+      return json_({ ok: true, bounced: Object.keys(hit) });
+    }
+
     var to = cleanList_(p.to), cc = cleanList_(p.cc);
     if (!to) return json_({ ok: false, error: 'No valid recipient' });
     var subject = String(p.subject || 'Nexus').replace(/[\r\n]+/g, ' ').slice(0, 250);
