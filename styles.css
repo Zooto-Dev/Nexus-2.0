@@ -600,3 +600,9 @@ a.dt[href]:hover { text-decoration: none; border-color: #b9c8e2; box-shadow: 0 4
 .dgrid > .card { height: 100%; display: flex; flex-direction: column; }
 .dgrid > .card > .dcard-b { flex: 1; }
 @media (max-width: 640px) { .dcard-b { overflow-x: auto; } .dcard-b > .vz { min-width: 500px; } .dcard-h { flex-wrap: wrap; row-gap: 2px; } .dt-v { font-size: 22px; } }
+.jcbom select { border: 0; background: transparent; height: 24px; width: 100%; min-width: 120px; padding: 0 4px; font-size: 12px; border-radius: 0; }
+.jcbom a[data-act="jcc-del"] { color: #c62828; font-weight: bold; text-decoration: none; cursor: pointer; }
+.dash > .dwide { grid-column: 1 / -1; }
+.dsec { font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; margin: 6px 0 -6px; }
+@media (min-width: 1100px) { .dtiles.dt4 { grid-template-columns: repeat(4, 1fr); } .dtiles.dt5 { grid-template-columns: repeat(5, 1fr); } }
+@media (min-width: 600px) and (max-width: 1099px) { .dtiles.dt4 { grid-template-columns: repeat(2, 1fr); } }

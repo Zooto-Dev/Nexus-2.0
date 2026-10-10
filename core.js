@@ -530,6 +530,7 @@ const NAV = [
     { v: 'invapproval', l: 'Invoice Approval', mod: 'purchase' },
     { v: 'vendors', l: 'Vendors', mod: 'purchase' }] },
   { menu: 'Merchant', items: [
+    { v: 'merchantdash', l: 'Merchant Dashboard', mod: 'merchant' },
     { v: 'punch', l: 'Punch Order', mod: 'orders', edit: true },
     { v: 'orders', l: 'Orders', mod: 'orders' },
     { v: 'jobcards', l: 'Job Card', mod: 'merchant' },

@@ -169,8 +169,8 @@ VIEWS.home = {
       const late = allOpenSteps().filter(x => x.step.status === 'Late');
       const pos = openPOs(); const poOver = pos.filter(p => p.expected && p.expected < todayYmd());
       const reqs = Store.all('requisitions').filter(r => r.status === 'Pending');
-      const swPend = Store.all('job_cards').filter(j => j.swatch_status === 'Pending' && j.status !== 'Closed');
-      const jcCorr = Store.all('job_cards').filter(j => (j.corrections || []).some(c => !c.resolved));
+      const swPend = []; Store.all('inwards').filter(invApproved).forEach(i => (i.qc || []).forEach(q => { if (q.result === 'Mismatch' && !q.m_status) swPend.push(q); }));
+      const jcOpen = Store.all('job_cards').filter(j => j.status !== 'Closed');
       const smPend = Store.all('inwards').filter(i => i.status === 'Pending GRN' && i.inv_status === 'Approved' && (i.qc || []).some(q => !q.result));
       const payPend = Store.all('dispatches').filter(d => !d.cancelled && d.payment !== 'Received');
       const month = todayYmd().slice(0, 7);
@@ -187,7 +187,7 @@ VIEWS.home = {
       const stage = {}; openOrders.forEach(x => { stage[x.st.label] = (stage[x.st.label] || 0) + 1; });
       h += '<div class="grid2"><div class="dcard"><div class="dh3">Departments</div><div class="tbl-wrap"><table class="nopage"><tr><th>Department</th><th>Item</th><th class="num">Count</th><th>Item</th><th class="num">Count</th></tr>' +
         dep('Purchase', 'purchasedash', [['open PO', pos.length, false], ['overdue', poOver.length, poOver.length > 0]]) +
-        dep('Merchant', 'swatch', [['swatch pending', swPend.length, false], ['corrections', jcCorr.length, jcCorr.length > 0]]) +
+        dep('Merchant', 'swatch', [['QC mismatch', swPend.length, swPend.length > 0], ['open JCs', jcOpen.length, false]]) +
         dep('Store', 'issuance', [['req to issue', reqs.length, false], ['QC pending', smPend.length, false]]) +
         dep('Production', 'prodtracker', [['orders in flow', openOrders.length, false], ['late steps', late.length, late.length > 0]]) +
         dep('Accounts', 'invoices', [['payment pending', payPend.length, false]]) +

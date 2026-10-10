@@ -632,7 +632,7 @@ VIEWS.jobcards = {
     const rows = Store.all('job_cards').slice().sort((a2, b2) => b2.no < a2.no ? -1 : 1).filter(j => JC_UI.f === 'all' || (JC_UI.f === 'open' ? j.status !== 'Closed' : j.status === 'Closed'));
     let h = subTitle('Job Card', 'format: ZF-0001') + '<div class="toolbar">' + seg('f', [{ v: 'open', l: 'Open' }, { v: 'closed', l: 'Closed' }, { v: 'all', l: 'All' }], JC_UI.f) + '<span class="grow"></span>' + (edit ? newBtn('New job card', 'jc-new') : '') + '</div>';
     if (JC_UI.form && edit) h += jcForm();
-    h += '<div class="tbl-wrap"><table class="bomflat"><tr><th>JC No</th><th>JC Date</th><th>Order</th><th>Brand</th><th>Article</th><th>Style</th><th>Colour</th><th class="num">Qty</th><th>Material</th><th>Swatch</th><th>Corrections</th><th>Status</th><th>By</th><th></th></tr>' +
+    h += '<div class="tbl-wrap"><table class="bomflat"><tr><th>JC No</th><th>JC Date</th><th>Order</th><th>Brand</th><th>Article</th><th>Style</th><th>Colour</th><th class="num">Qty</th><th>Material</th><th>Corrections</th><th>Status</th><th>By</th><th></th></tr>' +
       (rows.length ? rows.map(j => {
         const oc = (j.corrections || []).filter(x => !x.resolved).length;
         const L = j.lines || []; const req = L.reduce((s2, l) => s2 + num(l.required), 0);
@@ -640,11 +640,11 @@ VIEWS.jobcards = {
         const ready = req ? Math.round(iss / req * 100) : null;
         let row = '<tr class="click" data-act="jc-toggle" data-id="' + esc(j.id) + '"><td><b>' + esc(j.no) + '</b></td><td>' + fmtD(j.at) + '</td><td>' + esc(j.order_no || '') + '</td><td>' + esc(j.brand) + '</td><td>' + esc(j.article) + '</td><td>' + esc(j.style || '') + '</td><td>' + esc(j.colour || '') + '</td><td class="num">' + qtyFmt(j.qty) + '</td>' +
           '<td>' + (ready == null ? '<span class="late-txt small">No BOM</span>' : '<span class="' + (ready >= 100 ? 'st Done' : 'small') + '">' + ready + '% issued</span>') + '</td>' +
-          '<td><span class="st ' + (j.swatch_status === 'Approved' ? 'Done' : j.swatch_status === 'Rejected' ? 'Late' : 'Pending') + '">' + esc(j.swatch_status) + '</span></td><td>' + (oc ? '<span class="late-txt">' + oc + ' open</span>' : (j.corrections || []).length ? 'resolved' : '—') + '</td><td>' + stHtml(j.status === 'Closed' ? 'Done' : 'Pending').replace('>Done<', '>Closed<').replace('>Pending<', '>Open<') + '</td>' +
+          '<td>' + (oc ? '<span class="late-txt">' + oc + ' open</span>' : (j.corrections || []).length ? (j.corrections || []).length : '—') + '</td><td>' + stHtml(j.status === 'Closed' ? 'Done' : 'Pending').replace('>Done<', '>Closed<').replace('>Pending<', '>Open<') + '</td>' +
           '<td>' + esc(j.by || '') + '</td><td class="right">' + (edit && j.status !== 'Closed' ? '<button class="btn sm" data-act="jc-close" data-id="' + esc(j.id) + '" data-confirm="Close JC?">Close</button>' : '') + '</td></tr>';
-        if (JC_UI.open === j.id) row += '<tr class="inline-form"><td colspan="14">' + jcDetail(j) + '</td></tr>';
+        if (JC_UI.open === j.id) row += '<tr class="inline-form"><td colspan="13">' + jcDetail(j) + '</td></tr>';
         return row;
-      }).join('') : '<tr><td colspan="14" class="empty">No job cards</td></tr>') + '</table></div>';
+      }).join('') : '<tr><td colspan="13" class="empty">No job cards</td></tr>') + '</table></div>';
     setMain(h);
     onSeg(e => {
       if (e.target.dataset.seg === 'f') { JC_UI.f = e.detail; VIEWS.jobcards.render(); return; }
@@ -847,7 +847,7 @@ ACTIONS['jc-save'] = () => {
   const j = Store.put('job_cards', {
     id: uid(), no: useNo, order_no: o.no, brand: o.customer_name, article: l.article, style: l.style || '', colour: l.colour || '', gender: l.gender || '', category: o.category,
     qty: act, sizes, lines, photo: JCF.photo || '', line_status: (($('#jfStatus') || {}).value || 'NA'), remarks: (($('#jfRem') || {}).value || '').trim(),
-    swatch_status: 'Pending', status: 'Open', corrections: [], by: ME.name, at: nowIso()
+    status: 'Open', corrections: [], by: ME.name, at: nowIso()
   });
   audit('jc.create', j.no, o.no + ' · ' + l.article + ' × ' + act + ' · ' + lines.length + ' materials');
   // WhatsApp: job card PDF to the merchandiser, reservation to Store, short items to Purchase
@@ -859,23 +859,103 @@ ACTIONS['jc-save'] = () => {
 };
 ACTIONS['jc-close'] = el => { const j = Store.get('job_cards', el.dataset.id); if ((j.corrections || []).some(c => !c.resolved)) { flash('Resolve open corrections first.', 'err'); return; } j.status = 'Closed'; Store.put('job_cards', j); audit('jc.close', j.no, ''); VIEWS.jobcards.render(); };
 
+// Job Card Correction: change a saved job card — add / remove an item, change norms, supplier, process, section,
+// category or the remark. Saved at once; every change is logged (old → new) with the reason, by whom and when.
+const JCC_UI = { id: '' };
+function jcExt(j) { const e = (j.sizes || []).reduce((a, x) => a + num(x.extra), 0); return e || Math.ceil(num(j.qty) * 1.02); }
+function jccRow(l, oi, j) {
+  l = l || {}; const m = matBy(l.material) || {};
+  const iss = j && l.material ? issuedToJc(j.no, l.material) : 0;
+  return '<tr data-jccrow data-oi="' + (oi == null ? '' : oi) + '"><td class="c" data-idx></td><td><input data-c="process" value="' + esc(l.process || '') + '"></td><td><input data-c="section" value="' + esc(l.section || '') + '"></td><td><input data-c="category" value="' + esc(l.category || m.group || '') + '"></td>' +
+    '<td><input data-c="mat" list="dlMatJcc" value="' + esc(m.name || l.material || '') + '"></td><td class="c muted" data-c-code>' + esc(l.material || '') + '</td><td class="c muted" data-c-uom>' + esc(l.uom || m.uom || '') + '</td>' +
+    '<td><input data-c="norms" type="number" min="0" step="any" class="right" value="' + esc(l.norms != null ? l.norms : '') + '"></td><td class="c" data-c-req>' + (l.required != null ? qtyFmt(l.required) : '') + '</td><td class="c muted">' + (iss ? qtyFmt(iss) : '') + '</td>' +
+    '<td>' + vendorSel('data-c="supplier"', l.supplier || '') + '</td><td class="c">' + (iss > 0 ? '' : '<a data-act="jcc-del" title="Remove">×</a>') + '</td></tr>';
+}
 VIEWS.jccorrection = {
   mod: 'merchant', render() {
     const edit = can('merchant', 'edit');
-    const rows = Store.all('job_cards').filter(j => j.status !== 'Closed');
-    let h = '<div class="tbl-wrap"><table class="bomflat"><tr><th>JC No</th><th>Brand</th><th>Article</th><th>Colour</th><th class="num">Sr</th><th>Correction</th><th>By</th><th>Date</th><th>Status</th><th></th>' + (edit ? '<th>Add Correction</th><th></th>' : '') + '</tr>' +
-      (rows.length ? rows.map(j => { const cs = (j.corrections || []).length ? j.corrections : [null];
-        return cs.map((c, i) => '<tr' + (i === 0 ? ' class="bomfirst"' : '') + '><td><b>' + esc(j.no) + '</b></td><td>' + esc(j.brand || '') + '</td><td>' + esc(j.article || '') + '</td><td>' + esc(j.colour || '') + '</td><td class="num">' + (c ? i + 1 : '') + '</td><td>' + (c ? esc(c.note) : '') + '</td><td>' + (c ? esc(c.by || '') : '') + '</td><td>' + (c && c.at ? fmtD(c.at) : '') + '</td><td>' + (c ? (c.resolved ? '<span class="st Done">Resolved</span>' : '<span class="st Pending">Open</span>') : '') + '</td><td>' + (c && !c.resolved && edit ? '<button class="btn sm ghost" data-act="jcc-resolve" data-id="' + esc(j.id) + '" data-i="' + i + '">Resolve</button>' : '') + '</td>' +
-          (edit ? (i === 0 ? '<td><input data-jcc-note style="min-width:180px"></td><td><button class="btn sm" data-act="jcc-add" data-id="' + esc(j.id) + '">Add</button></td>' : '<td></td><td></td>') : '') + '</tr>').join(''); }).join('') : '<tr><td colspan="12" class="empty">No open job cards</td></tr>') + '</table></div>';
-    setMain(h);
+    const open = Store.all('job_cards').filter(j => j.status !== 'Closed').sort((a, b) => String(a.no).localeCompare(String(b.no)));
+    if (JCC_UI.id && !open.some(j => j.id === JCC_UI.id)) JCC_UI.id = '';
+    const j = JCC_UI.id ? Store.get('job_cards', JCC_UI.id) : null;
+    let h = '';
+    if (edit) {
+      h += '<div class="card"><div class="card-b"><div class="row"><label>Job Card *<select id="jccJc"><option value="">— select —</option>' + open.map(x => '<option value="' + esc(x.id) + '"' + (x.id === JCC_UI.id ? ' selected' : '') + '>' + esc(x.no + ' · ' + (x.brand || '') + ' · ' + (x.article || '') + (x.colour ? ' · ' + x.colour : '')) + '</option>').join('') + '</select></label>' +
+        (j ? '<label>Order<input value="' + esc(j.order_no || '') + '" readonly></label><label>Qty (with extra)<input value="' + qtyFmt(num(j.qty)) + ' (' + qtyFmt(jcExt(j)) + ')" readonly></label>' : '') + '</div>';
+      if (j) {
+        h += dlMat('dlMatJcc') + '<div class="jcdoc" style="margin-top:10px"><table id="jccBom" class="jcbom"><tr class="hd"><th style="width:36px">Sr No</th><th style="width:100px">Process</th><th style="width:110px">Section</th><th style="width:120px">Item Category</th><th>Item Name</th><th style="width:90px">Item Code</th><th style="width:60px">Uom</th><th style="width:85px">Norms</th><th style="width:90px">Required Qty</th><th style="width:80px">Issued</th><th style="width:160px">Supplier</th><th style="width:26px"></th></tr>' +
+          (j.lines || []).map((l, oi) => jccRow(l, oi, j)).join('') + '</table></div><a class="small" data-act="jcc-addrow">+ Add item</a>' +
+          '<div class="row" style="margin-top:10px"><label style="grid-column:span 2">Remark<input id="jccRem" value="' + esc(j.remarks || '') + '"></label><label style="grid-column:span 2">Reason for correction *<input id="jccWhy" maxlength="300"></label></div>';
+      }
+      h += '</div>' + (j ? '<div class="card-f"><button class="btn primary" data-act="jcc-save">Save correction</button><span id="jccMsg" class="small"></span></div>' : '') + '</div>';
+    }
+    // history: every correction, newest first
+    const hist = [];
+    Store.all('job_cards').forEach(x => (x.corrections || []).forEach(c => hist.push({ j: x, c })));
+    hist.sort((a, b) => (b.c.at || '') < (a.c.at || '') ? -1 : 1);
+    h += '<div class="tbl-wrap"><table><tr><th>JC No</th><th>Brand</th><th>Article</th><th>Colour</th><th>Date</th><th>By</th><th>Reason</th><th>Changes</th></tr>' +
+      (hist.length ? hist.map(x => '<tr><td><b>' + esc(x.j.no) + '</b></td><td>' + esc(x.j.brand || '') + '</td><td>' + esc(x.j.article || '') + '</td><td>' + esc(x.j.colour || '') + '</td><td class="nowrap">' + fmtDT(x.c.at) + '</td><td>' + esc(x.c.by || '') + '</td><td>' + esc(x.c.note || '') + '</td><td style="white-space:normal;min-width:280px">' + (x.c.changes || []).map(esc).join('<br>') + '</td></tr>').join('')
+        : '<tr><td colspan="8" class="empty">No corrections yet</td></tr>') + '</table></div>';
+    const m = setMain(h);
+    const recalc = () => {
+      if (!j) return; const ext = jcExt(j);
+      $$('#jccBom tr[data-jccrow]').forEach((tr, i) => { $('[data-idx]', tr).textContent = i + 1; const n = num($('[data-c="norms"]', tr).value); $('[data-c-req]', tr).textContent = n ? qtyFmt(Math.ceil(n * ext * 1000) / 1000) : '0'; });
+    };
+    m.addEventListener('change', e => {
+      if (e.target.id === 'jccJc') { JCC_UI.id = e.target.value; VIEWS.jccorrection.render(); return; }
+      if (e.target.dataset.c === 'mat') {
+        const mt = matBy(e.target.value); const tr = e.target.closest('tr');
+        if (mt) { e.target.value = mt.name; $('[data-c-code]', tr).textContent = mt.code; $('[data-c-uom]', tr).textContent = mt.uom || ''; const c = $('[data-c="category"]', tr); if (!c.value) c.value = mt.group || ''; }
+        else { $('[data-c-code]', tr).textContent = ''; $('[data-c-uom]', tr).textContent = ''; }
+      }
+      recalc();
+    });
+    m.addEventListener('input', e => { if (e.target.dataset.c === 'norms') recalc(); });
+    recalc();
   }
 };
-ACTIONS['jcc-add'] = el => {
-  const note = $('[data-jcc-note]', el.closest('tr')).value.trim(); if (!note) return;
-  const j = Store.get('job_cards', el.dataset.id); j.corrections = j.corrections || []; j.corrections.push({ at: nowIso(), by: ME.name, note, resolved: false });
-  Store.put('job_cards', j); audit('jc.correction', j.no, note); VIEWS.jccorrection.render();
+ACTIONS['jcc-addrow'] = () => { const j = Store.get('job_cards', JCC_UI.id); $('#jccBom').insertAdjacentHTML('beforeend', jccRow(null, null, j)); $$('#jccBom tr[data-jccrow]').forEach((tr, i) => { $('[data-idx]', tr).textContent = i + 1; }); const r = $$('#jccBom tr[data-jccrow]').pop(); $('[data-c="mat"]', r).focus(); };
+ACTIONS['jcc-del'] = el => { el.closest('tr').remove(); $$('#jccBom tr[data-jccrow]').forEach((tr, i) => { $('[data-idx]', tr).textContent = i + 1; }); };
+ACTIONS['jcc-save'] = el => {
+  if (!requirePerm('merchant', 'edit')) return;
+  const j = Store.get('job_cards', JCC_UI.id); if (!j || j.status === 'Closed') return;
+  const msg = t => { $('#jccMsg').innerHTML = '<span class="late-txt">' + esc(t) + '</span>'; };
+  const why = $('#jccWhy').value.trim();
+  const ext = jcExt(j), old = j.lines || [];
+  const rows = $$('#jccBom tr[data-jccrow]').map(tr => ({ tr, oi: tr.dataset.oi === '' ? null : +tr.dataset.oi, mat: matBy($('[data-c="mat"]', tr).value), name: $('[data-c="mat"]', tr).value.trim(), norms: num($('[data-c="norms"]', tr).value), process: $('[data-c="process"]', tr).value.trim(), section: $('[data-c="section"]', tr).value.trim(), category: $('[data-c="category"]', tr).value.trim(), supplier: $('[data-c="supplier"]', tr).value.trim() }))
+    .filter(r => r.name || r.oi != null);
+  const bad = rows.find(r => !r.mat); if (bad) return msg((bad.name || 'A row') + ' is not in the Item master — select an item from the list.');
+  const zero = rows.find(r => !(r.norms > 0)); if (zero) return msg(zero.mat.code + ': norms must be more than 0.');
+  const sup = badSuppliers(rows.map(r => ({ supplier: r.supplier }))); if (sup.length) return msg('Supplier not in Vendors master: ' + sup.join(', '));
+  const keys = rows.map(r => norm(r.section + '|' + r.mat.code)); const dup = keys.find((k, i) => keys.indexOf(k) !== i); if (dup) return msg('The same item is twice in the same section — remove one.');
+  if (!rows.length) return msg('At least one item is needed.');
+  // removed items: not allowed once material is issued to this job card
+  const keptOld = new Set(rows.filter(r => r.oi != null).map(r => r.oi));
+  const removed = old.map((l, oi) => ({ l, oi })).filter(x => !keptOld.has(x.oi));
+  const blocked = removed.find(x => issuedToJc(j.no, x.l.material) > 0); if (blocked) return msg(blocked.l.material + ' is already issued to this job card — it cannot be removed (change norms instead).');
+  const changes = [];
+  const lbl = { process: 'Process', section: 'Section', category: 'Category', supplier: 'Supplier' };
+  const lines = rows.map(r => {
+    const req = Math.ceil(r.norms * ext * 1000) / 1000;
+    const base = r.oi != null ? Object.assign({}, old[r.oi]) : { po_raised: 0 };
+    const o = r.oi != null ? old[r.oi] : null;
+    if (o && norm(o.material) !== norm(r.mat.code)) { changes.push('Item ' + o.material + ' → ' + r.mat.code); base.po_raised = 0; }
+    if (!o) changes.push('Added ' + r.mat.code + ' (' + r.mat.name + ') · norms ' + r.norms + ' · req ' + qtyFmt(req) + (r.supplier ? ' · ' + r.supplier : ''));
+    else {
+      if (num(o.norms) !== r.norms) changes.push(r.mat.code + ': norms ' + o.norms + ' → ' + r.norms + ' (req ' + qtyFmt(o.required) + ' → ' + qtyFmt(req) + ')');
+      Object.keys(lbl).forEach(k => { const ov = String(k === 'category' ? (o.category || (matBy(o.material) || {}).group || '') : (o[k] || '')); if (ov !== r[k]) changes.push(r.mat.code + ': ' + lbl[k] + ' ' + (ov || '—') + ' → ' + (r[k] || '—')); });
+    }
+    return Object.assign(base, { process: r.process, section: r.section, category: r.category || r.mat.group || '', material: r.mat.code, uom: r.mat.uom || '', norms: r.norms, required: req, supplier: r.supplier });
+  });
+  removed.forEach(x => changes.push('Removed ' + x.l.material + ' (' + ((matBy(x.l.material) || {}).name || '') + ')'));
+  const rem = $('#jccRem').value.trim(); if (rem !== (j.remarks || '')) changes.push('Remark ' + (j.remarks || '—') + ' → ' + (rem || '—'));
+  if (!changes.length) return msg('Nothing changed.');
+  if (!why) return msg('Write the reason for the correction.');
+  el.disabled = true;
+  j.lines = lines; j.remarks = rem;
+  j.corrections = (j.corrections || []).concat([{ at: nowIso(), by: ME.name, note: why, changes, resolved: true }]);
+  Store.put('job_cards', j); audit('jc.correction', j.no, why + ' — ' + changes.join('; '));
+  flash(esc(j.no) + ' corrected — ' + changes.length + ' change(s) saved.'); VIEWS.jccorrection.render();
 };
-ACTIONS['jcc-resolve'] = el => { const j = Store.get('job_cards', el.dataset.id); j.corrections[+el.dataset.i].resolved = true; Store.put('job_cards', j); audit('jc.correction.resolve', j.no, j.corrections[+el.dataset.i].note); VIEWS.jccorrection.render(); };
 
 /* ================= STORE ================= */
 const ISS_UI = { form: false, ret: false };

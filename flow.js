@@ -508,7 +508,7 @@ ACTIONS['qc-set'] = el => {
   flash(esc(q.material) + ': ' + (q.result === 'Match' ? 'QC passed.' : 'sent to ' + esc((q.merchants || []).join(', ') || 'merchant') + ' for approval.')); VIEWS.swatchmatch.render();
 };
 
-/* ================= Swatch approval (merchant): QC mismatches + JC swatches ================= */
+/* ================= Swatch approval (merchant): material QC mismatches ================= */
 const SW_UI = { ph: {} };
 VIEWS.swatch = {
   mod: 'merchant', render() {
@@ -519,18 +519,13 @@ VIEWS.swatch = {
       const ms = q.merchants || [];
       if (isSuperAdmin() || ms.some(isMyMerchant) || (!ms.length && canApprove())) mine.push({ i, q });
     }));
-    let h = '<h2 style="margin-top:0">Material QC mismatch</h2><div class="tbl-wrap"><table><tr><th>Inward</th><th>Vendor</th><th>PO</th><th>Item Code</th><th>Item Name</th><th>Brand</th><th>Merchant</th><th>QC By</th><th>Approval Card + Sample Photo</th><th>Note</th>' + (edit ? '<th></th>' : '') + '</tr>' +
+    let h = '<div class="tbl-wrap"><table><tr><th>Inward</th><th>Vendor</th><th>PO</th><th>Item Code</th><th>Item Name</th><th>Brand</th><th>Merchant</th><th>QC By</th><th>Approval Card + Sample Photo</th><th>Note</th>' + (edit ? '<th></th>' : '') + '</tr>' +
       (mine.length ? mine.map(({ i, q }) => { const k = i.id + '|' + q.material;
         return '<tr><td><b>' + esc(i.no) + '</b></td><td>' + esc(i.vendor) + '</td><td>' + esc(i.po_no) + '</td><td>' + esc(q.material) + '</td><td>' + esc((matBy(q.material) || {}).name || '') + '</td><td>' + esc(q.brands.join(', ')) + '</td><td>' + esc((q.merchants || []).join(', ')) + '</td><td>' + esc(q.by || '') + '</td>' +
           '<td>' + (edit ? attachBox('accept="image/*" data-swf="' + esc(k) + '"', SW_UI.ph[k], 'Attach approval card') : '') + '</td>' +
           '<td>' + (edit ? '<input data-swn="' + esc(k) + '">' : '') + '</td>' +
           (edit ? '<td class="right"><button class="btn sm primary" data-act="qcm-set" data-k="' + esc(k) + '" data-s="Approved">Approve</button> <button class="btn sm" data-act="qcm-amend" data-k="' + esc(k) + '">Amend</button> <button class="btn sm danger" data-act="qcm-set" data-k="' + esc(k) + '" data-s="Rejected">Reject</button></td>' : '') + '</tr>'; }).join('')
         : '<tr><td colspan="11" class="empty">Nothing waiting for you</td></tr>') + '</table></div>';
-    const rows = Store.all('job_cards').filter(j => ['Pending', 'Rejected', 'Amend'].includes(j.swatch_status));
-    h += '<h2>Job card swatch</h2><div class="tbl-wrap"><table><tr><th>JC No</th><th>Brand</th><th>Article</th><th>Colour</th><th class="num">Qty</th><th>Status</th><th>Note</th>' + (edit ? '<th></th>' : '') + '</tr>' +
-      (rows.length ? rows.map(j => '<tr><td><b>' + esc(j.no) + '</b></td><td>' + esc(j.brand) + '</td><td>' + esc(j.article) + '</td><td>' + esc(j.colour) + '</td><td class="num">' + qtyFmt(j.qty) + '</td><td><span class="st ' + (j.swatch_status === 'Rejected' ? 'Late' : 'Pending') + '">' + esc(j.swatch_status) + '</span></td>' +
-        '<td>' + (edit ? '<input data-sw-note value="' + esc(j.swatch_note || '') + '">' : esc(j.swatch_note || '')) + '</td>' +
-        (edit ? '<td class="right"><button class="btn sm primary" data-act="sw-set" data-id="' + esc(j.id) + '" data-s="Approved">Approve</button> <button class="btn sm" data-act="sw-set" data-id="' + esc(j.id) + '" data-s="Amend">Amend</button> <button class="btn sm danger" data-act="sw-set" data-id="' + esc(j.id) + '" data-s="Rejected">Reject</button></td>' : '') + '</tr>').join('') : '<tr><td colspan="8" class="empty">No swatches pending</td></tr>') + '</table></div>';
     const m = setMain(h);
     m.addEventListener('change', e => { const k = e.target.dataset.swf; if (k) readImg(e.target.files[0], src => { SW_UI.ph[k] = src; VIEWS.swatch.render(); }); });
   }
@@ -554,13 +549,6 @@ ACTIONS['qcm-amend'] = el => {
     Store.put('inwards', i); audit('inward.swatch_amend', i.no, q.material + ' · ' + v.res + ' · ' + v.why);
     flash(esc(q.material) + (v.res === 'Match' ? ' amended to Match — goes to GRN.' : ' stays a mismatch — approve or reject it.')); VIEWS.swatch.render();
   });
-};
-ACTIONS['sw-set'] = el => {
-  const j = Store.get('job_cards', el.dataset.id); const tr = el.closest('tr');
-  const note = $('[data-sw-note]', tr).value.trim();
-  if (el.dataset.s !== 'Approved' && !note) { flash('Write the reason in Note.', 'err'); return; }
-  j.swatch_status = el.dataset.s; j.swatch_note = note; j.swatch_by = ME.name; j.swatch_at = nowIso();
-  Store.put('job_cards', j); audit('jc.swatch', j.no, el.dataset.s + (j.swatch_note ? ' — ' + j.swatch_note : '')); flash(esc(j.no) + ' swatch ' + el.dataset.s.toLowerCase() + '.'); VIEWS.swatch.render();
 };
 
 /* ================= GRN ================= */
