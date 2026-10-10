@@ -606,3 +606,26 @@ a.dt[href]:hover { text-decoration: none; border-color: #b9c8e2; box-shadow: 0 4
 .dsec { font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; margin: 6px 0 -6px; }
 @media (min-width: 1100px) { .dtiles.dt4 { grid-template-columns: repeat(4, 1fr); } .dtiles.dt5 { grid-template-columns: repeat(5, 1fr); } }
 @media (min-width: 600px) and (max-width: 1099px) { .dtiles.dt4 { grid-template-columns: repeat(2, 1fr); } }
+
+/* ---------- flow chart ---------- */
+.fc-wrap { background: #fff; border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; box-shadow: var(--sh); }
+.fc-bar { display: flex; align-items: center; gap: 6px; padding: 8px 10px; border-bottom: 1px solid var(--line2); background: #fff; flex-wrap: wrap; }
+.fc-leg { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--muted); flex-wrap: wrap; }
+.fc-leg i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-left: 8px; }
+.fc-leg i:first-child { margin-left: 0; }
+.fc-leg i.fc-dash { width: 18px; height: 0; border-top: 2px dashed #6d4dc4; border-radius: 0; }
+.fc-z { min-width: 44px; text-align: center; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.fc-wrap .chart-wrap { border: 0; border-radius: 0; background: #f7f9fd; max-height: 78vh; text-align: left; cursor: grab; padding: 8px; }
+.fc-wrap .chart-wrap.fc-drag { cursor: grabbing; user-select: none; }
+.fc-wrap .chart-wrap svg { display: block; margin: 0 auto; }
+.chart-wrap svg.fc-svg text { font-family: var(--font); }
+.fc-svg .fc-name { font-size: 13.5px; font-weight: 700; }
+.fc-svg .fc-who { font-size: 12px; }
+.fc-svg .fc-chip { font-size: 10.5px; font-weight: 700; letter-spacing: .02em; }
+.fc-svg .fc-num { font-size: 11px; font-weight: 800; }
+.fc-svg .fc-pill { font-size: 13px; font-weight: 700; }
+.fc-svg .fc-node { cursor: pointer; }
+.fc-svg .fc-node:hover > rect:first-child { stroke: #1a56c8; }
+.fc-wrap.fc-max { position: fixed; inset: 0; z-index: 1500; border-radius: 0; display: flex; flex-direction: column; }
+.fc-wrap.fc-max .chart-wrap, .fc-wrap:fullscreen .chart-wrap { max-height: none; flex: 1; height: calc(100vh - 48px); }
+.fc-wrap:fullscreen { display: flex; flex-direction: column; border-radius: 0; }

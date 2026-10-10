@@ -95,7 +95,7 @@ VIEWS.builder = {
         (!B.dirty && !proc.active ? '<button class="btn primary" data-act="bld-activate" data-confirm="Make live?"' + (v.errors.length ? ' disabled' : '') + '>Activate v' + proc.version + '</button>' : '') : '<span class="muted small">Read only</span>') + '</div>' +
       (B.dirty && v.errors.length ? '<ul class="val" style="margin:0 0 6px;padding-left:18px">' + v.errors.map(x => '<li class="e">' + esc(x) + '</li>').join('') + '</ul>' : '') + '</div>';
     h += '<div class="tabs">' + [['flow', 'Flow'], ['tables', 'Doer Tables'], ['sim', 'Simulate'], ['fields', 'Fields & JSON']].map(([k, l]) => '<a data-act="bld-tab" data-t="' + k + '" class="' + (B.tab === k ? 'on' : '') + '">' + l + '</a>').join('') + '</div>';
-    if (B.tab === 'flow') h += '<div class="bld"><div class="panel" style="padding:0"><div id="bSteps" class="steplist"></div>' + (edit ? '<div style="padding:8px"><button class="btn sm" data-act="bld-add">+ Add step</button></div>' : '') + '</div><div class="panel ed" id="bEd"></div><div><div id="bPv" class="toolbar"></div><div class="chart-wrap" id="bChart"></div><div id="bVal" class="panel small" style="margin-top:10px"></div></div></div>';
+    if (B.tab === 'flow') h += '<div class="bld"><div class="panel" style="padding:0"><div id="bSteps" class="steplist"></div>' + (edit ? '<div style="padding:8px"><button class="btn sm" data-act="bld-add">+ Add step</button></div>' : '') + '</div><div class="panel ed" id="bEd"></div><div><div id="bPv" class="toolbar"></div><div id="fcWrap" class="fc-wrap"><div class="fc-bar"><span class="fc-leg"><i style="background:#1a56c8"></i>Step<i style="background:#b26a00"></i>Only for some orders (IF)<i style="background:#13795b"></i>Auto<i class="fc-dash"></i>Runs on a date</span><span class="grow"></span><button class="btn sm" data-act="fc-zoom" data-z="-">−</button><span id="fcZoom" class="fc-z">100%</span><button class="btn sm" data-act="fc-zoom" data-z="+">+</button><button class="btn sm" data-act="fc-zoom" data-z="fit">Fit</button><button class="btn sm" data-act="fc-svg">Download</button><button class="btn sm primary" data-act="fc-full">⛶ Full screen</button></div><div class="chart-wrap" id="bChart"></div></div><div id="bVal" class="panel small" style="margin-top:10px"></div></div></div>';
     else if (B.tab === 'sim') h += '<div id="bSim"></div>';
     else if (B.tab === 'tables') h += '<div id="bTables"></div>';
     else h += '<div id="bFields"></div>';
@@ -137,7 +137,9 @@ function bldSide() {
   // chart
   let svg = '';
   try { svg = bldChart(d, order); } catch (e) { svg = '<div class="empty">Chart unavailable: ' + esc(e.message) + '</div>'; }
-  $('#bChart').innerHTML = svg;
+  const box = $('#bChart'), had = !!box.querySelector('svg'), sl = box.scrollLeft, sT = box.scrollTop;
+  box.innerHTML = svg; fcApply();
+  if (had) { box.scrollLeft = sl; box.scrollTop = sT; } else box.scrollLeft = Math.max(0, (box.scrollWidth - box.clientWidth) / 2);   // keep the view while editing; centre the first time
   const v = validateSpec(d);
   $('#bVal').innerHTML = (v.errors.length || v.warns.length ? '<ul class="val" style="margin:0;padding-left:16px">' + v.errors.map(x => '<li class="e">' + esc(x) + '</li>').join('') + v.warns.map(x => '<li class="w">' + esc(x) + '</li>').join('') + '</ul>' : '<span class="st Done">Flow is valid</span>') +
     '<div class="muted" style="margin-top:6px">' + d.steps.length + ' steps · Only actuals move the chain · Delay counted in working time</div>';
@@ -146,9 +148,10 @@ function bldSide() {
 function bldChart(spec, order) {
   const fields = Object.assign({ created_at: new Date().toISOString(), delivery_date: ymdOf(new Date(Date.now() + 10 * 86400000)) }, B.pv);
   let res = null; try { res = FMSEngine.resolveInstance(Object.assign({}, spec, { calendar: calendar() }), { fields, actuals: {} }); } catch (e) { }
-  const W = 172, H = 58, GX = 188, GY = 92, PILL = 30, PAD = 16;
+  const W = 234, H = 78, GX = 262, GY = 124, PILL = 34, PAD = 28;
   const trig0 = st => (Array.isArray(st.trigger) ? st.trigger[0] : st.trigger) || {};
   const ids = spec.steps.map(s => s.id); const byId = Object.fromEntries(spec.steps.map(s => [s.id, s]));
+  const num0 = {}; (order || ids).forEach((id, i) => { num0[id] = i + 1; });
   // one graph: step links + dashed links from the step that asks a date to the steps that run on that date
   const edges = [];
   spec.steps.forEach(s => (Array.isArray(s.trigger) ? s.trigger : [s.trigger]).forEach((t, i) => { if (t && t.type === 'afterStep' && byId[t.step]) edges.push({ from: t.step, to: s.id, kind: i === 0 ? 'primary' : 'fallback' }); }));
@@ -163,62 +166,146 @@ function bldChart(spec, order) {
   relax(new Set());
   const maxR = Math.max(...ids.map(id => rank[id]));
   const cnt = {}; ids.forEach(id => cnt[rank[id]] = (cnt[rank[id]] || 0) + 1);
-  const width = Math.max(560, PAD * 2 + Math.max(...Object.values(cnt)) * GX - (GX - W)) + 14;
-  const pos = {}; const pill = { x: width / 2, y: PAD + PILL / 2 }; let y = PAD + PILL + 34;
+  const width = Math.max(640, PAD * 2 + Math.max(...Object.values(cnt)) * GX - (GX - W)) + 40;
+  const pos = {}; const pill = { x: width / 2, y: PAD + PILL / 2 }; let y = PAD + PILL + 46;
   for (let r = 0; r <= maxR; r++) {
     const cx = id => { const ps = edges.filter(e => e.to === id && pos[e.from]).map(e => pos[e.from].x); return ps.length ? ps.reduce((a, b) => a + b, 0) / ps.length : width / 2; };
     const row = ids.filter(id => rank[id] === r).sort((a, b) => cx(a) - cx(b)); const tw = row.length * GX - (GX - W);
-    if (row.some(id => beforeRoots.includes(id))) y += 44;
-    row.forEach((id, i) => { pos[id] = { x: (width - tw) / 2 + i * GX + 4, y }; });
+    if (row.some(id => beforeRoots.includes(id))) y += 52;
+    row.forEach((id, i) => { pos[id] = { x: (width - tw) / 2 + i * GX, y }; });
     if (row.length) y += GY;
   }
-  const height = y + 4;
-  const C = { line: '#aab2bd', date: '#6a4fb3', blue: '#1f5fae', green: '#2e7d32', amber: '#b26a00', grey: '#c9ced6', txt: '#1c2430', sub: '#6b7482' };
-  let s = '<svg xmlns="http://www.w3.org/2000/svg" width="' + width + '" height="' + height + '" viewBox="0 0 ' + width + ' ' + height + '">';
-  s += '<defs><marker id="ar" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="' + C.line + '"/></marker><marker id="ard" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="' + C.date + '"/></marker>' +
-    '<filter id="sh" x="-5%" y="-5%" width="110%" height="120%"><feDropShadow dx="0" dy="1" stdDeviation="1.2" flood-color="#000" flood-opacity=".10"/></filter></defs>';
-  const vcurve = (x1, y1, x2, y2) => { const my = (y1 + y2) / 2; return 'M' + x1 + ',' + y1 + ' C' + x1 + ',' + my + ' ' + x2 + ',' + my + ' ' + x2 + ',' + y2; };
+  // end terminal under the last row
+  // "End" links only from the end of the main chain (the dispatch step and what follows it), not from every side step
+  const leaves = ids.filter(id => !edges.some(e => e.from === id && e.kind !== 'fallback'));
+  const endStep = spec.process && byId[spec.process.endStep] ? spec.process.endStep : null;
+  const after = new Set(endStep ? [endStep] : []); let more = true; while (more) { more = false; edges.forEach(e => { if (e.kind !== 'fallback' && after.has(e.from) && !after.has(e.to)) { after.add(e.to); more = true; } }); }
+  let enders = leaves.filter(id => after.has(id)); if (!enders.length) enders = leaves.filter(id => rank[id] === Math.max(...leaves.map(x => rank[x])));
+  const endY = y + 6; const height = endY + PILL + PAD;
+  const C = { line: '#9aa6b8', date: '#6d4dc4', blue: '#1a56c8', green: '#13795b', amber: '#b26a00', grey: '#c3cad6', txt: '#142033', sub: '#5b6880', card: '#ffffff', stroke: '#d9e0ea' };
+  let s = '<svg xmlns="http://www.w3.org/2000/svg" class="fc-svg" width="' + width + '" height="' + height + '" viewBox="0 0 ' + width + ' ' + height + '" data-w="' + width + '" data-h="' + height + '">';
+  s += '<defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M1,1 L9,5 L1,9 z" fill="' + C.line + '"/></marker>' +
+    '<marker id="ard" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M1,1 L9,5 L1,9 z" fill="' + C.date + '"/></marker>' +
+    '<filter id="sh" x="-10%" y="-10%" width="120%" height="140%"><feDropShadow dx="0" dy="2" stdDeviation="2.5" flood-color="#0b1f4d" flood-opacity=".10"/></filter>' +
+    '<pattern id="dots" width="22" height="22" patternUnits="userSpaceOnUse"><circle cx="1.5" cy="1.5" r="1.1" fill="#d5dcea"/></pattern></defs>';
+  s += '<rect width="' + width + '" height="' + height + '" fill="#f7f9fd"/><rect width="' + width + '" height="' + height + '" fill="url(#dots)"/>';
+  // orthogonal connector with rounded corners: down, across, down
+  const elbow = (x1, y1, x2, y2) => {
+    if (Math.abs(x1 - x2) < 1) return 'M' + x1 + ',' + y1 + ' V' + y2;
+    const my = Math.round((y1 + y2) / 2), r = Math.min(10, Math.abs(x2 - x1) / 2, Math.abs(my - y1)), dir = x2 > x1 ? 1 : -1;
+    return 'M' + x1 + ',' + y1 + ' V' + (my - r) + ' Q' + x1 + ',' + my + ' ' + (x1 + dir * r) + ',' + my + ' H' + (x2 - dir * r) + ' Q' + x2 + ',' + my + ' ' + x2 + ',' + (my + r) + ' V' + y2;
+  };
+  // rounded polyline through points
+  const poly = pts => {
+    let d = 'M' + pts[0][0] + ',' + pts[0][1];
+    for (let i = 1; i < pts.length - 1; i++) {
+      const [x0, y0] = pts[i - 1], [x1, y1] = pts[i], [x2, y2] = pts[i + 1];
+      const r = Math.min(10, Math.hypot(x1 - x0, y1 - y0) / 2, Math.hypot(x2 - x1, y2 - y1) / 2);
+      const ax = x1 - Math.sign(x1 - x0) * r, ay = y1 - Math.sign(y1 - y0) * r, bx = x1 + Math.sign(x2 - x1) * r, by = y1 + Math.sign(y2 - y1) * r;
+      d += ' L' + ax + ',' + ay + ' Q' + x1 + ',' + y1 + ' ' + bx + ',' + by;
+    }
+    const L = pts[pts.length - 1]; return d + ' L' + L[0] + ',' + L[1];
+  };
+  // a link that skips rows runs down a free lane between the cards, never through one
+  const boxes = ids.map(id => pos[id]);
+  const route = (a, b) => {
+    const x1 = a.x + W / 2, y1 = a.y + H, x2 = b.x + W / 2, y2 = b.y - 3;
+    const mid = boxes.filter(q => q.y > a.y + 1 && q.y < b.y - 1);
+    if (!mid.length) return elbow(x1, y1, x2, y2);
+    const hit = x => mid.some(q => x > q.x - 8 && x < q.x + W + 8);
+    const gap = (GX - W) / 2;
+    const cands = [x1, x2].concat(...mid.map(q => [q.x - gap, q.x + W + gap]), [PAD / 2 + 4, width - PAD / 2 - 4]);
+    const lane = cands.filter(x => !hit(x)).sort((p1, p2) => (Math.abs(p1 - x1) + Math.abs(p1 - x2)) - (Math.abs(p2 - x1) + Math.abs(p2 - x2)))[0];
+    if (lane == null || Math.abs(lane - x1) < 1 && Math.abs(lane - x2) < 1) return elbow(x1, y1, x2, y2);
+    const ya = y1 + 18, yb = y2 - 20;
+    const pts = [[x1, y1]]; if (Math.abs(lane - x1) >= 1) pts.push([x1, ya], [lane, ya]); else pts.push([x1, ya]);
+    if (Math.abs(lane - x2) >= 1) pts.push([lane, yb], [x2, yb]); else pts.push([lane, yb]);
+    pts.push([x2, y2]);
+    return poly(pts.filter((q, i) => i === 0 || q[0] !== pts[i - 1][0] || q[1] !== pts[i - 1][1]));
+  };
   const starters = ids.filter(id => !edges.some(e => e.to === id && e.kind !== 'fallback'));
-  starters.forEach(id => { const b = pos[id]; s += '<path d="' + vcurve(pill.x, pill.y + PILL / 2, b.x + W / 2, b.y - 2) + '" fill="none" stroke="' + C.line + '" stroke-width="1.3" marker-end="url(#ar)"/>'; });
-  const pt = (spec.process && spec.process.startEvent) || 'Start'; const pw = Math.max(120, pt.length * 6.6 + 28);
-  s += '<rect x="' + (pill.x - pw / 2) + '" y="' + (pill.y - PILL / 2) + '" width="' + pw + '" height="' + PILL + '" rx="15" fill="#0e6a73"/><text x="' + pill.x + '" y="' + (pill.y + 4) + '" text-anchor="middle" fill="#fff" font-weight="600">' + esc(pt) + '</text>';
+  starters.forEach(id => { const b = pos[id]; s += '<path d="' + elbow(pill.x, pill.y + PILL / 2, b.x + W / 2, b.y - 3) + '" fill="none" stroke="' + C.line + '" stroke-width="1.6" marker-end="url(#ar)"/>'; });
+  enders.forEach(id => { const a = pos[id]; s += '<path d="' + route(a, { x: width / 2 - W / 2, y: endY }) + '" fill="none" stroke="' + C.line + '" stroke-width="1.6" marker-end="url(#ar)"/>'; });
+  const pillTxt = (x, yy, t, fill) => { const pw = Math.max(130, t.length * 7.4 + 36); return '<rect x="' + (x - pw / 2) + '" y="' + (yy - PILL / 2) + '" width="' + pw + '" height="' + PILL + '" rx="' + (PILL / 2) + '" fill="' + fill + '" filter="url(#sh)"/><text x="' + x + '" y="' + (yy + 4.5) + '" text-anchor="middle" fill="#fff" class="fc-pill">' + esc(t) + '</text>'; };
   // dates counted back: one line from the step that asks the date to a "T" pill, then short lines to each step
   Array.from(new Set(edges.filter(e => e.kind === 'before').map(e => e.from))).forEach(src => {
     const tos = edges.filter(e => e.kind === 'before' && e.from === src).map(e => e.to); const a = pos[src];
-    const tx = tos.reduce((m, id) => m + pos[id].x + W / 2, 0) / tos.length, ty = Math.min(...tos.map(id => pos[id].y)) - 34;
-    const f = byId[tos[0]]; const lbl = 'T = ' + fieldLabel(trig0(f).field); const tw2 = Math.max(110, lbl.length * 6.2 + 24);
-    const left = a.x + W / 2 < width / 2; const ex = left ? a.x : a.x + W, gx = left ? 6 : width - 6, px = left ? tx - tw2 / 2 - 2 : tx + tw2 / 2 + 2;
-    s += '<path d="M' + ex + ',' + (a.y + H / 2) + ' L' + gx + ',' + (a.y + H / 2) + ' L' + gx + ',' + ty + ' L' + px + ',' + ty + '" fill="none" stroke="' + C.date + '" stroke-width="1.3" stroke-dasharray="4 3" marker-end="url(#ard)"/>';
-    tos.forEach(id => { const b = pos[id]; s += '<path d="' + vcurve(tx, ty + 12, b.x + W / 2, b.y - 2) + '" fill="none" stroke="' + C.date + '" stroke-width="1.3" stroke-dasharray="4 3" marker-end="url(#ard)"/>'; });
-    s += '<rect x="' + (tx - tw2 / 2) + '" y="' + (ty - 12) + '" width="' + tw2 + '" height="24" rx="12" fill="' + C.date + '"/><text x="' + tx + '" y="' + (ty + 4) + '" text-anchor="middle" fill="#fff" font-weight="600">' + esc(lbl) + '</text>';
+    const tx = tos.reduce((m, id) => m + pos[id].x + W / 2, 0) / tos.length, ty = Math.min(...tos.map(id => pos[id].y)) - 40;
+    const f = byId[tos[0]]; const lbl = 'T = ' + fieldLabel(trig0(f).field); const tw2 = Math.max(130, lbl.length * 7 + 30);
+    const left = a.x + W / 2 < width / 2; const ex = left ? a.x : a.x + W, gx = left ? 10 : width - 10, px = left ? tx - tw2 / 2 - 2 : tx + tw2 / 2 + 2;
+    s += '<path d="M' + ex + ',' + (a.y + H / 2) + ' H' + gx + ' V' + ty + ' H' + px + '" fill="none" stroke="' + C.date + '" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#ard)"/>';
+    tos.forEach(id => { const b = pos[id]; s += '<path d="' + elbow(tx, ty + 13, b.x + W / 2, b.y - 3) + '" fill="none" stroke="' + C.date + '" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#ard)"/>'; });
+    s += '<rect x="' + (tx - tw2 / 2) + '" y="' + (ty - 13) + '" width="' + tw2 + '" height="26" rx="13" fill="' + C.date + '" filter="url(#sh)"/><text x="' + tx + '" y="' + (ty + 4.5) + '" text-anchor="middle" fill="#fff" class="fc-pill">' + esc(lbl) + '</text>';
   });
   edges.forEach(e => {
     if (e.kind === 'before') return;
     const a = pos[e.from], b = pos[e.to]; if (!a || !b) return;
-    const dim = res && (!res.steps[e.from].applies || !res.steps[e.to].applies); const dated = e.kind === 'before' || e.kind === 'date';
-    const d = b.y <= a.y ? 'M' + (a.x + W) + ',' + (a.y + H / 2) + ' C' + (a.x + W + 40) + ',' + (a.y + H / 2) + ' ' + (b.x + W + 40) + ',' + (b.y + H / 2) + ' ' + (b.x + W + 2) + ',' + (b.y + H / 2) : vcurve(a.x + W / 2, a.y + H, b.x + W / 2, b.y - 2);
-    s += '<path d="' + d + '" fill="none" stroke="' + (dated ? C.date : C.line) + '" stroke-width="1.3"' + (e.kind !== 'primary' ? ' stroke-dasharray="4 3"' : '') + (dim ? ' opacity=".3"' : '') + ' marker-end="url(#' + (dated ? 'ard' : 'ar') + ')"/>';
+    const dim = res && (!res.steps[e.from].applies || !res.steps[e.to].applies); const dated = e.kind === 'date';
+    let d;
+    if (b.y <= a.y) { const gx = Math.max(a.x, b.x) + W + 22; d = 'M' + (a.x + W) + ',' + (a.y + H / 2) + ' H' + gx + ' V' + (b.y + H / 2) + ' H' + (b.x + W + 3); }
+    else d = route(a, b);
+    s += '<path d="' + d + '" fill="none" stroke="' + (dated ? C.date : C.line) + '" stroke-width="1.6"' + (e.kind !== 'primary' ? ' stroke-dasharray="5 4"' : '') + (dim ? ' opacity=".28"' : '') + ' marker-end="url(#' + (dated ? 'ard' : 'ar') + ')"/>';
   });
+  s += pillTxt(pill.x, pill.y, (spec.process && spec.process.startEvent) || 'Start', '#0b2a7a');
+  s += pillTxt(width / 2, endY + PILL / 2, 'End', '#13795b');
+  const cut = (x, k) => x.length > k ? x.slice(0, k - 1) + '…' : x;
   ids.forEach(id => {
     const st = byId[id]; const p = pos[id]; const r = res && res.steps[id];
     const on = id === B.sel; const applies = !r || r.applies; const t0 = trig0(st);
     const auto = st.status && st.status.type === 'auto';
     const bar = !applies ? C.grey : auto ? C.green : st.applies ? C.amber : C.blue;
-    const who = (r && r.doer ? r.doer : doerText(st.doer)) || '—';
-    const time = t0.type === 'beforeDate' ? 'T−' + ((t0.tat || st.tat || {}).value || 0) + 'd' : t0.type === 'external' ? 'on ' + fieldLabel(t0.field) : tatStr(t0.tat || st.tat).replace(' / urgent ', ' · U ');
-    const cut = (x, k) => x.length > k ? x.slice(0, k - 1) + '…' : x;
-    s += '<g data-act="bld-sel" data-s="' + esc(id) + '" style="cursor:pointer" opacity="' + (applies ? 1 : .45) + '">' +
-      '<rect x="' + p.x + '" y="' + p.y + '" width="' + W + '" height="' + H + '" rx="8" fill="' + (on ? '#eaf1fa' : '#fff') + '" stroke="' + (on ? C.blue : '#dde1e6') + '" stroke-width="' + (on ? 1.8 : 1) + '" filter="url(#sh)"/>' +
-      '<rect x="' + p.x + '" y="' + (p.y + 6) + '" width="4" height="' + (H - 12) + '" rx="2" fill="' + bar + '"/>' +
-      '<text x="' + (p.x + 13) + '" y="' + (p.y + 20) + '" fill="' + C.txt + '" font-weight="600">' + esc(cut(st.name || '', 25)) + '</text>' +
-      '<text x="' + (p.x + 13) + '" y="' + (p.y + 36) + '" fill="' + C.sub + '">' + esc(cut(who, 22)) + '</text>' +
-      '<text x="' + (p.x + 13) + '" y="' + (p.y + 50) + '" fill="' + C.sub + '">' + esc(cut(time, 22)) + '</text>' +
-      (auto ? '<text x="' + (p.x + W - 8) + '" y="' + (p.y + 50) + '" text-anchor="end" fill="' + C.green + '" font-weight="600">auto</text>' : '') +
-      (st.applies ? '<text x="' + (p.x + W - 8) + '" y="' + (p.y + 20) + '" text-anchor="end" fill="' + C.amber + '" font-weight="600">if</text>' : '') +
-      (st.capture ? '<text x="' + (p.x + W - 8) + '" y="' + (p.y + 36) + '" text-anchor="end" fill="' + C.date + '">asks date</text>' : '') + '</g>';
+    const who = (r && r.doer ? r.doer : doerText(st.doer)) || 'Not set';
+    const time = t0.type === 'beforeDate' ? 'T − ' + ((t0.tat || st.tat || {}).value || 0) + 'd' : t0.type === 'external' ? 'on ' + fieldLabel(t0.field) : tatStr(t0.tat || st.tat).replace(' / urgent ', ' · urgent ');
+    // chips along the bottom: time first, then tags — laid out left to right so nothing overlaps
+    const chips = [{ t: '⏱ ' + cut(time, 22), bg: '#eef2f8', fg: C.sub }];
+    if (st.applies) chips.push({ t: 'IF', bg: '#fdf3e2', fg: C.amber });
+    if (auto) chips.push({ t: 'AUTO', bg: '#e6f4ee', fg: C.green });
+    if (st.capture) chips.push({ t: 'ASKS DATE', bg: '#efeafb', fg: C.date });
+    let cx = p.x + 14, chipSvg = '';
+    chips.forEach(c => { const w = Math.round(c.t.length * 6.1 + 14); if (cx + w > p.x + W - 8) return; chipSvg += '<rect x="' + cx + '" y="' + (p.y + H - 26) + '" width="' + w + '" height="18" rx="9" fill="' + c.bg + '"/><text x="' + (cx + w / 2) + '" y="' + (p.y + H - 13.5) + '" text-anchor="middle" fill="' + c.fg + '" class="fc-chip">' + esc(c.t) + '</text>'; cx += w + 5; });
+    s += '<g data-act="bld-sel" data-s="' + esc(id) + '" class="fc-node" opacity="' + (applies ? 1 : .45) + '">' +
+      '<rect x="' + p.x + '" y="' + p.y + '" width="' + W + '" height="' + H + '" rx="12" fill="' + (on ? '#eef4ff' : C.card) + '" stroke="' + (on ? C.blue : C.stroke) + '" stroke-width="' + (on ? 2 : 1) + '" filter="url(#sh)"/>' +
+      '<path d="M' + (p.x + 12) + ',' + p.y + ' H' + (p.x + W - 12) + ' Q' + (p.x + W) + ',' + p.y + ' ' + (p.x + W) + ',' + (p.y + 12) + ' V' + (p.y + 4) + ' H' + p.x + ' V' + (p.y + 12) + ' Q' + p.x + ',' + p.y + ' ' + (p.x + 12) + ',' + p.y + ' Z" fill="' + bar + '"/>' +
+      '<circle cx="' + (p.x + 22) + '" cy="' + (p.y + 24) + '" r="10" fill="' + bar + '" opacity=".14"/><text x="' + (p.x + 22) + '" y="' + (p.y + 28) + '" text-anchor="middle" fill="' + bar + '" class="fc-num">' + (num0[id] || '') + '</text>' +
+      '<text x="' + (p.x + 39) + '" y="' + (p.y + 28) + '" fill="' + C.txt + '" class="fc-name">' + esc(cut(st.name || '(unnamed)', 23)) + '</text>' +
+      '<text x="' + (p.x + 14) + '" y="' + (p.y + 46) + '" fill="' + C.sub + '" class="fc-who">👤 ' + esc(cut(who, 28)) + '</text>' +
+      chipSvg + '<title>' + esc((st.name || '') + ' — ' + who + ' — ' + time) + '</title></g>';
   });
   return s + '</svg>';
 }
+// zoom / fit / full screen for the flow chart
+function fcApply() {
+  const box = $('#bChart'); const svg = box && box.querySelector('svg.fc-svg'); if (!svg) return;
+  const w = +svg.dataset.w, h = +svg.dataset.h;
+  if (B.zoom == null || B.zoom === 'fit') {
+    const full = document.fullscreenElement && document.fullscreenElement.contains(box);
+    const availW = box.clientWidth - 16, availH = full ? box.clientHeight - 16 : Infinity;
+    B.zoomV = Math.max(full ? 0.2 : 0.7, Math.min(1.4, availW / w, availH / h));
+  } else B.zoomV = B.zoom;
+  svg.setAttribute('width', Math.round(w * B.zoomV)); svg.setAttribute('height', Math.round(h * B.zoomV));
+  const z = $('#fcZoom'); if (z) z.textContent = Math.round(B.zoomV * 100) + '%';
+}
+ACTIONS['fc-zoom'] = el => { const cur = B.zoomV || 1; const d = el.dataset.z; B.zoom = d === 'fit' ? 'fit' : d === '1' ? 1 : Math.max(0.3, Math.min(2.5, cur * (d === '+' ? 1.2 : 1 / 1.2))); fcApply(); };
+ACTIONS['fc-full'] = () => {
+  const w = $('#fcWrap'); if (!w) return;
+  if (document.fullscreenElement) document.exitFullscreen(); else if (w.requestFullscreen) w.requestFullscreen().catch(() => w.classList.toggle('fc-max')); else w.classList.toggle('fc-max');
+};
+ACTIONS['fc-svg'] = () => {
+  const svg = $('#bChart svg.fc-svg'); if (!svg) return;
+  const c = svg.cloneNode(true); c.setAttribute('width', svg.dataset.w); c.setAttribute('height', svg.dataset.h);
+  c.insertAdjacentHTML('afterbegin', '<style>text{font-family:Segoe UI,Arial,sans-serif}.fc-name{font-size:13.5px;font-weight:700}.fc-who{font-size:12px}.fc-chip{font-size:10.5px;font-weight:700}.fc-num{font-size:11px;font-weight:800}.fc-pill{font-size:13px;font-weight:700}</style>');
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([c.outerHTML], { type: 'image/svg+xml' })); a.download = ((B.draft && B.draft.process && B.draft.process.name) || 'flow') + '.svg'; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+};
+document.addEventListener('fullscreenchange', () => { const w = $('#fcWrap'); if (w) { w.classList.toggle('fc-max', !!document.fullscreenElement); const b = $('[data-act="fc-full"]'); if (b) b.textContent = document.fullscreenElement ? '✕ Exit full screen' : '⛶ Full screen'; } B.zoom = 'fit'; fcApply(); });
+window.addEventListener('resize', () => { if (B && (B.zoom == null || B.zoom === 'fit')) fcApply(); });
+// drag the empty canvas to move around
+document.addEventListener('mousedown', e => {
+  const box = e.target.closest && e.target.closest('#bChart'); if (!box || e.button !== 0 || e.target.closest('.fc-node')) return;
+  const sx = e.clientX, sy = e.clientY, sl = box.scrollLeft, st = box.scrollTop; box.classList.add('fc-drag');
+  const mv = ev => { box.scrollLeft = sl - (ev.clientX - sx); box.scrollTop = st - (ev.clientY - sy); };
+  const up = () => { box.classList.remove('fc-drag'); document.removeEventListener('mousemove', mv); document.removeEventListener('mouseup', up); };
+  document.addEventListener('mousemove', mv); document.addEventListener('mouseup', up); e.preventDefault();
+});
 
 /* ---------- editor ---------- */
 function curStep() { return B.draft.steps.find(s => s.id === B.sel); }
