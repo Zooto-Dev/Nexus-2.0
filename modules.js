@@ -83,6 +83,10 @@ function netReqRows(vendor, excludePo) {
     if (bal <= 0.0001) return;
     const r = row(l.material); r.demand += bal; r.jcs.push({ jc: j.no, bal, supplier: l.supplier || '', brand: j.brand || '', article: j.article || '', colour: j.colour || '' }); if (l.supplier) r.suppliers.add(l.supplier);
   }));
+  // manual requirements (Purchase › Requirements): demand until received; the vendor Purchase picked is the supplier
+  if (typeof activeReqs === 'function') activeReqs().forEach(q => {
+    const r = row(q.material); r.demand += num(q.qty); r.jcs.push({ jc: q.no, bal: num(q.qty), supplier: q.vendor || '', brand: q.brand || '', article: '', colour: '', req: true }); if (q.vendor) r.suppliers.add(q.vendor);
+  });
   Store.all('materials').filter(m => num(m.min_level) > 0).forEach(m => row(m.code));
   const src = Store.all('sourcing');
   const openPo = code => Store.all('purchase_orders').filter(p => !p.cancelled && p.approval !== 'Rejected' && p.id !== excludePo)
@@ -310,30 +314,7 @@ function newBtn(label, act) { return '<button class="btn primary" data-act="' + 
 function subTitle() { return ''; }
 
 /* ================= PURCHASE ================= */
-VIEWS.purchasedash = {
-  mod: 'purchase', render() {
-    const pos = Store.all('purchase_orders').filter(p => !p.cancelled);
-    const open = pos.filter(p => poPending(p) > 0);
-    const overdue = open.filter(p => p.expected && p.expected < todayYmd());
-    const fuDue = open.filter(p => { const f = (p.followups || [])[p.followups ? p.followups.length - 1 : -1]; return !f || !f.next || f.next <= todayYmd(); });
-    const month = todayYmd().slice(0, 7);
-    const grnMonth = Store.all('grns').filter(g => (g.date || '').startsWith(month)).reduce((s, g) => s + g.lines.reduce((a, l) => a + num(l.accepted), 0), 0);
-    const apprPend = Store.all('purchase_orders').filter(p => !p.cancelled && (!p.approval || p.approval === 'Pending'));
-    const low = lowStockList();
-    let h = subTitle('Purchase Dashboard');
-    h += '<div class="kpis">' +
-      '<a href="#/po/approvals"><b class="' + (apprPend.length ? 'late-txt' : '') + '">' + apprPend.length + '</b><span>PO approval pending</span></a>' +
-      '<a href="#/stock"><b class="' + (low.length ? 'late-txt' : '') + '">' + low.length + '</b><span>Low stock items</span></a>' +
-      '<a href="#/po"><b>' + open.length + '</b><span>Open POs</span></a>' +
-      '<a href="#/po"><b class="' + (overdue.length ? 'late-txt' : '') + '">' + overdue.length + '</b><span>Overdue POs</span></a>' +
-      '<div><b>' + qtyFmt(open.reduce((s, p) => s + poPending(p), 0)) + '</b><span>Qty pending</span></div>' +
-      '<a href="#/followup"><b>' + fuDue.length + '</b><span>Followups due</span></a>' +
-      '<div><b>' + qtyFmt(grnMonth) + '</b><span>Qty received this month</span></div></div>';
-    h += '<h2>Open purchase orders</h2><div class="tbl-wrap"><table><tr><th>PO</th><th>Date</th><th>Vendor</th><th class="num">Ordered</th><th class="num">Received</th><th class="num">Pending</th><th>Expected</th><th>Status</th></tr>' +
-      (open.length ? open.map(p => { const oq = p.lines.reduce((s, l) => s + num(l.qty), 0), rq = p.lines.reduce((s, l) => s + num(l.received), 0); return '<tr class="click" data-act="go" data-v="po" data-p="' + esc(p.id) + '"><td><b>' + esc(p.no) + '</b></td><td>' + fmtD(p.date) + '</td><td>' + esc(p.vendor) + '</td><td class="num">' + qtyFmt(oq) + '</td><td class="num">' + qtyFmt(rq) + '</td><td class="num">' + qtyFmt(oq - rq) + '</td><td class="nowrap ' + (p.expected && p.expected < todayYmd() ? 'late-txt' : '') + '">' + fmtD(p.expected) + '</td><td>' + stHtml(poStatus(p)).replace('Partial', 'Partial').replace('st Partial', 'st Pending').replace('st Open', 'st Waiting').replace('st Received', 'st Done') + '</td></tr>'; }).join('') : '<tr><td colspan="8" class="empty">No open POs</td></tr>') + '</table></div>';
-    setMain(h);
-  }
-};
+// VIEWS.purchasedash: see dash.js
 
 const PO_UI = { f: 'open', form: false, open: null };
 VIEWS.po = {
@@ -417,9 +398,8 @@ function poFillJc(vendor) {
 function poJcLines() {
   return (PO_UI.net || []).map(r => {
     const m = matBy(r.material) || {}; const o = PO_UI.moq[r.material];
-    const jcs = r.jcs.map(x => jcBy(x.jc)).filter(Boolean);
     return { key: r.material, r, m, qty: o && o.qty > r.net + 1e-9 ? o.qty : r.net, moq: !!(o && o.qty > r.net + 1e-9),
-      brand: Array.from(new Set(jcs.map(j => j.brand).filter(Boolean))).join(', '), photo: m.photo || '' };
+      brand: Array.from(new Set(r.jcs.map(x => x.req ? x.brand : (jcBy(x.jc) || {}).brand).filter(Boolean))).join(', '), photo: m.photo || '' };
   });
 }
 function poJcDraw() {
@@ -546,6 +526,7 @@ ACTIONS['po-save'] = () => {
   if (dup) { $('#npMsg').innerHTML = '<span class="late-txt">An identical PO ' + esc(dup.no) + ' was just created (double-submit guard).</span>'; return; }
   const po = Store.put('purchase_orders', { id: uid(), no: fyNo('purchase_orders', 'PO', 3), date: $('#npDate').value || todayYmd(), vendor: vm.name, expected: exp, remarks: $('#npRem').value.trim(), lines, moq_log: moqLog, followups: [], approval: 'Pending', created_by: ME.name, created_by_id: ME.id, at: nowIso(), _sig: sig });
   audit('po.create', po.no, ven + ' · ' + qtyFmt(lines.reduce((s, l) => s + l.qty, 0)) + ' qty'); waSend('po_submitted', po.id);
+  if (typeof reqLinkPo === 'function') reqLinkPo(po);
   let mailNote = '';
   if (moqLog.length) {
     moqLog.forEach(x => audit('po.moq_override', po.no, x.material + ' net ' + qtyFmt(x.net) + ' → ' + qtyFmt(x.moq) + ' (+' + qtyFmt(x.extra) + ') · ' + x.reason));
@@ -597,7 +578,7 @@ VIEWS.netreq = {
     const rows = netReqRows();
     const toOrder = rows.filter(r => r.net > 0);
     setMain(subTitle('Net Requirement', 'JC requirement − stock − open PO + min level') +
-      '<div class="toolbar"><span class="small"><b>' + toOrder.length + '</b> item(s) to order</span><span class="grow"></span>' + (can('purchase', 'edit') ? '<a class="btn primary" data-act="netreq-po">+ New PO</a>' : '') + '</div>' +
+      '<div class="toolbar"><span class="small"><b>' + toOrder.length + '</b> item(s) to order</span><span class="grow"></span>' + (canRaiseReq() ? '<button class="btn" data-act="prq-new">+ Create Requirement</button>' : '') + (can('purchase', 'edit') ? '<a class="btn primary" data-act="netreq-po">+ New PO</a>' : '') + '</div>' +
       '<div class="tbl-wrap"><table><tr><th>Item Code</th><th>Item Name</th><th>UOM</th><th>JC No</th><th>Brand</th><th>Article</th><th>Colour</th><th>Supplier</th><th class="num">JC Balance</th><th class="num">Total JC Requirement</th><th class="num">Stock</th><th class="num">Open PO</th><th class="num">Min Level</th><th class="num">Net Requirement</th></tr>' +
       (rows.length ? rows.map(r => (r.jcs.length ? r.jcs : [{ jc: '', bal: 0, supplier: Array.from(r.suppliers)[0] || '' }]).map((x, i) => '<tr class="' + (i === 0 ? 'bomfirst' : '') + (r.net > 0 ? '' : ' muted') + '"><td><b>' + esc(r.material) + '</b></td><td>' + esc(r.name) + '</td><td>' + esc(r.uom) + '</td><td>' + esc(x.jc) + '</td><td>' + esc(x.brand || '') + '</td><td>' + esc(x.article || '') + '</td><td>' + esc(x.colour || '') + '</td><td>' + esc(x.supplier || '') + '</td><td class="num">' + (x.jc ? qtyFmt(x.bal) : '') + '</td>' +
         '<td class="num">' + qtyFmt(r.demand) + '</td><td class="num">' + qtyFmt(r.stock) + '</td><td class="num">' + qtyFmt(r.openPo) + '</td><td class="num">' + (r.min ? qtyFmt(r.min) : '') + '</td><td class="num"><b' + (r.net > 0 ? ' class="late-txt"' : '') + '>' + qtyFmt(r.net) + '</b></td></tr>').join('')).join('')

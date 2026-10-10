@@ -55,7 +55,7 @@ function saveLocal() {
     localStorage.setItem(DB_KEY, JSON.stringify(DB));
   } catch (e) { flash('Browser storage full — export a backup from Settings.', 'err'); }
 }
-const COLS = ['users', 'roles', 'customers', 'items', 'materials', 'processes', 'orders', 'samples', 'dispatches', 'purchase_orders', 'sourcing', 'grns', 'inwards', 'vendors', 'issues', 'rsjw', 'rtvs', 'boms', 'job_cards', 'requisitions', 'tickets', 'checklist', 'checklist_log', 'escalations', 'attributes', 'item_types', 'mail_queue', 'prod_reports', 'wa_log', 'audit'];
+const COLS = ['users', 'roles', 'customers', 'items', 'materials', 'processes', 'orders', 'samples', 'dispatches', 'purchase_orders', 'sourcing', 'grns', 'inwards', 'vendors', 'issues', 'rsjw', 'rtvs', 'boms', 'job_cards', 'requisitions', 'tickets', 'checklist', 'checklist_log', 'escalations', 'attributes', 'item_types', 'mail_queue', 'requirements', 'prod_reports', 'wa_log', 'audit'];
 let DB = null;
 const CFG = window.NEXUS_CONFIG || {};
 const CLOUD = !!(CFG.SUPABASE_URL && CFG.SUPABASE_ANON_KEY && window.supabase);
@@ -524,6 +524,7 @@ const NAV = [
   { menu: 'Purchase', items: [
     { v: 'purchasedash', l: 'Purchase Dashboard', mod: 'purchase' },
     { v: 'netreq', l: 'Net Requirement', mod: 'purchase' },
+    { v: 'requirements', l: 'Requirements', mod: 'purchase' },
     { v: 'po', l: 'Purchase Order', mod: 'purchase' },
     { v: 'poapproval', l: 'PO Approval', mod: 'purchase' },
     { v: 'invapproval', l: 'Invoice Approval', mod: 'purchase' },
@@ -769,42 +770,9 @@ function pageSizeOf(tbl) {
   return pick ? num(p[pick]) : PAGE_SIZE;
 }
 const PAGER_STATE = new Map();   // hash|tableIndex -> current page
+// every list table gets Excel-style filter / sort on its header and paging (xfilter.js)
 function applyPagination(root) {
-  root.querySelectorAll('.tbl-wrap > table').forEach((tbl, ti) => {
-    if (tbl.classList.contains('nopage')) return;
-    const rows = Array.from(tbl.rows).filter(r => !r.querySelector('th'));
-    if (!rows.length || rows.some(r => r.querySelector('.empty'))) return;
-    // group rows that must stay together: rowspan continuations + attached rows (size grid, inline forms)
-    const groups = [];
-    let span = 0; const docRows = !!tbl.querySelector('tr.bomfirst');
-    rows.forEach(r => {
-      const attach = span > 0 || r.classList.contains('szrow') || r.classList.contains('inline-form') || (docRows && !r.classList.contains('bomfirst'));
-      if (span > 0) span -= 1;
-      const rs = Math.max(1, ...Array.from(r.cells).map(c => c.rowSpan || 1)) - 1;
-      if (rs > 0) span = Math.max(span, rs);
-      if (attach && groups.length) groups[groups.length - 1].push(r); else groups.push([r]);
-    });
-    const PAGE_SIZE = pageSizeOf(tbl);
-    if (!PAGE_SIZE || groups.length <= PAGE_SIZE) return;
-    const key = location.hash + '|' + ti;
-    const pages = Math.ceil(groups.length / PAGE_SIZE);
-    let page = Math.min(PAGER_STATE.get(key) || 1, pages);
-    const bar = document.createElement('div'); bar.className = 'pager noprint';
-    const info = document.createElement('span'); info.className = 'muted small';
-    const prev = document.createElement('button'); prev.className = 'btn sm'; prev.type = 'button'; prev.textContent = '‹ Prev';
-    const next = document.createElement('button'); next.className = 'btn sm'; next.type = 'button'; next.textContent = 'Next ›';
-    const show = () => {
-      PAGER_STATE.set(key, page);
-      groups.forEach((g, i) => { const on = i >= (page - 1) * PAGE_SIZE && i < page * PAGE_SIZE; g.forEach(r => { r.style.display = on ? '' : 'none'; }); });
-      info.textContent = ((page - 1) * PAGE_SIZE + 1) + '–' + Math.min(page * PAGE_SIZE, groups.length) + ' of ' + groups.length;
-      prev.disabled = page <= 1; next.disabled = page >= pages;
-    };
-    prev.onclick = () => { page -= 1; show(); };
-    next.onclick = () => { page += 1; show(); };
-    bar.append(info, prev, next);
-    tbl.closest('.tbl-wrap').after(bar);
-    show();
-  });
+  root.querySelectorAll('.tbl-wrap > table').forEach((tbl, ti) => { try { xTable(tbl, ti); } catch (e) { console.error(e); } });
 }
 function onSeg(fn) { SEG_HANDLER = fn; }
 document.addEventListener('segchange', e => { if (SEG_HANDLER && e.target.closest('#main') && !e.target.hasAttribute('data-own')) SEG_HANDLER(e); });
