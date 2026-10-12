@@ -1511,6 +1511,14 @@ ACTIONS['req-save'] = () => {
 
 /* ================= PRODUCTION REPORT ================= */
 const PR_UI = { form: false, jc: '', stage: '', qty: {}, remark: '', open: null };
+// a job card can be reported only once material has been issued to it
+function jcHasIssue(no) { return Store.all('issues').some(i => i.status === 'Approved' && i.type !== 'return' && i.type !== 'line_reject' && i.type !== 'scrap' && [i.to_jc, i.jc, i.jc_no].some(x => x && norm(x) === norm(no))); }
+function prodJcs() { return Store.all('job_cards').filter(x => x.status !== 'Closed' && jcHasIssue(x.no)).sort((a, b) => String(a.no).localeCompare(String(b.no))); }
+// stages run in the order of the Stage list: a stage can never go beyond what the stage before it has produced (per size)
+function prodLimit(j, stage, size, act) {
+  const st = optList('prod_stage'); const k = st.indexOf(stage);
+  return k > 0 ? Math.min(num(act), prodDone(j.no, st[k - 1], size)) : num(act);
+}
 function prodDone(jc, stage, size) { return Store.all('prod_reports').filter(p => norm(p.jc_no) === norm(jc) && p.stage === stage).reduce((a, p) => a + (p.sizes || []).filter(x => String(x.size) === String(size)).reduce((b, x) => b + num(x.qty), 0), 0); }
 VIEWS.prodreport = {
   mod: 'production', render() {
@@ -1518,49 +1526,49 @@ VIEWS.prodreport = {
     let h = '<div class="toolbar"><span class="grow"></span>' + (edit ? newBtn('Production report', 'pr-new') : '') + '</div>';
     if (U.form && edit) {
       const j = U.jc ? jcBy(U.jc) : null; const o = j ? Store.all('orders').find(x => norm(x.no) === norm(j.order_no)) || {} : {};
-      h += '<div class="card"><div class="card-b"><div class="row"><label>Job Card *<select id="prJc">' + '<option value="">— select —</option>' + Store.all('job_cards').filter(x => x.status !== 'Closed').sort((a, b) => String(a.no).localeCompare(String(b.no))).map(x => '<option value="' + esc(x.no) + '"' + (norm(x.no) === norm(U.jc) ? ' selected' : '') + '>' + esc(x.no + ' · ' + (x.brand || '') + ' · ' + (x.article || '')) + '</option>').join('') + '</select></label>' +
+      h += '<div class="card"><div class="card-b"><div class="row"><label>Job Card *<input id="prJc" list="dlPrJc" autocomplete="off" value="' + esc(U.jc || '') + '"><datalist id="dlPrJc">' + prodJcs().map(x => '<option value="' + esc(x.no) + '">' + esc((x.brand || '') + ' · ' + (x.article || '') + (x.colour ? ' · ' + x.colour : '')) + '</option>').join('') + '</datalist></label>' +
         '<label>Category<input value="' + esc(j ? j.category || o.category || '' : '') + '" readonly></label><label>Brand<input value="' + esc(j ? j.brand || '' : '') + '" readonly></label><label>Article<input value="' + esc(j ? j.article || '' : '') + '" readonly></label><label>Colour<input value="' + esc(j ? j.colour || '' : '') + '" readonly></label>' +
         '<label>Stage *<select id="prStage">' + selOpts(optList('prod_stage'), U.stage) + '</select></label></div>';
       const sizes = j ? (j.sizes || []) : [];
-      h += '<div class="tbl-wrap" style="margin-top:8px"><table class="bomflat nopage" id="prTable"><tr><th>Size</th><th class="num">Order Qty</th><th class="num">Produced till now (' + esc(U.stage || 'stage') + ')</th><th class="num">Balance</th><th class="num">Quantity produced (this report)</th></tr>' +
-        (!j ? '<tr><td colspan="5" class="empty">Select a Job Card</td></tr>' : !sizes.length ? '<tr><td colspan="5" class="empty">This Job Card has no size breakup</td></tr>' : sizes.map(z => {
-          const tgt = num(z.act); const done = U.stage ? prodDone(j.no, U.stage, z.size) : 0; const bal = Math.max(0, tgt - done);
-          return '<tr data-prs="' + esc(z.size) + '" data-bal="' + bal + '"><td><b>' + esc(z.size) + '</b></td><td class="num">' + qtyFmt(tgt) + '</td><td class="num">' + qtyFmt(done) + '</td><td class="num">' + qtyFmt(bal) + '</td><td><input class="qty right" type="number" min="0" step="1" data-prq value="' + esc(U.qty[z.size] || '') + '"' + (U.stage ? '' : ' disabled') + '></td></tr>';
-        }).join('') + '<tr class="tot"><td>Total</td><td class="num">' + qtyFmt(sizes.reduce((a, z) => a + num(z.act), 0)) + '</td><td class="num">' + (U.stage ? qtyFmt(sizes.reduce((a, z) => a + prodDone(j.no, U.stage, z.size), 0)) : '') + '</td><td></td><td class="num" id="prTot">' + qtyFmt(Object.values(U.qty).reduce((a, v) => a + num(v), 0)) + '</td></tr>') + '</table></div>' +
+      h += '<div class="tbl-wrap" style="margin-top:8px"><table class="bomflat nopage nofilter" id="prTable"><tr><th>Size</th><th class="num">Order Qty</th><th class="num">Produced till now (' + esc(U.stage || 'stage') + ')</th><th class="num">' + (U.stage && optList('prod_stage').indexOf(U.stage) > 0 ? 'Done at ' + esc(optList('prod_stage')[optList('prod_stage').indexOf(U.stage) - 1]) : 'Previous stage') + '</th><th class="num">Balance</th><th class="num">Quantity produced (this report)</th></tr>' +
+        (!j ? '<tr><td colspan="6" class="empty">Select a Job Card</td></tr>' : !sizes.length ? '<tr><td colspan="6" class="empty">This Job Card has no size breakup</td></tr>' : sizes.map(z => {
+          const tgt = num(z.act); const done = U.stage ? prodDone(j.no, U.stage, z.size) : 0; const lim = U.stage ? prodLimit(j, U.stage, z.size, tgt) : tgt; const bal = Math.max(0, lim - done);
+          return '<tr data-prs="' + esc(z.size) + '" data-bal="' + bal + '"><td><b>' + esc(z.size) + '</b></td><td class="num">' + qtyFmt(tgt) + '</td><td class="num">' + qtyFmt(done) + '</td><td class="num">' + (U.stage && optList('prod_stage').indexOf(U.stage) > 0 ? qtyFmt(prodDone(j.no, optList('prod_stage')[optList('prod_stage').indexOf(U.stage) - 1], z.size)) : '—') + '</td><td class="num">' + qtyFmt(bal) + '</td><td><input class="qty right" type="number" min="0" step="1" data-prq value="' + esc(U.qty[z.size] || '') + '"' + (U.stage && bal > 0 ? ' max="' + bal + '"' : ' disabled') + '></td></tr>';
+        }).join('') + '<tr class="tot"><td>Total</td><td class="num">' + qtyFmt(sizes.reduce((a, z) => a + num(z.act), 0)) + '</td><td class="num">' + (U.stage ? qtyFmt(sizes.reduce((a, z) => a + prodDone(j.no, U.stage, z.size), 0)) : '') + '</td><td></td><td></td><td class="num" id="prTot">' + qtyFmt(Object.values(U.qty).reduce((a, v) => a + num(v), 0)) + '</td></tr>') + '</table></div>' +
         '<label style="margin-top:8px">Remark<textarea id="prRem" rows="2">' + esc(U.remark) + '</textarea></label>' +
         '</div><div class="card-f"><button class="btn primary" data-act="pr-save">Save report</button><span id="prMsg" class="small"></span></div></div>';
     }
     // one line per job card: every stage shows Actual / Plan (plan = job card qty); click a line for the size-wise view
     const reps = Store.all('prod_reports');
     const stages = optList('prod_stage').concat(Array.from(new Set(reps.map(p => p.stage))).filter(x => x && !optList('prod_stage').includes(x)));
-    const jcs = Store.all('job_cards').filter(j => j.status !== 'Closed' || reps.some(p => norm(p.jc_no) === norm(j.no)));
+    const jcs = Store.all('job_cards').filter(j => reps.some(p => norm(p.jc_no) === norm(j.no)) || (j.status !== 'Closed' && jcHasIssue(j.no)));
     const list = jcs.map(j => { const rs = reps.filter(p => norm(p.jc_no) === norm(j.no)).sort((a, b) => (b.at || '') < (a.at || '') ? -1 : 1); return { j, rs, last: rs[0] || null }; })
       .sort((a, b) => ((b.last && b.last.at) || '') < ((a.last && a.last.at) || '') ? -1 : ((b.last && b.last.at) || '') > ((a.last && a.last.at) || '') ? 1 : String(b.j.no).localeCompare(String(a.j.no)));
     const plan = j => (j.sizes || []).reduce((a, z) => a + num(z.act), 0) || num(j.qty);
     const done = (rs, st, size) => rs.filter(p => p.stage === st).reduce((a, p) => a + (p.sizes || []).filter(x => size == null || String(x.size) === String(size)).reduce((b, x) => b + num(x.qty), 0), 0);
     const pa = (act, pl) => { const pct = pl ? Math.min(100, Math.round(act / pl * 100)) : 0; const cls = act <= 0 ? 'pa-0' : act >= pl ? 'pa-done' : 'pa-part';
       return '<div class="pa ' + cls + '"><span class="pa-v"><b>' + qtyFmt(act) + '</b><i>/</i>' + qtyFmt(pl) + '</span><span class="pa-bar"><span style="width:' + pct + '%"></span></span></div>'; };
-    h += '<div class="tbl-wrap"><table class="prgrid"><tr><th>Report No</th><th>Date &amp; Time</th><th>Job Card</th><th>Category</th><th>Brand</th><th>Article</th><th>Colour</th><th class="num">Order Qty</th>' + stages.map(st => '<th class="c">' + esc(st) + '<span class="pa-h">Actual / Plan</span></th>').join('') + '</tr>' +
+    h += '<div class="tbl-wrap"><table class="prgrid"><tr><th>Last Report</th><th>Job Card</th><th>Category</th><th>Brand</th><th>Article</th><th>Colour</th><th class="num">Order Qty</th>' + stages.map(st => '<th class="c">' + esc(st) + '<span class="pa-h">Actual / Plan</span></th>').join('') + '</tr>' +
       (list.length ? list.map(x => {
         const j = x.j, pl = plan(j), open = PR_UI.open === j.id;
-        let row = '<tr class="click' + (open ? ' pr-open' : '') + '" data-act="pr-toggle" data-id="' + esc(j.id) + '"><td><b>' + esc(x.last ? x.last.no : '—') + '</b>' + (x.rs.length > 1 ? ' <span class="pr-cnt">+' + (x.rs.length - 1) + '</span>' : '') + '</td><td class="nowrap">' + (x.last ? fmtDT(x.last.at) : '') + '</td><td><b>' + esc(j.no) + '</b></td><td>' + esc(j.category || (Store.all('orders').find(o => norm(o.no) === norm(j.order_no)) || {}).category || (x.last && x.last.category) || '') + '</td><td>' + esc(j.brand || '') + '</td><td>' + esc(j.article || '') + '</td><td>' + esc(j.colour || '') + '</td><td class="num">' + qtyFmt(pl) + '</td>' +
+        let row = '<tr class="click' + (open ? ' pr-open' : '') + '" data-act="pr-toggle" data-id="' + esc(j.id) + '"><td class="nowrap">' + (x.last ? fmtDT(x.last.at) : '<span class="muted">Not started</span>') + '</td><td><b>' + esc(j.no) + '</b></td><td>' + esc(j.category || (Store.all('orders').find(o => norm(o.no) === norm(j.order_no)) || {}).category || (x.last && x.last.category) || '') + '</td><td>' + esc(j.brand || '') + '</td><td>' + esc(j.article || '') + '</td><td>' + esc(j.colour || '') + '</td><td class="num">' + qtyFmt(pl) + '</td>' +
           stages.map(st => '<td>' + pa(done(x.rs, st), pl) + '</td>').join('') + '</tr>';
         if (open) {
           const sizes = (j.sizes || []).length ? j.sizes : [{ size: '—', act: pl }];
-          row += '<tr class="inline-form"><td colspan="' + (8 + stages.length) + '"><div class="pr-detail">' +
+          row += '<tr class="inline-form"><td colspan="' + (7 + stages.length) + '"><div class="pr-detail">' +
             '<table class="pr-sz"><tr><th>Size</th><th class="num">Order Qty</th>' + stages.map(st => '<th class="c">' + esc(st) + '</th>').join('') + '</tr>' +
             sizes.map(z => '<tr><td><b>' + esc(z.size) + '</b></td><td class="num">' + qtyFmt(num(z.act)) + '</td>' + stages.map(st => '<td>' + pa(done(x.rs, st, (j.sizes || []).length ? z.size : null), num(z.act)) + '</td>').join('') + '</tr>').join('') +
             '<tr class="tot"><td>Total</td><td class="num">' + qtyFmt(pl) + '</td>' + stages.map(st => '<td>' + pa(done(x.rs, st), pl) + '</td>').join('') + '</tr></table>' +
-            (x.rs.length ? '<table class="pr-sz" style="margin-top:12px"><tr><th>Report No</th><th>Date &amp; Time</th><th>Stage</th><th>Size-wise Qty</th><th class="num">Total</th><th>Remark</th><th>Reported By</th></tr>' +
-              x.rs.map(p => '<tr><td><b>' + esc(p.no) + '</b></td><td class="nowrap">' + fmtDT(p.at) + '</td><td>' + esc(p.stage) + '</td><td>' + (p.sizes || []).filter(s2 => num(s2.qty) > 0).map(s2 => esc(s2.size) + ': <b>' + qtyFmt(s2.qty) + '</b>').join(' · ') + '</td><td class="num"><b>' + qtyFmt(p.total || (p.sizes || []).reduce((a, s2) => a + num(s2.qty), 0)) + '</b></td><td>' + esc(p.remark || '') + '</td><td>' + esc(p.by || '') + '</td></tr>').join('') + '</table>' : '<div class="muted small" style="margin-top:8px">No production reported yet</div>') +
+            (x.rs.length ? '<table class="pr-sz" style="margin-top:12px"><tr><th>Date &amp; Time</th><th>Stage</th><th>Size-wise Qty</th><th class="num">Total</th><th>Remark</th><th>Reported By</th></tr>' +
+              x.rs.map(p => '<tr><td class="nowrap">' + fmtDT(p.at) + '</td><td>' + esc(p.stage) + '</td><td>' + (p.sizes || []).filter(s2 => num(s2.qty) > 0).map(s2 => esc(s2.size) + ': <b>' + qtyFmt(s2.qty) + '</b>').join(' · ') + '</td><td class="num"><b>' + qtyFmt(p.total || (p.sizes || []).reduce((a, s2) => a + num(s2.qty), 0)) + '</b></td><td>' + esc(p.remark || '') + '</td><td>' + esc(p.by || '') + '</td></tr>').join('') + '</table>' : '<div class="muted small" style="margin-top:8px">No production reported yet</div>') +
             '</div></td></tr>';
         }
         return row;
-      }).join('') : '<tr><td colspan="' + (8 + stages.length) + '" class="empty">No job cards</td></tr>') + '</table></div>';
+      }).join('') : '<tr><td colspan="' + (7 + stages.length) + '" class="empty">No job cards</td></tr>') + '</table></div>';
     const m = setMain(h);
     m.addEventListener('change', e => {
       const t = e.target;
-      if (t.id === 'prJc') { U.jc = t.value; U.qty = {}; VIEWS.prodreport.render(); }
+      if (t.id === 'prJc') { const ok = prodJcs().find(x => norm(x.no) === norm(t.value)); U.jc = ok ? ok.no : ''; U.qty = {}; if (!ok && t.value.trim()) flash(esc(t.value) + ' is not an open job card with material issued — select one from the list.', 'err'); VIEWS.prodreport.render(); }
       else if (t.id === 'prStage') { U.stage = t.value; U.qty = {}; VIEWS.prodreport.render(); }
     });
     m.addEventListener('input', e => {
@@ -1574,10 +1582,17 @@ ACTIONS['pr-new'] = () => { Object.assign(PR_UI, { form: !PR_UI.form, jc: '', st
 ACTIONS['pr-save'] = () => {
   if (!requirePerm('production', 'edit')) return;
   const U = PR_UI; const msg = t => { $('#prMsg').innerHTML = '<span class="late-txt">' + t + '</span>'; };
-  const j = jcBy(U.jc); if (!j) { msg('Select a Job Card.'); return; }
+  const j = prodJcs().find(x => norm(x.no) === norm(U.jc || ($('#prJc') || {}).value || '')); if (!j) { msg('Select a Job Card from the list (only open job cards with material issued).'); return; }
   if (!U.stage) { msg('Select the Stage.'); return; }
   let bad = ''; const sizes = [];
-  $$('#prTable tr[data-prs]').forEach(tr => { const q = num(($('[data-prq]', tr) || {}).value); if (q <= 0) return; if (q > num(tr.dataset.bal) + 1e-9) bad = bad || 'Size ' + tr.dataset.prs + ': only ' + qtyFmt(tr.dataset.bal) + ' left at this stage.'; sizes.push({ size: tr.dataset.prs, qty: q }); });
+  const stList = optList('prod_stage'); const prev = stList[stList.indexOf(U.stage) - 1];
+  $$('#prTable tr[data-prs]').forEach(tr => {
+    const q = num(($('[data-prq]', tr) || {}).value); if (q <= 0) return;
+    const z = (j.sizes || []).find(x => String(x.size) === String(tr.dataset.prs)) || {};
+    const left = Math.max(0, prodLimit(j, U.stage, tr.dataset.prs, z.act) - prodDone(j.no, U.stage, tr.dataset.prs));
+    if (q > left + 1e-9) bad = bad || 'Size ' + tr.dataset.prs + ': only ' + qtyFmt(left) + ' can be reported at ' + U.stage + (prev ? ' (' + prev + ' has done ' + qtyFmt(prodDone(j.no, prev, tr.dataset.prs)) + ')' : '') + '.';
+    sizes.push({ size: tr.dataset.prs, qty: q });
+  });
   if (bad) { msg(esc(bad)); return; }
   if (!sizes.length) { msg('Enter the quantity produced for at least one size.'); return; }
   const o = Store.all('orders').find(x => norm(x.no) === norm(j.order_no)) || {};
