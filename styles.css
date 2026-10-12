@@ -629,3 +629,4 @@ a.dt[href]:hover { text-decoration: none; border-color: #b9c8e2; box-shadow: 0 4
 .fc-wrap.fc-max { position: fixed; inset: 0; z-index: 1500; border-radius: 0; display: flex; flex-direction: column; }
 .fc-wrap.fc-max .chart-wrap, .fc-wrap:fullscreen .chart-wrap { max-height: none; flex: 1; height: calc(100vh - 48px); }
 .fc-wrap:fullscreen { display: flex; flex-direction: column; border-radius: 0; }
+.fc-end { flex-direction: row; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 12px; } .fc-end select { width: auto; min-width: 220px; }

@@ -141,7 +141,8 @@ function bldSide() {
   box.innerHTML = svg; fcApply();
   if (had) { box.scrollLeft = sl; box.scrollTop = sT; } else box.scrollLeft = Math.max(0, (box.scrollWidth - box.clientWidth) / 2);   // keep the view while editing; centre the first time
   const v = validateSpec(d);
-  $('#bVal').innerHTML = (v.errors.length || v.warns.length ? '<ul class="val" style="margin:0;padding-left:16px">' + v.errors.map(x => '<li class="e">' + esc(x) + '</li>').join('') + v.warns.map(x => '<li class="w">' + esc(x) + '</li>').join('') + '</ul>' : '<span class="st Done">Flow is valid</span>') +
+  const endSel = '<label class="fc-end">Last step (End)<select id="bEndStep"' + (can('builder', 'edit') ? '' : ' disabled') + '>' + (d.steps.some(x => x.id === (d.process || {}).endStep) ? '' : '<option value="" selected>— select —</option>') + d.steps.map(x => '<option value="' + esc(x.id) + '"' + (x.id === (d.process || {}).endStep ? ' selected' : '') + '>' + esc(x.name || x.id) + '</option>').join('') + '</select></label>';
+  $('#bVal').innerHTML = endSel + (v.errors.length || v.warns.length ? '<ul class="val" style="margin:0;padding-left:16px">' + v.errors.map(x => '<li class="e">' + esc(x) + '</li>').join('') + v.warns.map(x => '<li class="w">' + esc(x) + '</li>').join('') + '</ul>' : '<span class="st Done">Flow is valid</span>') +
     '<div class="muted" style="margin-top:6px">' + d.steps.length + ' steps · Only actuals move the chain · Delay counted in working time</div>';
   const saveBtn = $('[data-act="bld-save"]'); if (saveBtn) saveBtn.disabled = !!v.errors.length;
 }
@@ -430,13 +431,29 @@ ACTIONS['bld-add'] = () => {
   B.sel = id; B.dirty = true; VIEWS.builder.render(); const n = $('[data-k="name"]'); if (n) { n.focus(); n.select(); }
 };
 ACTIONS['bld-move'] = el => { bldCollect(); const i = B.draft.steps.findIndex(s => s.id === B.sel); const j = i + num(el.dataset.d); if (j < 0 || j >= B.draft.steps.length) return; const a = B.draft.steps; [a[i], a[j]] = [a[j], a[i]]; B.dirty = true; VIEWS.builder.render(); };
+// the last step (End) of the flow
+document.addEventListener('change', e => {
+  if (e.target.id !== 'bEndStep' || !B.draft) return;
+  if (!bldEditAllowed()) return;
+  B.draft.process = B.draft.process || {}; B.draft.process.endStep = e.target.value;
+  if (!bldMarkDirty()) bldSide();
+});
 ACTIONS['bld-del'] = () => {
   const i = B.draft.steps.findIndex(s => s.id === B.sel); if (i < 0) return;
-  const gone = B.draft.steps[i]; const gt = (Array.isArray(gone.trigger) ? gone.trigger[0] : gone.trigger) || { type: 'instanceStart' };
+  const gone = B.draft.steps[i]; const gts = (Array.isArray(gone.trigger) ? gone.trigger : [gone.trigger]).filter(Boolean); if (!gts.length) gts.push({ type: 'instanceStart' });
+  // steps that ran after the deleted one now start the way the deleted one started (all of its starts, not only the first)
   B.draft.steps.forEach(st => {
-    const list = (Array.isArray(st.trigger) ? st.trigger : [st.trigger]).map(t => t && t.type === 'afterStep' && t.step === gone.id ? Object.assign(clone(gt), t.when ? { when: t.when } : {}, t.orNext ? { orNext: true } : {}) : t);
+    const list = (Array.isArray(st.trigger) ? st.trigger : [st.trigger]).flatMap(t => t && t.type === 'afterStep' && t.step === gone.id
+      ? gts.map(g => { const n = Object.assign(clone(g), t.when && gts.length === 1 ? { when: t.when } : {}, t.orNext ? { orNext: true } : {}); const tat = t.tat || st.tat || g.tat; if (tat) n.tat = clone(tat); else delete n.tat; return n; })
+      : [t]);
     st.trigger = list.length === 1 ? list[0] : list;
   });
+  // the deleted step was the last step (End): the step before it becomes the last step
+  if (B.draft.process && B.draft.process.endStep === gone.id) {
+    const prev = gts.find(g => g.type === 'afterStep' && g.step && g.step !== gone.id);
+    const rest = B.draft.steps.filter(x => x.id !== gone.id);
+    B.draft.process.endStep = prev ? prev.step : (rest[rest.length - 1] || {}).id || '';
+  }
   B.draft.steps.splice(i, 1); B.sel = (B.draft.steps[Math.max(0, i - 1)] || {}).id; B.dirty = true; VIEWS.builder.render();
 };
 ACTIONS['cand-add'] = () => { bldCollect(); const s = curStep(); const t = (Array.isArray(s.trigger) ? s.trigger : [s.trigger]).filter(Boolean); t.push({ type: 'afterStep', step: '' }); s.trigger = t; if (!bldMarkDirty()) { bldEditor(); bldSide(); } };
