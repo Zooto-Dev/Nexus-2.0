@@ -55,7 +55,7 @@ function saveLocal() {
     localStorage.setItem(DB_KEY, JSON.stringify(DB));
   } catch (e) { flash('Browser storage full — export a backup from Settings.', 'err'); }
 }
-const COLS = ['users', 'roles', 'customers', 'items', 'materials', 'processes', 'orders', 'samples', 'dispatches', 'purchase_orders', 'sourcing', 'grns', 'inwards', 'vendors', 'issues', 'rsjw', 'rtvs', 'boms', 'job_cards', 'requisitions', 'tickets', 'checklist', 'checklist_log', 'escalations', 'attributes', 'item_types', 'mail_queue', 'requirements', 'prod_reports', 'wa_log', 'audit'];
+const COLS = ['users', 'roles', 'customers', 'items', 'materials', 'processes', 'orders', 'samples', 'dispatches', 'purchase_orders', 'sourcing', 'grns', 'inwards', 'vendors', 'issues', 'rsjw', 'rtvs', 'boms', 'job_cards', 'requisitions', 'tickets', 'checklist', 'checklist_log', 'escalations', 'attributes', 'item_types', 'mail_queue', 'requirements', 'prod_reports', 'prod_plans', 'wa_log', 'audit'];
 let DB = null;
 const CFG = window.NEXUS_CONFIG || {};
 const CLOUD = !!(CFG.SUPABASE_URL && CFG.SUPABASE_ANON_KEY && window.supabase);
@@ -555,6 +555,7 @@ const NAV = [
     { v: 'bom', l: 'BOM', mod: 'development' },
     { v: 'boms', l: 'Created BOM', mod: 'development' }] },
   { menu: 'Production', items: [
+    { v: 'planning', l: 'Planning & DPR', mod: 'production' },
     { v: 'requisition', l: 'Requisition Slip', mod: 'production' },
     { v: 'prodreport', l: 'Production Report', mod: 'production' },
     { v: 'prodtracker', l: 'Production Tracker', mod: 'production' },

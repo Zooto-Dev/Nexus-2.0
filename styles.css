@@ -647,3 +647,4 @@ tr.pr-open > td { background: #f1f6ff; }
 .pr-sz { width: auto; min-width: 60%; background: #fff; border: 1px solid var(--line); border-radius: 8px; border-collapse: separate; border-spacing: 0; overflow: hidden; }
 .pr-sz th { background: var(--th-bg); position: static; }
 .pr-sz tr.tot td { background: #f7f9fc; font-weight: 600; border-top: 1px solid var(--line); }
+.pl-sec { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); margin: 14px 0 6px; } .pl-sec:first-child { margin-top: 2px; } .dpr td { white-space: nowrap; }
