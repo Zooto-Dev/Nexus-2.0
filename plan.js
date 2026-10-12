@@ -133,32 +133,46 @@ function dprTable(list, interactive) {
     (list.length ? list.map(({ p, s }) => {
       const cur = s.st && s.st.cur;
       const dd = s.overall === 'Dispatched' ? '' : s.days < 0 ? '<span class="late-txt">' + (-s.days) + 'd late</span>' : s.days === 0 ? '<span class="warn-txt">today</span>' : '<span class="muted">' + s.days + 'd left</span>';
-      let row = '<tr' + (interactive ? ' class="click' + (PL_UI.open === p.id ? ' pr-open' : '') + '" data-act="pl-toggle" data-id="' + esc(p.id) + '"' : '') + '><td><b>' + esc(p.jc_no) + '</b></td><td>' + esc(p.order_no || '') + '</td><td class="nowrap">' + fmtD(p.order_date) + '</td><td>' + esc(p.merchant || '') + '</td><td>' + esc(p.customer || '') + '</td><td>' + esc(p.category || '') + '</td><td>' + esc(p.article || '') + '</td><td>' + esc(p.colour || '') + '</td><td class="num">' + qtyFmt(s.qty) + '</td>' +
+      let row = '<tr' + (interactive ? ' class="click' + '' + '" data-act="pl-toggle" data-id="' + esc(p.id) + '"' : '') + '><td><b>' + esc(p.jc_no) + '</b></td><td>' + esc(p.order_no || '') + '</td><td class="nowrap">' + fmtD(p.order_date) + '</td><td>' + esc(p.merchant || '') + '</td><td>' + esc(p.customer || '') + '</td><td>' + esc(p.category || '') + '</td><td>' + esc(p.article || '') + '</td><td>' + esc(p.colour || '') + '</td><td class="num">' + qtyFmt(s.qty) + '</td>' +
         '<td class="nowrap"><b>' + fmtD(p.dispatch_date) + '</b>' + ((p.history || []).length ? ' <span class="pr-cnt" title="Revised">R' + p.history.length + '</span>' : '') + '<div class="small">' + dd + '</div></td>' +
         '<td>' + (cur ? '<span class="st ' + (cur.status === 'Late' ? 'Late' : 'Pending') + '">' + esc(cur.name) + '</span>' : esc(s.st ? s.st.label : '—')) + '</td>' +
         '<td><span class="st ' + (MAT_CLS[s.matArr] || 'NA') + '">' + esc(s.matArr) + '</span>' + (s.matArr === 'Awaited' ? '<div class="small muted">' + s.awaited + ' on PO' + (s.noPo ? ' · <span class="late-txt">' + s.noPo + ' no PO</span>' : '') + '</div>' : '') + '</td>' +
         '<td>' + (s.items.length ? '<div class="pa ' + (s.issPct >= 100 ? 'pa-done' : s.issPct > 0 ? 'pa-part' : 'pa-0') + '"><span class="pa-v"><b>' + s.items.filter(x => x.bal <= 1e-9).length + '</b><i>/</i>' + s.items.length + ' items · ' + s.issPct + '%</span><span class="pa-bar"><span style="width:' + s.issPct + '%"></span></span></div>' : '<span class="muted">—</span>') + '</td>' + s.prod.map(x => '<td>' + pa(x.done, s.qty) + '</td>').join('') + '<td>' + pa(s.disp, s.qty) + '</td>' +
         '<td><span class="st ' + OVR_CLS[s.overall] + '">' + esc(s.overall) + '</span></td></tr>';
-      if (interactive && PL_UI.open === p.id) row += '<tr class="inline-form"><td colspan="' + cols + '">' + planDetail(p, s) + '</td></tr>';
       return row;
     }).join('') : '<tr><td colspan="' + cols + '" class="empty">No plans yet</td></tr>') + '</table>';
 }
+// complete tracking of one job card in a full-screen panel that fits the screen (no scrolling):
+// left the O2D timeline, right the material and the plan
 function planDetail(p, s) {
-  let h = '<div class="pr-detail pl-detail">';
-  // O2D steps as a Gantt timeline: grey = planned window, bar = actual (green on time, red late), today + dispatch lines
-  if (s.r) h += '<div class="pl-sec">O2D · ' + esc(s.o.no) + '</div>' + o2dGantt(s.o, s.r, p.dispatch_date);
-  else h += '<div class="muted small">Order not found for O2D tracking.</div>';
-  // material
-  h += '<div class="pl-sec">Material</div>' + (s.items.length ? '<table class="pr-sz"><tr><th>Item</th><th>Code</th><th>UOM</th><th class="num">Required</th><th class="num">Issued</th><th class="num">Balance</th><th class="num">Stock</th><th>PO (expected)</th><th>Status</th></tr>' +
-    s.items.map(x => '<tr><td>' + esc(x.m.name || x.l.material) + '</td><td>' + esc(x.l.material) + '</td><td>' + esc(x.l.uom || x.m.uom || '') + '</td><td class="num">' + qtyFmt(x.rq) + '</td><td class="num">' + qtyFmt(x.is) + '</td><td class="num">' + (x.bal ? '<b>' + qtyFmt(x.bal) + '</b>' : '—') + '</td><td class="num">' + qtyFmt(x.stock) + '</td><td class="nowrap">' + (x.po ? esc(x.po.no) + (x.po.expected ? ' · <span class="' + (x.po.expected < todayYmd() ? 'late-txt' : '') + '">' + fmtD(x.po.expected) + '</span>' : '') : '') + '</td><td><span class="st ' + ({ Issued: 'Done', 'In stock': 'Done', 'PO raised': 'Pending', 'No PO': 'Late' }[x.state]) + '">' + esc(x.state) + '</span></td></tr>').join('') + '</table>' : '<div class="muted small">No BOM on this job card.</div>');
-  // plan + history
-  h += '<div class="pl-sec">Plan</div><div class="small">Planned dispatch <b>' + fmtD(p.dispatch_date) + '</b> · by ' + esc(p.by || '') + ' · ' + fmtDT(p.at) + (p.remark ? ' · ' + esc(p.remark) : '') + '</div>' +
-    ((p.history || []).length ? '<table class="pr-sz" style="margin-top:6px"><tr><th>Changed</th><th>By</th><th>Old Date</th><th>New Date</th><th>Reason</th></tr>' + p.history.slice().reverse().map(x => '<tr><td class="nowrap">' + fmtDT(x.at) + '</td><td>' + esc(x.by) + '</td><td>' + fmtD(x.old) + '</td><td>' + fmtD(x.new) + '</td><td>' + esc(x.reason) + '</td></tr>').join('') + '</table>' : '') +
-    (can('production', 'edit') && s.overall !== 'Dispatched' ? '<div class="toolbar" style="margin-top:8px"><button class="btn sm" data-act="pl-revise" data-id="' + esc(p.id) + '">Revise dispatch date</button></div>' : '');
-  return h + '</div>';
+  const stCls = { Issued: 'Done', 'In stock': 'Done', 'PO raised': 'Pending', 'No PO': 'Late' };
+  const mat = s.items.length ? '<table class="plm-t"><tr><th>Item</th><th class="num">Balance / Req</th><th>Status</th></tr>' +
+    s.items.map(x => '<tr><td><b>' + esc(x.m.name || x.l.material) + '</b><div class="small muted">' + esc(x.l.material) + ' · stock ' + qtyFmt(x.stock) + ' ' + esc(x.l.uom || x.m.uom || '') + '</div></td><td class="num nowrap">' + (x.bal ? '<b>' + qtyFmt(x.bal) + '</b>' : '<b class="ok-txt">0</b>') + ' / ' + qtyFmt(x.rq) + '</td><td><span class="st ' + stCls[x.state] + '">' + esc(x.state) + '</span>' + (x.po && x.bal ? '<div class="small nowrap">' + esc(x.po.no.split('/').pop()) + ' · <span class="' + (x.po.expected && x.po.expected < todayYmd() ? 'late-txt' : 'muted') + '">' + (x.po.expected ? fmtD(x.po.expected) : '') + '</span></div>' : '') + '</td></tr>').join('') + '</table>' : '<div class="muted small">No BOM on this job card.</div>';
+  const hist = (p.history || []).slice().reverse().map(x => '<div class="plm-h"><b>' + fmtD(x.old) + ' → ' + fmtD(x.new) + '</b><span>' + esc(x.reason) + '</span><i>' + esc(x.by) + ' · ' + fmtDT(x.at) + '</i></div>').join('');
+  const dd = s.overall === 'Dispatched' ? 'Dispatched' : s.days < 0 ? (-s.days) + ' days late' : s.days === 0 ? 'Due today' : s.days + ' days left';
+  return '<div class="plm"><div class="plm-hd"><div><span class="plm-jc">' + esc(p.jc_no) + '</span><span class="plm-meta">' + esc([p.customer, p.article, p.colour].filter(Boolean).join(' · ')) + ' · ' + qtyFmt(s.qty) + ' pairs · Order ' + esc(p.order_no || '') + '</span></div>' +
+    '<div class="plm-r"><span class="plm-dd">Dispatch <b>' + fmtD(p.dispatch_date) + '</b> · ' + dd + '</span><span class="st ' + OVR_CLS[s.overall] + '">' + esc(s.overall) + '</span>' +
+    (can('production', 'edit') && s.overall !== 'Dispatched' ? '<button class="btn sm" data-act="pl-revise" data-id="' + esc(p.id) + '">Revise date</button>' : '') + '<button class="btn sm ghost" data-act="pl-close">✕</button></div></div>' +
+    '<div class="plm-b"><div class="plm-g">' + (s.r ? o2dGantt(s.o, s.r, p.dispatch_date) : '<div class="muted">Order not found for O2D tracking.</div>') + '</div>' +
+    '<div class="plm-side"><div class="pl-sec">Material · ' + s.items.filter(x => x.bal <= 1e-9).length + ' / ' + s.items.length + ' issued</div>' + mat +
+    '<div class="pl-sec">Plan</div><div class="small">By ' + esc(p.by || '') + ' · ' + fmtDT(p.at) + (p.remark ? '<br>' + esc(p.remark) : '') + '</div>' + hist + '</div></div></div>';
 }
+function planModal() {
+  const old = $('#plModal'); if (old) old.remove();
+  const p = PL_UI.open && Store.get('prod_plans', PL_UI.open); if (!p || !jcBy(p.jc_no)) { PL_UI.open = null; return; }
+  const d = document.createElement('div'); d.id = 'plModal'; d.className = 'dlg-back plm-back';
+  d.innerHTML = planDetail(p, planStatus(p));
+  d.addEventListener('click', e => { if (e.target === d) ACTIONS['pl-close'](); });
+  document.body.appendChild(d);
+  // redraw the timeline at the panel's real size
+  const g = $('.plm-g', d), s = planStatus(p);
+  if (g && s.r) g.innerHTML = o2dGantt(s.o, s.r, p.dispatch_date, { w: g.clientWidth - 24, h: g.clientHeight - 20 });
+}
+ACTIONS['pl-close'] = () => { PL_UI.open = null; const m = $('#plModal'); if (m) m.remove(); };
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && $('#plModal') && !$('#fxDlg')) ACTIONS['pl-close'](); });
+window.addEventListener('hashchange', () => { const m = $('#plModal'); if (m) { m.remove(); PL_UI.open = null; } });
 ACTIONS['pl-new'] = () => { Object.assign(PL_UI, { form: !PL_UI.form, jc: '', date: '', rem: '' }); VIEWS.planning.render(); };
-ACTIONS['pl-toggle'] = (el, ev) => { if (ev && ev.target.closest('button,a,input,select')) return; PL_UI.open = PL_UI.open === el.dataset.id ? null : el.dataset.id; VIEWS.planning.render(); };
+ACTIONS['pl-toggle'] = (el, ev) => { if (ev && ev.target.closest('button,a,input,select')) return; PL_UI.open = el.dataset.id; planModal(); };
 ACTIONS['pl-save'] = el => {
   if (!requirePerm('production', 'edit')) return;
   const msg = t => { $('#plMsg').innerHTML = '<span class="late-txt">' + esc(t) + '</span>'; };
@@ -171,7 +185,7 @@ ACTIONS['pl-save'] = el => {
   const p = Store.put('prod_plans', Object.assign({ id: uid(), jc_no: j.no, dispatch_date: date, remark: ($('#plRem').value || '').trim(), history: [], by: ME.name, at: nowIso() }, inf));
   audit('plan.create', j.no, 'dispatch ' + fmtD(date) + (p.remark ? ' · ' + p.remark : ''));
   const r = planSyncO2D(j);
-  Object.assign(PL_UI, { form: false, jc: '', date: '', rem: '', open: p.id });
+  Object.assign(PL_UI, { form: false, jc: '', date: '', rem: '', open: null });
   flash(esc(j.no) + ' planned for ' + fmtD(date) + '.' + (r === 'closed' ? ' O2D "Planned Dispatch Date" marked done for ' + esc(p.order_no) + '.' : r === 'waiting' ? ' O2D step closes when every job card of ' + esc(p.order_no) + ' is planned.' : ''));
   VIEWS.planning.render();
 };
@@ -184,7 +198,7 @@ ACTIONS['pl-revise'] = el => {
     const old = p.dispatch_date; p.dispatch_date = v.date; Store.put('prod_plans', p);
     audit('plan.revise', p.jc_no, fmtD(old) + ' → ' + fmtD(v.date) + ' · ' + v.why);
     const j = jcBy(p.jc_no); const r = j ? planSyncO2D(j) : '';
-    flash(esc(p.jc_no) + ' dispatch date revised to ' + fmtD(v.date) + '.' + (r === 'updated' ? ' O2D planned dispatch updated.' : '')); VIEWS.planning.render();
+    flash(esc(p.jc_no) + ' dispatch date revised to ' + fmtD(v.date) + '.' + (r === 'updated' ? ' O2D planned dispatch updated.' : '')); VIEWS.planning.render(); if (PL_UI.open) planModal();
   });
 };
 ACTIONS['pl-print'] = () => {
@@ -195,7 +209,7 @@ ACTIONS['pl-print'] = () => {
   w.document.close(); setTimeout(() => w.print(), 300);
 };
 
-function o2dGantt(o, r, dispatchYmd) {
+function o2dGantt(o, r, dispatchYmd, box) {
   const steps = r.order.map(id => Object.assign({ def: r.spec.steps.find(x => x.id === id) }, r.steps[id])).filter(st => st && st.applies);
   const now = new Date(), created = new Date(o.created_at || o.at || now);
   const t0 = st => { const tr = st.def && (Array.isArray(st.def.trigger) ? st.def.trigger[0] : st.def.trigger) || {};
@@ -206,7 +220,9 @@ function o2dGantt(o, r, dispatchYmd) {
   if (dispatchYmd) ds.push(new Date(dispatchYmd + 'T18:00:00'));
   const day = 864e5, d0 = new Date(Math.min(...ds)); d0.setHours(0, 0, 0, 0);
   const d1 = new Date(Math.max(...ds) + day); d1.setHours(23, 59, 0, 0);
-  const W = 1180, L = 250, R = 130, HEAD = 44, RH = 22, H = HEAD + steps.length * RH + 8;
+  // drawn at the real size of the panel (box) so it fills it without scrolling; rows grow or shrink to fit
+  const W = box ? Math.max(700, Math.floor(box.w)) : 1180, L = 250, R = 175, HEAD = 44;
+  const RH = box ? Math.max(16, Math.min(34, Math.floor((box.h - 34 - HEAD - 10) / (steps.length || 1)))) : 22, H = HEAD + steps.length * RH + 8;
   const span = d1 - d0, x = d => L + (W - L - R) * Math.max(0, Math.min(1, (d - d0) / span));
   const days = Math.round(span / day), every = days <= 16 ? 1 : days <= 35 ? 2 : days <= 70 ? 7 : 14;
   let g = '';
@@ -236,5 +252,5 @@ function o2dGantt(o, r, dispatchYmd) {
   if (dispatchYmd) { const dx = x(new Date(dispatchYmd + 'T18:00:00')); g += '<line x1="' + dx + '" x2="' + dx + '" y1="' + (HEAD - 4) + '" y2="' + (H - 8) + '" stroke="#6d4dc4" stroke-width="1.5"/><rect x="' + (dx - 30) + '" y="2" width="60" height="15" rx="7.5" fill="#6d4dc4"/><text x="' + dx + '" y="13" text-anchor="middle" class="gt-tag">Dispatch</text>'; }
   const done = steps.filter(st => st.status === 'Done').length, lateN = steps.filter(st => st.status === 'Late').length;
   return '<div class="gt-wrap"><div class="gt-top"><span><b>' + done + '</b> / ' + steps.length + ' steps done' + (lateN ? ' · <b class="late-txt">' + lateN + ' late</b>' : '') + '</span><span class="gt-leg"><i style="background:#dfe5ee"></i>Planned<i style="background:#13795b"></i>Done on time<i style="background:#d97706"></i>Done late<i style="background:#d03b3b"></i>Late (open)<i class="gt-dia"></i>Due</span></div>' +
-    '<svg class="gt" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="O2D timeline">' + g + '</svg></div>';
+    '<svg class="gt"' + (box ? ' width="' + W + '" height="' + H + '"' : '') + ' viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="O2D timeline">' + g + '</svg></div>';
 }
