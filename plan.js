@@ -145,16 +145,9 @@ function dprTable(list, interactive) {
 }
 function planDetail(p, s) {
   let h = '<div class="pr-detail pl-detail">';
-  // O2D steps: compact step map (no scrolling) — each step a small card coloured by status; details on hover
-  if (s.r) {
-    const steps = s.r.order.map(id => s.r.steps[id]).filter(st => st && st.applies);
-    const done = steps.filter(st => st.status === 'Done').length, late = steps.filter(st => st.status === 'Late').length;
-    const cls = st => st.status === 'Done' ? (st.delayMinutes ? 'o2-done-late' : 'o2-done') : st.status === 'Late' ? 'o2-late' : st.status === 'Pending' ? 'o2-pend' : 'o2-wait';
-    const sub = st => st.status === 'Done' ? '✓ ' + fmtD(st.actual) + (st.delayMinutes ? ' · ' + fmtDelay(Math.round(st.delayMinutes)) + ' late' : '') : st.status === 'Late' ? fmtDelay(Math.round(st.delayMinutes)) + ' late' : st.planned ? 'due ' + fmtD(st.planned) : 'waiting';
-    h += '<div class="pl-sec">O2D · ' + esc(s.o.no) + ' <span class="o2-sum">' + done + ' / ' + steps.length + ' done' + (late ? ' · <b class="late-txt">' + late + ' late</b>' : '') + '</span></div>' +
-      '<div class="o2-bar"><span style="width:' + Math.round(done / (steps.length || 1) * 100) + '%"></span></div>' +
-      '<div class="o2-map">' + steps.map((st, i) => '<div class="o2 ' + cls(st) + '" title="' + esc(st.name + ' · ' + (st.doer || '') + (st.planned ? ' · planned ' + fmtDT(st.planned) : '') + (st.actual ? ' · done ' + fmtDT(st.actual) : '')) + '"><span class="o2-n">' + (i + 1) + '</span><span class="o2-t"><b>' + esc(st.name) + '</b><i>' + esc(st.doer || '') + ' · ' + esc(sub(st)) + '</i></span></div>').join('') + '</div>';
-  } else h += '<div class="muted small">Order not found for O2D tracking.</div>';
+  // O2D steps as a Gantt timeline: grey = planned window, bar = actual (green on time, red late), today + dispatch lines
+  if (s.r) h += '<div class="pl-sec">O2D · ' + esc(s.o.no) + '</div>' + o2dGantt(s.o, s.r, p.dispatch_date);
+  else h += '<div class="muted small">Order not found for O2D tracking.</div>';
   // material
   h += '<div class="pl-sec">Material</div>' + (s.items.length ? '<table class="pr-sz"><tr><th>Item</th><th>Code</th><th>UOM</th><th class="num">Required</th><th class="num">Issued</th><th class="num">Balance</th><th class="num">Stock</th><th>PO (expected)</th><th>Status</th></tr>' +
     s.items.map(x => '<tr><td>' + esc(x.m.name || x.l.material) + '</td><td>' + esc(x.l.material) + '</td><td>' + esc(x.l.uom || x.m.uom || '') + '</td><td class="num">' + qtyFmt(x.rq) + '</td><td class="num">' + qtyFmt(x.is) + '</td><td class="num">' + (x.bal ? '<b>' + qtyFmt(x.bal) + '</b>' : '—') + '</td><td class="num">' + qtyFmt(x.stock) + '</td><td class="nowrap">' + (x.po ? esc(x.po.no) + (x.po.expected ? ' · <span class="' + (x.po.expected < todayYmd() ? 'late-txt' : '') + '">' + fmtD(x.po.expected) + '</span>' : '') : '') + '</td><td><span class="st ' + ({ Issued: 'Done', 'In stock': 'Done', 'PO raised': 'Pending', 'No PO': 'Late' }[x.state]) + '">' + esc(x.state) + '</span></td></tr>').join('') + '</table>' : '<div class="muted small">No BOM on this job card.</div>');
@@ -201,3 +194,47 @@ ACTIONS['pl-print'] = () => {
     '<h1>' + esc(settings().company || 'Nexus 2.0') + ' — Daily Production Report</h1><small>' + fmtDT(nowIso()) + ' · ' + plans.length + ' job card(s)</small>' + dprTable(plans, false) + '</body></html>');
   w.document.close(); setTimeout(() => w.print(), 300);
 };
+
+function o2dGantt(o, r, dispatchYmd) {
+  const steps = r.order.map(id => Object.assign({ def: r.spec.steps.find(x => x.id === id) }, r.steps[id])).filter(st => st && st.applies);
+  const now = new Date(), created = new Date(o.created_at || o.at || now);
+  const t0 = st => { const tr = st.def && (Array.isArray(st.def.trigger) ? st.def.trigger[0] : st.def.trigger) || {};
+    if (tr.type === 'afterStep' && r.steps[tr.step] && r.steps[tr.step].actual) return new Date(r.steps[tr.step].actual);
+    if (tr.type === 'instanceStart') return created; return st.planned ? new Date(st.planned) : null; };
+  steps.forEach(st => { st.start = t0(st); st.pl = st.planned ? new Date(st.planned) : null; st.ac = st.actual ? new Date(st.actual) : null; });
+  const ds = [created, now].concat(...steps.map(st => [st.start, st.pl, st.ac].filter(Boolean)));
+  if (dispatchYmd) ds.push(new Date(dispatchYmd + 'T18:00:00'));
+  const day = 864e5, d0 = new Date(Math.min(...ds)); d0.setHours(0, 0, 0, 0);
+  const d1 = new Date(Math.max(...ds) + day); d1.setHours(23, 59, 0, 0);
+  const W = 1180, L = 250, R = 130, HEAD = 44, RH = 22, H = HEAD + steps.length * RH + 8;
+  const span = d1 - d0, x = d => L + (W - L - R) * Math.max(0, Math.min(1, (d - d0) / span));
+  const days = Math.round(span / day), every = days <= 16 ? 1 : days <= 35 ? 2 : days <= 70 ? 7 : 14;
+  let g = '';
+  for (let d = new Date(d0), k = 0; d <= d1; d = new Date(d.getTime() + day), k++) {
+    const xx = x(d), wk = d.getDay() === 0;
+    if (wk) g += '<rect x="' + xx + '" y="' + HEAD + '" width="' + ((W - L - R) * day / span) + '" height="' + (H - HEAD - 8) + '" fill="#f4f6fa"/>';
+    g += '<line x1="' + xx + '" x2="' + xx + '" y1="' + (HEAD - 6) + '" y2="' + (H - 8) + '" stroke="#eef1f6"/>';
+    if (k % every === 0) g += '<text x="' + (xx + 3) + '" y="' + (HEAD - 10) + '" class="gt-ax">' + d.getDate() + ' ' + MON[d.getMonth()] + '</text>';
+  }
+  steps.forEach((st, i) => {
+    const y = HEAD + i * RH, cy = y + RH / 2;
+    const late = st.status === 'Late' || (st.ac && st.delayMinutes > 0);
+    const col = st.status === 'Done' ? (st.delayMinutes > 0 ? '#d97706' : '#13795b') : st.status === 'Late' ? '#d03b3b' : '#2a78d6';
+    const txt = st.status === 'Done' ? '✓ ' + fmtD(st.ac) + (st.delayMinutes > 0 ? ' · ' + fmtDelay(Math.round(st.delayMinutes)) + ' late' : '') : st.status === 'Late' ? fmtDelay(Math.round(st.delayMinutes)) + ' late' : st.pl ? 'due ' + fmtD(st.pl) : 'waiting';
+    const tip = '<b>' + esc(st.name) + '</b><br>' + esc(st.doer || '') + (st.pl ? '<br>Planned: ' + fmtDT(st.pl) : '') + (st.ac ? '<br>Done: ' + fmtDT(st.ac) : '') + (st.delayMinutes ? '<br>Delay: ' + fmtDelay(Math.round(st.delayMinutes)) : '');
+    g += '<g class="vz-hit" data-tip="' + esc(tip) + '">' + (i % 2 ? '<rect x="0" y="' + y + '" width="' + W + '" height="' + RH + '" fill="#fafbfd"/>' : '<rect x="0" y="' + y + '" width="' + W + '" height="' + RH + '" fill="transparent"/>') +
+      '<text x="8" y="' + (cy + 4) + '" class="gt-name"' + (st.status === 'Waiting' ? ' fill="#98a3b6"' : '') + '>' + esc((st.name.length > 26 ? st.name.slice(0, 25) + '…' : st.name)) + '</text>' +
+      '<text x="' + (L - 8) + '" y="' + (cy + 4) + '" text-anchor="end" class="gt-doer">' + esc(st.doer || '') + '</text>';
+    if (st.start && st.pl) { const a = x(Math.min(st.start, st.pl)), b = x(st.pl); g += '<rect x="' + a + '" y="' + (cy - 6) + '" width="' + Math.max(3, b - a) + '" height="12" rx="3" fill="#dfe5ee"/>'; }
+    const endA = st.ac || (st.status === 'Late' ? now : null);
+    if (st.start && endA) { const a = x(st.start), b = x(endA); g += '<rect x="' + a + '" y="' + (cy - 3.5) + '" width="' + Math.max(4, b - a) + '" height="7" rx="3.5" fill="' + col + '"' + (!st.ac ? ' opacity=".85"' : '') + '/>'; }
+    else if (st.pl && st.status !== 'Done') g += '<path d="M' + x(st.pl) + ',' + (cy - 5) + ' l5,5 l-5,5 l-5,-5 z" fill="' + col + '"/>';
+    g += '<text x="' + (W - R + 10) + '" y="' + (cy + 4) + '" class="gt-st" fill="' + (st.status === 'Waiting' ? '#98a3b6' : late ? '#b42318' : st.status === 'Done' ? '#13795b' : '#33415a') + '">' + esc(txt) + '</text></g>';
+  });
+  // today and planned dispatch markers
+  const tx = x(now); g += '<line x1="' + tx + '" x2="' + tx + '" y1="' + (HEAD - 4) + '" y2="' + (H - 8) + '" stroke="#d03b3b" stroke-width="1.5" stroke-dasharray="4 3"/><rect x="' + (tx - 20) + '" y="2" width="40" height="15" rx="7.5" fill="#d03b3b"/><text x="' + tx + '" y="13" text-anchor="middle" class="gt-tag">Today</text>';
+  if (dispatchYmd) { const dx = x(new Date(dispatchYmd + 'T18:00:00')); g += '<line x1="' + dx + '" x2="' + dx + '" y1="' + (HEAD - 4) + '" y2="' + (H - 8) + '" stroke="#6d4dc4" stroke-width="1.5"/><rect x="' + (dx - 30) + '" y="2" width="60" height="15" rx="7.5" fill="#6d4dc4"/><text x="' + dx + '" y="13" text-anchor="middle" class="gt-tag">Dispatch</text>'; }
+  const done = steps.filter(st => st.status === 'Done').length, lateN = steps.filter(st => st.status === 'Late').length;
+  return '<div class="gt-wrap"><div class="gt-top"><span><b>' + done + '</b> / ' + steps.length + ' steps done' + (lateN ? ' · <b class="late-txt">' + lateN + ' late</b>' : '') + '</span><span class="gt-leg"><i style="background:#dfe5ee"></i>Planned<i style="background:#13795b"></i>Done on time<i style="background:#d97706"></i>Done late<i style="background:#d03b3b"></i>Late (open)<i class="gt-dia"></i>Due</span></div>' +
+    '<svg class="gt" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="O2D timeline">' + g + '</svg></div>';
+}
