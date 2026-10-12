@@ -648,3 +648,18 @@ tr.pr-open > td { background: #f1f6ff; }
 .pr-sz th { background: var(--th-bg); position: static; }
 .pr-sz tr.tot td { background: #f7f9fc; font-weight: 600; border-top: 1px solid var(--line); }
 .pl-sec { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); margin: 14px 0 6px; } .pl-sec:first-child { margin-top: 2px; } .dpr td { white-space: nowrap; }
+/* O2D step map (DPR detail) */
+.o2-sum { font-weight: 600; text-transform: none; letter-spacing: 0; color: var(--muted); margin-left: 6px; }
+.o2-bar { height: 4px; background: #e9eef5; border-radius: 99px; overflow: hidden; margin-bottom: 8px; }
+.o2-bar span { display: block; height: 100%; background: #13795b; }
+.o2-map { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 6px; }
+.o2 { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line); border-left-width: 4px; background: #fff; min-width: 0; }
+.o2-n { flex: none; width: 20px; height: 20px; border-radius: 50%; font-size: 10.5px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; background: #eef2f8; color: var(--muted); }
+.o2-t { display: flex; flex-direction: column; min-width: 0; line-height: 1.3; }
+.o2-t b { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.o2-t i { font-style: normal; font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.o2-done, .o2-done-late { border-left-color: #13795b; } .o2-done .o2-n, .o2-done-late .o2-n { background: #e6f4ee; color: #13795b; } .o2-done-late i { color: #a35d00; }
+.o2-late { border-left-color: #d03b3b; background: #fff7f7; } .o2-late .o2-n { background: #fde8e8; color: #b42318; } .o2-late i { color: #b42318; font-weight: 600; }
+.o2-pend { border-left-color: #fab219; background: #fffbf2; } .o2-pend .o2-n { background: #fdf3e2; color: #a35d00; }
+.o2-wait { border-left-color: #c3cad6; opacity: .75; }
+.pl-detail { max-width: 1300px; }

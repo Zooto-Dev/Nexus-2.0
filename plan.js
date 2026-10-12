@@ -145,10 +145,15 @@ function dprTable(list, interactive) {
 }
 function planDetail(p, s) {
   let h = '<div class="pr-detail pl-detail">';
-  // O2D steps
+  // O2D steps: compact step map (no scrolling) — each step a small card coloured by status; details on hover
   if (s.r) {
-    h += '<div class="pl-sec">O2D tracking · ' + esc(s.o.no) + '</div><table class="pr-sz"><tr><th>#</th><th>Step</th><th>Doer</th><th>Planned</th><th>Actual</th><th>Delay</th><th>Status</th></tr>' +
-      s.r.order.map((id, i) => { const st = s.r.steps[id]; if (!st || !st.applies) return ''; return '<tr><td>' + (i + 1) + '</td><td>' + esc(st.name) + '</td><td>' + esc(st.doer || '') + '</td><td class="nowrap">' + (st.planned ? fmtDT(st.planned) : '') + '</td><td class="nowrap">' + (st.actual ? fmtDT(st.actual) : '') + '</td><td class="nowrap">' + (st.delayMinutes ? '<span class="late-txt">' + fmtDelay(Math.round(st.delayMinutes)) + '</span>' : '') + '</td><td>' + stHtml(st.status === 'Done' ? 'Done' : st.status === 'Late' ? 'Late' : st.status === 'Pending' ? 'Pending' : st.status) + '</td></tr>'; }).join('') + '</table>';
+    const steps = s.r.order.map(id => s.r.steps[id]).filter(st => st && st.applies);
+    const done = steps.filter(st => st.status === 'Done').length, late = steps.filter(st => st.status === 'Late').length;
+    const cls = st => st.status === 'Done' ? (st.delayMinutes ? 'o2-done-late' : 'o2-done') : st.status === 'Late' ? 'o2-late' : st.status === 'Pending' ? 'o2-pend' : 'o2-wait';
+    const sub = st => st.status === 'Done' ? '✓ ' + fmtD(st.actual) + (st.delayMinutes ? ' · ' + fmtDelay(Math.round(st.delayMinutes)) + ' late' : '') : st.status === 'Late' ? fmtDelay(Math.round(st.delayMinutes)) + ' late' : st.planned ? 'due ' + fmtD(st.planned) : 'waiting';
+    h += '<div class="pl-sec">O2D · ' + esc(s.o.no) + ' <span class="o2-sum">' + done + ' / ' + steps.length + ' done' + (late ? ' · <b class="late-txt">' + late + ' late</b>' : '') + '</span></div>' +
+      '<div class="o2-bar"><span style="width:' + Math.round(done / (steps.length || 1) * 100) + '%"></span></div>' +
+      '<div class="o2-map">' + steps.map((st, i) => '<div class="o2 ' + cls(st) + '" title="' + esc(st.name + ' · ' + (st.doer || '') + (st.planned ? ' · planned ' + fmtDT(st.planned) : '') + (st.actual ? ' · done ' + fmtDT(st.actual) : '')) + '"><span class="o2-n">' + (i + 1) + '</span><span class="o2-t"><b>' + esc(st.name) + '</b><i>' + esc(st.doer || '') + ' · ' + esc(sub(st)) + '</i></span></div>').join('') + '</div>';
   } else h += '<div class="muted small">Order not found for O2D tracking.</div>';
   // material
   h += '<div class="pl-sec">Material</div>' + (s.items.length ? '<table class="pr-sz"><tr><th>Item</th><th>Code</th><th>UOM</th><th class="num">Required</th><th class="num">Issued</th><th class="num">Balance</th><th class="num">Stock</th><th>PO (expected)</th><th>Status</th></tr>' +
