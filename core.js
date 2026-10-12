@@ -261,7 +261,7 @@ const DEF_OPTS = {
   packing: ['Assortment', 'Solid'],
   prod_line: ['ASSEMBLY LINE 1', 'ASSEMBLY LINE 2', 'CUTTING', 'PACKING LINE 1', 'STITCHING'],
   process: ['Cutting', 'Stitching', 'Moulding', 'Assembly', 'Finishing', 'Packing'],
-  prod_stage: ['Cutting', 'Stitching', 'Moulding', 'Assembly', 'Finishing', 'QC Passed', 'Packing'],
+  prod_stage: ['Cutting', 'Moulding', 'Closing', 'Packing'],
   picker: []
 };
 function optList(key) {

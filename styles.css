@@ -630,3 +630,20 @@ a.dt[href]:hover { text-decoration: none; border-color: #b9c8e2; box-shadow: 0 4
 .fc-wrap.fc-max .chart-wrap, .fc-wrap:fullscreen .chart-wrap { max-height: none; flex: 1; height: calc(100vh - 48px); }
 .fc-wrap:fullscreen { display: flex; flex-direction: column; border-radius: 0; }
 .fc-end { flex-direction: row; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 12px; } .fc-end select { width: auto; min-width: 220px; }
+
+/* ---------- production report: Actual / Plan cells ---------- */
+.prgrid th .pa-h { display: block; font-size: 10px; font-weight: 600; color: var(--faint); text-transform: none; letter-spacing: 0; }
+.prgrid td { vertical-align: middle; }
+.pa { min-width: 104px; display: flex; flex-direction: column; gap: 4px; }
+.pa-v { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 12px; text-align: center; white-space: nowrap; }
+.pa-v b { color: var(--text); font-size: 13px; } .pa-v i { font-style: normal; margin: 0 4px; color: var(--faint); }
+.pa-bar { height: 5px; border-radius: 99px; background: #e9eef5; overflow: hidden; }
+.pa-bar span { display: block; height: 100%; border-radius: 99px; background: #2a78d6; }
+.pa-done .pa-bar span { background: #13795b; } .pa-done .pa-v b { color: #13795b; }
+.pa-0 .pa-v b { color: var(--faint); font-weight: 600; }
+.pr-cnt { font-size: 11px; color: var(--accent); background: var(--accent-bg); border-radius: 99px; padding: 1px 6px; font-weight: 600; }
+tr.pr-open > td { background: #f1f6ff; }
+.pr-detail { padding: 6px 4px 10px; }
+.pr-sz { width: auto; min-width: 60%; background: #fff; border: 1px solid var(--line); border-radius: 8px; border-collapse: separate; border-spacing: 0; overflow: hidden; }
+.pr-sz th { background: var(--th-bg); position: static; }
+.pr-sz tr.tot td { background: #f7f9fc; font-weight: 600; border-top: 1px solid var(--line); }

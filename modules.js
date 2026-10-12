@@ -1510,7 +1510,7 @@ ACTIONS['req-save'] = () => {
 };
 
 /* ================= PRODUCTION REPORT ================= */
-const PR_UI = { form: false, jc: '', stage: '', qty: {}, remark: '' };
+const PR_UI = { form: false, jc: '', stage: '', qty: {}, remark: '', open: null };
 function prodDone(jc, stage, size) { return Store.all('prod_reports').filter(p => norm(p.jc_no) === norm(jc) && p.stage === stage).reduce((a, p) => a + (p.sizes || []).filter(x => String(x.size) === String(size)).reduce((b, x) => b + num(x.qty), 0), 0); }
 VIEWS.prodreport = {
   mod: 'production', render() {
@@ -1530,9 +1530,33 @@ VIEWS.prodreport = {
         '<label style="margin-top:8px">Remark<textarea id="prRem" rows="2">' + esc(U.remark) + '</textarea></label>' +
         '</div><div class="card-f"><button class="btn primary" data-act="pr-save">Save report</button><span id="prMsg" class="small"></span></div></div>';
     }
-    const rows = Store.all('prod_reports').slice().sort((a, b) => (b.at || '') < (a.at || '') ? -1 : 1);
-    h += '<div class="tbl-wrap"><table class="bomflat"><tr><th>Report No</th><th>Date &amp; Time</th><th>Job Card</th><th>Category</th><th>Brand</th><th>Article</th><th>Colour</th><th>Stage</th><th>Size</th><th class="num">Qty Produced</th><th>Remark</th><th>Reported By</th></tr>' +
-      (rows.length ? rows.map(p => (p.sizes || []).filter(x => num(x.qty) > 0).map((x, i) => '<tr' + (i === 0 ? ' class="bomfirst"' : '') + '><td><b>' + esc(p.no) + '</b></td><td class="nowrap">' + fmtDT(p.at) + '</td><td>' + esc(p.jc_no) + '</td><td>' + esc(p.category || '') + '</td><td>' + esc(p.brand || '') + '</td><td>' + esc(p.article || '') + '</td><td>' + esc(p.colour || '') + '</td><td>' + esc(p.stage) + '</td><td>' + esc(x.size) + '</td><td class="num">' + qtyFmt(x.qty) + '</td><td>' + esc(p.remark || '') + '</td><td>' + esc(p.by) + '</td></tr>').join('')).join('') : '<tr><td colspan="12" class="empty">No production reports yet</td></tr>') + '</table></div>';
+    // one line per job card: every stage shows Actual / Plan (plan = job card qty); click a line for the size-wise view
+    const reps = Store.all('prod_reports');
+    const stages = optList('prod_stage').concat(Array.from(new Set(reps.map(p => p.stage))).filter(x => x && !optList('prod_stage').includes(x)));
+    const jcs = Store.all('job_cards').filter(j => j.status !== 'Closed' || reps.some(p => norm(p.jc_no) === norm(j.no)));
+    const list = jcs.map(j => { const rs = reps.filter(p => norm(p.jc_no) === norm(j.no)).sort((a, b) => (b.at || '') < (a.at || '') ? -1 : 1); return { j, rs, last: rs[0] || null }; })
+      .sort((a, b) => ((b.last && b.last.at) || '') < ((a.last && a.last.at) || '') ? -1 : ((b.last && b.last.at) || '') > ((a.last && a.last.at) || '') ? 1 : String(b.j.no).localeCompare(String(a.j.no)));
+    const plan = j => (j.sizes || []).reduce((a, z) => a + num(z.act), 0) || num(j.qty);
+    const done = (rs, st, size) => rs.filter(p => p.stage === st).reduce((a, p) => a + (p.sizes || []).filter(x => size == null || String(x.size) === String(size)).reduce((b, x) => b + num(x.qty), 0), 0);
+    const pa = (act, pl) => { const pct = pl ? Math.min(100, Math.round(act / pl * 100)) : 0; const cls = act <= 0 ? 'pa-0' : act >= pl ? 'pa-done' : 'pa-part';
+      return '<div class="pa ' + cls + '"><span class="pa-v"><b>' + qtyFmt(act) + '</b><i>/</i>' + qtyFmt(pl) + '</span><span class="pa-bar"><span style="width:' + pct + '%"></span></span></div>'; };
+    h += '<div class="tbl-wrap"><table class="prgrid"><tr><th>Report No</th><th>Date &amp; Time</th><th>Job Card</th><th>Category</th><th>Brand</th><th>Article</th><th>Colour</th><th class="num">Order Qty</th>' + stages.map(st => '<th class="c">' + esc(st) + '<span class="pa-h">Actual / Plan</span></th>').join('') + '</tr>' +
+      (list.length ? list.map(x => {
+        const j = x.j, pl = plan(j), open = PR_UI.open === j.id;
+        let row = '<tr class="click' + (open ? ' pr-open' : '') + '" data-act="pr-toggle" data-id="' + esc(j.id) + '"><td><b>' + esc(x.last ? x.last.no : '—') + '</b>' + (x.rs.length > 1 ? ' <span class="pr-cnt">+' + (x.rs.length - 1) + '</span>' : '') + '</td><td class="nowrap">' + (x.last ? fmtDT(x.last.at) : '') + '</td><td><b>' + esc(j.no) + '</b></td><td>' + esc(j.category || '') + '</td><td>' + esc(j.brand || '') + '</td><td>' + esc(j.article || '') + '</td><td>' + esc(j.colour || '') + '</td><td class="num">' + qtyFmt(pl) + '</td>' +
+          stages.map(st => '<td>' + pa(done(x.rs, st), pl) + '</td>').join('') + '</tr>';
+        if (open) {
+          const sizes = (j.sizes || []).length ? j.sizes : [{ size: '—', act: pl }];
+          row += '<tr class="inline-form"><td colspan="' + (8 + stages.length) + '"><div class="pr-detail">' +
+            '<table class="pr-sz"><tr><th>Size</th><th class="num">Order Qty</th>' + stages.map(st => '<th class="c">' + esc(st) + '</th>').join('') + '</tr>' +
+            sizes.map(z => '<tr><td><b>' + esc(z.size) + '</b></td><td class="num">' + qtyFmt(num(z.act)) + '</td>' + stages.map(st => '<td>' + pa(done(x.rs, st, (j.sizes || []).length ? z.size : null), num(z.act)) + '</td>').join('') + '</tr>').join('') +
+            '<tr class="tot"><td>Total</td><td class="num">' + qtyFmt(pl) + '</td>' + stages.map(st => '<td>' + pa(done(x.rs, st), pl) + '</td>').join('') + '</tr></table>' +
+            (x.rs.length ? '<table class="pr-sz" style="margin-top:12px"><tr><th>Report No</th><th>Date &amp; Time</th><th>Stage</th><th>Size-wise Qty</th><th class="num">Total</th><th>Remark</th><th>Reported By</th></tr>' +
+              x.rs.map(p => '<tr><td><b>' + esc(p.no) + '</b></td><td class="nowrap">' + fmtDT(p.at) + '</td><td>' + esc(p.stage) + '</td><td>' + (p.sizes || []).filter(s2 => num(s2.qty) > 0).map(s2 => esc(s2.size) + ': <b>' + qtyFmt(s2.qty) + '</b>').join(' · ') + '</td><td class="num"><b>' + qtyFmt(p.total || (p.sizes || []).reduce((a, s2) => a + num(s2.qty), 0)) + '</b></td><td>' + esc(p.remark || '') + '</td><td>' + esc(p.by || '') + '</td></tr>').join('') + '</table>' : '<div class="muted small" style="margin-top:8px">No production reported yet</div>') +
+            '</div></td></tr>';
+        }
+        return row;
+      }).join('') : '<tr><td colspan="' + (8 + stages.length) + '" class="empty">No job cards</td></tr>') + '</table></div>';
     const m = setMain(h);
     m.addEventListener('change', e => {
       const t = e.target;
@@ -1545,6 +1569,7 @@ VIEWS.prodreport = {
     });
   }
 };
+ACTIONS['pr-toggle'] = (el, ev) => { if (ev && ev.target.closest('button,a,input,select')) return; PR_UI.open = PR_UI.open === el.dataset.id ? null : el.dataset.id; VIEWS.prodreport.render(); };
 ACTIONS['pr-new'] = () => { Object.assign(PR_UI, { form: !PR_UI.form, jc: '', stage: '', qty: {}, remark: '' }); VIEWS.prodreport.render(); };
 ACTIONS['pr-save'] = () => {
   if (!requirePerm('production', 'edit')) return;
