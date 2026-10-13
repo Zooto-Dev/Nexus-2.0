@@ -544,10 +544,13 @@ const IC_DEFAULT_TYPES = [
   ['Consumable Item', 'ADHESIVE', 'MATERIAL, PACK SIZE', 'LTR', '3506'], ['Consumable Item', 'PRIMER', 'MATERIAL, PACK SIZE', 'LTR', '3208'], ['Consumable Item', 'HARDENER', 'PACK SIZE', 'LTR', '3208'],
   ['Silicon', 'SILICON LABEL', 'COLOUR, PRINT', 'PCS', '3926']
 ];
+// adds only what is missing — never replaces an attribute or item type that already exists (renamed or edited ones included)
 function icSeedDefaults() {
-  Object.keys(IC_DEFAULT_ATTRS).forEach(cat => IC_DEFAULT_ATTRS[cat].forEach(([n, v], i) =>
-    Store.put('attributes', { id: 'ca_' + icSlug(cat) + '_' + icSlug(n), category: cat, name: n, seq: i + 1, values: v.split(',').map(x => x.trim()) })));
-  IC_DEFAULT_TYPES.forEach(r => Store.put('item_types', { id: 'it_' + icSlug(r[0] + '_' + r[1]), category: r[0], name: r[1], attrs: r[2].split(',').map(x => x.trim()), uom: r[3], hsn: r[4], gst: r[0] === 'Fabric' || r[0] === 'Packaging' ? 12 : 18 }));
+  const has = (col, id, cat, name) => Store.get(col, id) || Store.all(col).some(x => norm(x.category) === norm(cat) && norm(x.name) === norm(name));
+  Object.keys(IC_DEFAULT_ATTRS).forEach(cat => IC_DEFAULT_ATTRS[cat].forEach(([n, v], i) => {
+    const id = 'ca_' + icSlug(cat) + '_' + icSlug(n); if (has('attributes', id, cat, n)) return;
+    Store.put('attributes', { id, category: cat, name: n, seq: i + 1, values: v.split(',').map(x => x.trim()) }); }));
+  IC_DEFAULT_TYPES.filter(r => !has('item_types', 'it_' + icSlug(r[0] + '_' + r[1]), r[0], r[1])).forEach(r => Store.put('item_types', { id: 'it_' + icSlug(r[0] + '_' + r[1]), category: r[0], name: r[1], attrs: r[2].split(',').map(x => x.trim()), uom: r[3], hsn: r[4], gst: r[0] === 'Fabric' || r[0] === 'Packaging' ? 12 : 18 }));
 }
 // called from migrateDb on every login; fixed ids keep two browsers seeding at once consistent
 function seedItemMasters() {

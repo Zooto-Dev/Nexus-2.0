@@ -147,9 +147,11 @@ const Store = {
   setSettings(s) { s.id = 'main'; changeLog('settings', s, false); DB.settings = s; s.updated_at = nowIso(); s.updated_by = ME ? ME.name : 'System'; this.persist('settings', s); RES_CACHE.clear(); },
   persist(col, doc, isDelete) {
     saveLocal();
-    if (CLOUD && SB) cloudWrite(col, doc, isDelete);
+    // cloud: write only after the full cloud data has loaded in this session — never push the built-in demo data
+    if (CLOUD && SB) { if (CLOUD_OK) cloudWrite(col, doc, isDelete); else console.warn('Cloud write blocked (data not loaded):', col, doc.id); }
   },
   loadLocal() {
+    if (CLOUD) { localStorage.removeItem(DB_KEY); DB = seedData(true); COLS.forEach(c => { DB[c] = []; }); snapAll(); return; }   // nothing usable until cloudLoad
     try { DB = JSON.parse(localStorage.getItem(DB_KEY) || 'null'); } catch (e) { DB = null; }
     if (!DB || !DB.settings) { DB = seedData(); saveLocal(); }
     COLS.forEach(c => { if (!DB[c]) DB[c] = []; });
@@ -160,6 +162,7 @@ const Store = {
 /* ---- cloud (Supabase): one generic table nx_docs(collection, id, data) ---- */
 let pendingWrites = 0;
 let REAUTH = false;
+let CLOUD_OK = false;   // true only once every page of the cloud data has loaded
 async function reauth() {
   if (REAUTH) return; REAUTH = true;
   try { const { data } = await SB.auth.refreshSession(); if (data && data.session) { REAUTH = false; return; } } catch (e) { }
@@ -203,6 +206,7 @@ function retryNow() {
 setInterval(retryNow, 20000);
 window.addEventListener('beforeunload', ev => { if (CLOUD && (pendingWrites > 0 || RETRY_Q.size)) { ev.preventDefault(); ev.returnValue = ''; } });
 async function cloudLoad() {
+  CLOUD_OK = false;
   const out = { settings: null }; COLS.forEach(c => out[c] = []);
   let from = 0; const page = 1000;
   for (;;) {
@@ -213,10 +217,13 @@ async function cloudLoad() {
   }
   if (!out.settings) {                      // empty project → seed masters (no demo orders) and push
     const seed = seedData(true);
-    DB = seed; saveLocal();
+    DB = seed; saveLocal(); CLOUD_OK = true;
     await SB.from('nx_docs').upsert([{ collection: 'settings', id: 'main', data: seed.settings }]
       .concat(COLS.flatMap(c => seed[c].map(d => ({ collection: c, id: d.id, data: d })))));
-  } else { DB = out; saveLocal(); }
+  } else {
+    if (!out.users.length) throw new Error('No users came back from the cloud. Check the internet and try again.');
+    DB = out; saveLocal(); CLOUD_OK = true;
+  }
   snapAll();
   SB.channel('nx_docs').on('postgres_changes', { event: '*', schema: 'public', table: 'nx_docs' }, p => {
     const r = p.new && p.new.collection ? p.new : p.old; if (!r || !r.collection) return;
@@ -687,7 +694,8 @@ async function doLogin(email, pin) {
     await cloudLoad();
   }
   let u = Store.all('users').find(x => norm(x.email) === email);
-  if (CLOUD && !u && Store.all('users').every(x => x.seed)) {           // first cloud login becomes the admin
+  if (CLOUD && !CLOUD_OK) throw new Error('Data did not load from the cloud. Check the internet and try again.');
+  if (CLOUD && !u && Store.all('users').length && Store.all('users').every(x => x.seed)) {           // first cloud login becomes the admin
     u = Store.all('users').find(x => x.seed && x.role_id === 'r_admin');
     u.email = email; u.seed = false; Store.put('users', u);
   }
@@ -723,7 +731,14 @@ function migrateDb() {
   Store.all('customers').forEach(c => { if (!c.code) { cMax += 1; c.code = 'B' + String(cMax).padStart(3, '0'); Store.put('customers', c); } });
   if (typeof seedItemMasters === 'function') seedItemMasters();
 }
+// cloud data did not load: stop here (never run on the built-in demo data) and offer Retry
+function loadFailed(e) {
+  const l = $('#login'); l.classList.remove('hidden');
+  $('#loginMsg').innerHTML = '<span class="lg-err">Data did not load from the cloud (' + esc((e && e.message) || e) + '). Check the internet.</span> <button type="button" class="btn sm primary" onclick="location.reload()">Retry</button>';
+  $('#loginForm').style.display = 'none';
+}
 function startApp(u) {
+  if (CLOUD && !CLOUD_OK) { loadFailed(new Error('not loaded')); return; }
   ME = u; localStorage.setItem('nexus2_me', u.id);
   $('#login').classList.add('hidden'); $('#app').classList.remove('hidden');
   const r = myRole();
@@ -738,8 +753,8 @@ async function boot() {
   $('#loginMsg').innerHTML = CLOUD ? '' : 'Local mode — demo login: <b>admin@nexus.local</b> / PIN <b>1234</b>';
   const saved = localStorage.getItem('nexus2_me');
   if (saved) {
-    if (CLOUD) { const { data } = await SB.auth.getSession(); if (data && data.session) { try { await cloudLoad(); } catch (e) { flash('Cloud load failed: ' + esc(e.message), 'err'); } } else localStorage.removeItem('nexus2_me'); }
-    const u = Store.get('users', localStorage.getItem('nexus2_me'));
+    if (CLOUD) { const { data } = await SB.auth.getSession(); if (data && data.session) { try { await cloudLoad(); } catch (e) { loadFailed(e); return; } } else localStorage.removeItem('nexus2_me'); }
+    const u = (!CLOUD || CLOUD_OK) && Store.get('users', localStorage.getItem('nexus2_me'));
     if (u && u.active !== false) return startApp(u);
   }
   $('#login').classList.remove('hidden');
