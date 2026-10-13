@@ -142,32 +142,107 @@ function dprTable(list, interactive) {
       return row;
     }).join('') : '<tr><td colspan="' + cols + '" class="empty">No plans yet</td></tr>') + '</table>';
 }
-// complete tracking of one job card in a full-screen panel that fits the screen (no scrolling):
-// left the O2D timeline, right the material and the plan
-function planDetail(p, s) {
-  const stCls = { Issued: 'Done', 'In stock': 'Done', 'PO raised': 'Pending', 'No PO': 'Late' };
-  const mat = s.items.length ? '<table class="plm-t"><tr><th>Item</th><th class="num">Balance / Req</th><th>Status</th></tr>' +
-    s.items.map(x => '<tr><td><b>' + esc(x.m.name || x.l.material) + '</b><div class="small muted">' + esc(x.l.material) + ' · stock ' + qtyFmt(x.stock) + ' ' + esc(x.l.uom || x.m.uom || '') + '</div></td><td class="num nowrap">' + (x.bal ? '<b>' + qtyFmt(x.bal) + '</b>' : '<b class="ok-txt">0</b>') + ' / ' + qtyFmt(x.rq) + '</td><td><span class="st ' + stCls[x.state] + '">' + esc(x.state) + '</span>' + (x.po && x.bal ? '<div class="small nowrap">' + esc(x.po.no.split('/').pop()) + ' · <span class="' + (x.po.expected && x.po.expected < todayYmd() ? 'late-txt' : 'muted') + '">' + (x.po.expected ? fmtD(x.po.expected) : '') + '</span></div>' : '') + '</td></tr>').join('') + '</table>' : '<div class="muted small">No BOM on this job card.</div>';
-  const hist = (p.history || []).slice().reverse().map(x => '<div class="plm-h"><b>' + fmtD(x.old) + ' → ' + fmtD(x.new) + '</b><span>' + esc(x.reason) + '</span><i>' + esc(x.by) + ' · ' + fmtDT(x.at) + '</i></div>').join('');
+// complete tracking of one job card in a full-screen panel that fits the screen — four views of the same data:
+// Journey (order-tracking line), Departments (board), Summary (numbers + table), Timeline (Gantt)
+const PLV = [['journey', 'Journey'], ['dept', 'Departments'], ['summary', 'Summary'], ['timeline', 'Timeline']];
+function plView() { try { const v = localStorage.getItem('nx_pl_view'); if (PLV.some(x => x[0] === v)) return v; } catch (e) { } return 'journey'; }
+function plSteps(s) {
+  if (!s.r) return [];
+  const dept = n => { const u = Store.all('users').find(x => x.doer && norm(x.doer) === norm(n)); const d = (u && u.department) || (norm(n) === 'system' ? 'Dispatch' : 'Other'); return String(d).toLowerCase().replace(/\b\w/g, c => c.toUpperCase()); };
+  return s.r.order.map(id => s.r.steps[id]).filter(st => st && st.applies).map((st, i) => Object.assign({}, st, { n: i + 1, dept: dept(st.doer || '') }));
+}
+const plStepTxt = st => st.status === 'Done' ? '✓ ' + fmtD(st.actual) + (st.delayMinutes > 0 ? ' · ' + fmtDelay(Math.round(st.delayMinutes)) + ' late' : '') : st.status === 'Late' ? fmtDelay(Math.round(st.delayMinutes)) + ' late' : st.planned ? 'due ' + fmtD(st.planned) : 'waiting';
+const plStCls = st => st.status === 'Done' ? 'd' : st.status === 'Late' ? 'l' : st.status === 'Pending' ? 'p' : 'w';
+const MST = { Issued: 'Done', 'In stock': 'Done', 'PO raised': 'Pending', 'No PO': 'Late' };
+function plMatRows(s, compact) {
+  if (!s.items.length) return '<div class="muted small">No BOM on this job card.</div>';
+  return s.items.map(x => '<div class="pv-row' + (x.state === 'No PO' ? ' lt' : '') + '"><div><b>' + esc(x.m.name || x.l.material) + '</b><i>' + (x.bal ? qtyFmt(x.bal) + ' of ' + qtyFmt(x.rq) + ' balance' : 'fully issued') + (compact ? '' : ' · stock ' + qtyFmt(x.stock)) + '</i></div>' +
+    '<span class="st ' + MST[x.state] + '">' + (x.po && x.bal && x.state === 'PO raised' ? 'PO · ' + (x.po.expected ? fmtD(x.po.expected).replace(/ \d{4}$/, '') : '') : esc(x.state)) + '</span></div>').join('');
+}
+function plProdBars(s) {
+  return s.prod.map(x => { const pct = s.qty ? Math.min(100, Math.round(x.done / s.qty * 100)) : 0; return '<div class="pv-bar"><span>' + esc(x.stage) + '</span><b>' + qtyFmt(x.done) + ' / ' + qtyFmt(s.qty) + '</b><div><i style="width:' + pct + '%"></i></div></div>'; }).join('') +
+    '<div class="pv-bar"><span>Dispatched</span><b>' + qtyFmt(s.disp) + ' / ' + qtyFmt(s.qty) + '</b><div><i class="g" style="width:' + (s.qty ? Math.min(100, Math.round(s.disp / s.qty * 100)) : 0) + '%"></i></div></div>';
+}
+function plPlanTxt(p) {
+  return '<div class="small">Dispatch <b>' + fmtD(p.dispatch_date) + '</b> · by ' + esc(p.by || '') + ' · ' + fmtDT(p.at) + (p.remark ? '<br>' + esc(p.remark) : '') + '</div>' +
+    (p.history || []).slice().reverse().map(x => '<div class="plm-h"><b>' + fmtD(x.old) + ' → ' + fmtD(x.new) + '</b><span>' + esc(x.reason) + '</span><i>' + esc(x.by) + ' · ' + fmtDT(x.at) + '</i></div>').join('');
+}
+function plGroups(steps) { const groups = []; steps.forEach(st => { let g = groups.find(x => x.d === st.dept); if (!g) groups.push(g = { d: st.dept, list: [] }); g.list.push(st); }); return groups; }
+// 1) Journey: milestones (order → each department → material → production → dispatch) + what is stuck / next
+function plJourney(p, s) {
+  const steps = plSteps(s); const all = plGroups(steps); const groups = all.filter(g => !/^dispatch$/i.test(g.d)); const dg = all.find(g => /^dispatch$/i.test(g.d));
+  const ms = [{ t: 'Order Received', c: 'ok', sub: fmtD((s.o || {}).order_date || (s.o || {}).created_at) }];
+  groups.forEach(g => {
+    const late = g.list.find(x => x.status === 'Late'), cur = g.list.find(x => x.status === 'Pending'), done = g.list.filter(x => x.status === 'Done');
+    ms.push(done.length === g.list.length ? { t: g.d, c: 'ok', sub: done.length + ' of ' + g.list.length + ' · ' + fmtD(done.map(x => x.actual).sort().pop()) }
+      : late ? { t: g.d, c: 'late', sub: late.name + ' · ' + fmtDelay(Math.round(late.delayMinutes)) + ' late' }
+      : cur ? { t: g.d, c: 'now', sub: cur.name + ' · due ' + fmtD(cur.planned) }
+      : { t: g.d, c: 'wait', sub: done.length + ' of ' + g.list.length + ' done' });
+  });
+  const open = s.items.filter(x => x.bal > 1e-9);
+  ms.push(!s.items.length ? { t: 'Material', c: 'wait', sub: 'No BOM' } : !open.length ? { t: 'Material', c: 'ok', sub: 'All issued' } : s.noPo ? { t: 'Material', c: 'late', sub: s.noPo + ' item(s) no PO' } : { t: 'Material', c: open.every(x => x.state === 'In stock') ? 'now' : 'wait', sub: open.every(x => x.state === 'In stock') ? 'In stock · to issue' : 'Awaited on PO' });
+  const pk = s.prod.length ? s.prod[s.prod.length - 1].done : 0, ct = s.prod.length ? s.prod[0].done : 0;
+  ms.push(pk >= s.qty && s.qty ? { t: 'Packing', c: 'ok', sub: 'Packed ' + qtyFmt(pk) } : ct > 0 ? { t: 'Packing', c: 'now', sub: 'Packed ' + qtyFmt(pk) + ' / ' + qtyFmt(s.qty) } : { t: 'Packing', c: 'wait', sub: '0 / ' + qtyFmt(s.qty) });
+  const dLate = dg && dg.list.find(x => x.status === 'Late');
+  ms.push(s.overall === 'Dispatched' ? { t: 'Dispatch', c: 'ok', sub: 'Dispatched' } : dLate ? { t: 'Dispatch', c: 'late', sub: dLate.name + ' · ' + fmtDelay(Math.round(dLate.delayMinutes)) + ' late' } : { t: 'Dispatch', c: s.days < 0 ? 'late' : 'wait', sub: 'Plan ' + fmtD(p.dispatch_date) + (s.days < 0 ? ' · ' + (-s.days) + 'd late' : '') });
+  const lastOk = ms.reduce((a, m, i) => m.c === 'ok' ? i : a, 0);
+  const late = steps.filter(x => x.status === 'Late').sort((a, b) => b.delayMinutes - a.delayMinutes);
+  const next = steps.filter(x => x.status === 'Pending').sort((a, b) => a.planned - b.planned).concat(steps.filter(x => x.status === 'Waiting')).slice(0, Math.max(2, 5 - late.length));
+  return '<div class="pv-trk"><div class="pv-line"><span class="pv-fill" style="width:calc((100% - 120px) * ' + (ms.length > 1 ? (lastOk / (ms.length - 1)).toFixed(3) : 0) + ')"></span>' +
+    ms.map((m, i) => '<div class="pv-ms ' + m.c + '"><div class="pv-dot">' + (m.c === 'ok' ? '✓' : m.c === 'late' ? '!' : i + 1) + '</div><b>' + esc(m.t) + '</b><i>' + esc(m.sub) + '</i></div>').join('') + '</div></div>' +
+    '<div class="pv-grid3"><div class="pv-card"><h4>Atka hua · ' + late.length + ' late</h4>' + (late.length ? late.map(x => '<div class="pv-row lt"><div><b>' + esc(x.name) + '</b><i>' + esc(x.doer || '') + '</i></div><span class="late-txt"><b>' + fmtDelay(Math.round(x.delayMinutes)) + ' late</b></span></div>').join('') : '<div class="pv-ok">Nothing is late</div>') +
+    '<h4>Aage kya hai</h4>' + (next.length ? next.map(x => '<div class="pv-row"><div><b>' + esc(x.name) + '</b><i>' + esc(x.doer || '') + '</i></div><span class="muted small">' + (x.planned ? 'due ' + fmtD(x.planned) : 'waiting') + '</span></div>').join('') : '<div class="muted small">All steps done</div>') + '</div>' +
+    '<div class="pv-card"><h4>Material · ' + s.items.filter(x => x.bal <= 1e-9).length + ' / ' + s.items.length + ' issued</h4>' + plMatRows(s) + '</div>' +
+    '<div class="pv-card"><h4>Production</h4>' + plProdBars(s) + '<h4>Plan</h4>' + plPlanTxt(p) + '</div></div>';
+}
+// 2) Departments: one column per department, its steps as a checklist
+function plDepts(p, s) {
+  const groups = plGroups(plSteps(s));
+  return '<div class="pv-cols" style="grid-template-columns:repeat(' + Math.max(1, groups.length) + ',minmax(0,1fr))">' + groups.map(g => {
+    const done = g.list.filter(x => x.status === 'Done').length, late = g.list.filter(x => x.status === 'Late').length;
+    return '<div class="pv-col"><div class="pv-ch"><b>' + esc(g.d) + '</b> <span class="muted small">' + done + ' / ' + g.list.length + (late ? ' · <span class="late-txt">' + late + ' late</span>' : '') + '</span><div class="pv-p"><span style="width:' + Math.round(done / g.list.length * 100) + '%"></span></div></div>' +
+      '<div class="pv-cl">' + g.list.map(x => '<div class="pv-st ' + plStCls(x) + '" title="' + esc((x.planned ? 'Planned ' + fmtDT(x.planned) : '') + (x.actual ? ' · Done ' + fmtDT(x.actual) : '')) + '"><span class="pv-ic">' + (x.status === 'Done' ? '✓' : x.status === 'Late' ? '!' : '') + '</span><div><b>' + esc(x.name) + '</b><i>' + esc((x.doer || '') + ' · ' + plStepTxt(x)) + '</i></div></div>').join('') + '</div></div>';
+  }).join('') + '</div>' +
+    '<div class="pv-foot"><div class="pv-card"><h4>Material · ' + s.items.filter(x => x.bal <= 1e-9).length + ' / ' + s.items.length + ' issued</h4><div class="pv-mat2">' + plMatRows(s, true) + '</div></div><div class="pv-card"><h4>Production</h4><div class="pv-prod2">' + plProdBars(s) + '</div></div></div>';
+}
+// 3) Summary: progress ring, key numbers, step table (late and current first) + material + production
+function plSummary(p, s) {
+  const steps = plSteps(s); const done = steps.filter(x => x.status === 'Done').length; const pct = steps.length ? Math.round(done / steps.length * 100) : 0;
+  const late = steps.filter(x => x.status === 'Late').length, aw = s.items.filter(x => x.bal > 1e-9 && x.state !== 'In stock').length;
+  const pk = s.prod.length ? s.prod[s.prod.length - 1].done : 0;
+  const rank = { l: 0, p: 1, d: 2, w: 3 };
+  const order = steps.slice().sort((a, b) => (rank[plStCls(a)] - rank[plStCls(b)]) || a.n - b.n);
+  const ring = '<svg width="110" height="110" viewBox="0 0 36 36"><circle cx="18" cy="18" r="15.9" fill="none" stroke="#e3e8f1" stroke-width="3.2"/><circle cx="18" cy="18" r="15.9" fill="none" stroke="#13795b" stroke-width="3.2" stroke-dasharray="' + pct + ' ' + (100 - pct) + '" stroke-dashoffset="25" stroke-linecap="round"/><text x="18" y="18" text-anchor="middle" font-size="7.5" font-weight="800" fill="#142033">' + pct + '%</text><text x="18" y="23.5" text-anchor="middle" font-size="3.2" fill="#6b7482">' + done + ' of ' + steps.length + ' steps</text></svg>';
+  const kp = (v, l, t) => '<div class="pv-k ' + t + '"><b>' + v + '</b><span>' + l + '</span></div>';
+  return '<div class="pv-top"><div class="pv-ring">' + ring + '<div><b class="pv-big">' + (s.overall === 'Dispatched' ? 'Dispatched' : s.days < 0 ? (-s.days) + ' days late' : s.days + ' days left') + '</b><div class="small muted">to planned dispatch</div><div class="pv-mini">' + steps.map(x => '<span class="' + plStCls(x) + '" title="' + esc(x.name) + '"></span>').join('') + '</div></div></div>' +
+    '<div class="pv-kps">' + kp(late, 'steps late now', late ? 'r' : 'g') + kp(aw, 'materials awaited' + (s.noPo ? ' (' + s.noPo + ' no PO)' : ''), s.noPo ? 'r' : aw ? 'a' : 'g') + kp(s.items.filter(x => x.bal <= 1e-9).length + ' / ' + s.items.length, 'materials issued', 'b') + kp(qtyFmt(pk) + ' / ' + qtyFmt(s.qty), 'packed', pk >= s.qty && s.qty ? 'g' : 'b') + '</div></div>' +
+    '<div class="pv-grid2"><div class="pv-card"><h4>O2D steps</h4><table class="plm-t"><tr><th>#</th><th>Step</th><th>Doer</th><th>Planned</th><th>Status</th></tr>' +
+    order.map(x => '<tr><td>' + x.n + '</td><td>' + esc(x.name) + '</td><td>' + esc(x.doer || '') + '</td><td class="nowrap">' + (x.planned ? fmtD(x.planned) : '—') + '</td><td><span class="st ' + { d: 'Done', l: 'Late', p: 'Pending', w: 'NA' }[plStCls(x)] + '">' + esc(plStepTxt(x)) + '</span></td></tr>').join('') + '</table></div>' +
+    '<div class="pv-card"><h4>Material</h4><table class="plm-t"><tr><th>Item</th><th class="num">Balance</th><th class="num">Stock</th><th>Status</th></tr>' + s.items.map(x => '<tr><td>' + esc(x.m.name || x.l.material) + '</td><td class="num"><b>' + qtyFmt(x.bal) + '</b> / ' + qtyFmt(x.rq) + '</td><td class="num">' + qtyFmt(x.stock) + '</td><td><span class="st ' + MST[x.state] + '">' + (x.po && x.bal && x.state === 'PO raised' ? esc(x.po.no.split('/').pop()) + ' · ' + (x.po.expected ? fmtD(x.po.expected) : '') : esc(x.state)) + '</span></td></tr>').join('') + '</table>' +
+    '<h4>Production</h4><table class="plm-t"><tr>' + s.prod.map(x => '<th>' + esc(x.stage) + '</th>').join('') + '<th>Dispatched</th></tr><tr>' + s.prod.map(x => '<td>' + qtyFmt(x.done) + ' / ' + qtyFmt(s.qty) + '</td>').join('') + '<td>' + qtyFmt(s.disp) + ' / ' + qtyFmt(s.qty) + '</td></tr></table>' +
+    '<h4>Plan</h4>' + plPlanTxt(p) + '</div></div>';
+}
+function planDetail(p, s, view) {
   const dd = s.overall === 'Dispatched' ? 'Dispatched' : s.days < 0 ? (-s.days) + ' days late' : s.days === 0 ? 'Due today' : s.days + ' days left';
   return '<div class="plm"><div class="plm-hd"><div><span class="plm-jc">' + esc(p.jc_no) + '</span><span class="plm-meta">' + esc([p.customer, p.article, p.colour].filter(Boolean).join(' · ')) + ' · ' + qtyFmt(s.qty) + ' pairs · Order ' + esc(p.order_no || '') + '</span></div>' +
+    '<div class="seg plm-tabs">' + PLV.map(([k, l]) => '<button type="button" data-act="pl-view" data-v="' + k + '" class="' + (k === view ? 'on' : '') + '">' + l + '</button>').join('') + '</div>' +
     '<div class="plm-r"><span class="plm-dd">Dispatch <b>' + fmtD(p.dispatch_date) + '</b> · ' + dd + '</span><span class="st ' + OVR_CLS[s.overall] + '">' + esc(s.overall) + '</span>' +
     (can('production', 'edit') && s.overall !== 'Dispatched' ? '<button class="btn sm" data-act="pl-revise" data-id="' + esc(p.id) + '">Revise date</button>' : '') + '<button class="btn sm ghost" data-act="pl-close">✕</button></div></div>' +
-    '<div class="plm-b"><div class="plm-g">' + (s.r ? o2dGantt(s.o, s.r, p.dispatch_date) : '<div class="muted">Order not found for O2D tracking.</div>') + '</div>' +
-    '<div class="plm-side"><div class="pl-sec">Material · ' + s.items.filter(x => x.bal <= 1e-9).length + ' / ' + s.items.length + ' issued</div>' + mat +
-    '<div class="pl-sec">Plan</div><div class="small">By ' + esc(p.by || '') + ' · ' + fmtDT(p.at) + (p.remark ? '<br>' + esc(p.remark) : '') + '</div>' + hist + '</div></div></div>';
+    '<div class="plm-body">' + (view === 'dept' ? plDepts(p, s) : view === 'summary' ? plSummary(p, s) : view === 'timeline' ? '<div class="plm-b"><div class="plm-g"></div><div class="plm-side"><div class="pl-sec">Material</div>' + plMatRows(s) + '<div class="pl-sec">Plan</div>' + plPlanTxt(p) + '</div></div>' : plJourney(p, s)) + '</div></div>';
 }
 function planModal() {
   const old = $('#plModal'); if (old) old.remove();
   const p = PL_UI.open && Store.get('prod_plans', PL_UI.open); if (!p || !jcBy(p.jc_no)) { PL_UI.open = null; return; }
+  const s = planStatus(p), view = plView();
   const d = document.createElement('div'); d.id = 'plModal'; d.className = 'dlg-back plm-back';
-  d.innerHTML = planDetail(p, planStatus(p));
+  d.innerHTML = planDetail(p, s, view);
   d.addEventListener('click', e => { if (e.target === d) ACTIONS['pl-close'](); });
   document.body.appendChild(d);
-  // redraw the timeline at the panel's real size
-  const g = $('.plm-g', d), s = planStatus(p);
-  if (g && s.r) g.innerHTML = o2dGantt(s.o, s.r, p.dispatch_date, { w: g.clientWidth - 24, h: g.clientHeight - 20 });
+  // the timeline is drawn at the panel's real size
+  const g = $('.plm-g', d);
+  if (g) g.innerHTML = s.r ? o2dGantt(s.o, s.r, p.dispatch_date, { w: g.clientWidth - 24, h: g.clientHeight - 20 }) : '<div class="muted">Order not found for O2D tracking.</div>';
 }
+ACTIONS['pl-view'] = el => { try { localStorage.setItem('nx_pl_view', el.dataset.v); } catch (e) { } planModal(); };
 ACTIONS['pl-close'] = () => { PL_UI.open = null; const m = $('#plModal'); if (m) m.remove(); };
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && $('#plModal') && !$('#fxDlg')) ACTIONS['pl-close'](); });
 window.addEventListener('hashchange', () => { const m = $('#plModal'); if (m) { m.remove(); PL_UI.open = null; } });
