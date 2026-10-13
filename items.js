@@ -163,7 +163,7 @@ VIEWS.itemcreate = {
 };
 VIEWS.itemconfig = {
   mod: 'development', render() {
-    setMain(subTitle('Item Category Configuration') + icSetupHtml(can('development', 'edit')));
+    setMain(subTitle('Item Category Configuration') + icSetupHtml(isSuperAdmin()));
     icBind();
   }
 };
@@ -412,7 +412,10 @@ function icTypeMatrix(cat, edit) {
 }
 
 /* ---- category / attribute / type actions ---- */
+// categories, attributes and item types change every item name: only the Super Admin may change them (the database enforces it too)
+function icSuper() { if (isSuperAdmin()) return true; flash('Only the Super Admin can change categories, attributes and item types.', 'err'); return false; }
 ACTIONS['ic-addcat'] = () => {
+  if (!icSuper()) return;
   const c = ($('#icNewCat').value || '').trim().replace(/\s+/g, ' ');
   if (!c) return;
   const ex = itemCats().find(x => norm(x) === norm(c));
@@ -435,7 +438,7 @@ function atRead(tr) {
   return { name, kind, max, values: ['brand', 'article', 'dims'].includes(kind) ? [] : values, when_attr: k > 0 ? w.slice(0, k) : '', when_val: k > 0 ? w.slice(k + 1) : '' };
 }
 ACTIONS['at-add'] = el => {
-  if (!requirePerm('development', 'edit')) return;
+  if (!icSuper()) return;
   const cat = IC_UI.scat; const r = atRead(el.closest('tr'));
   if (!r.name || (!r.values.length && ['list', 'multi'].includes(r.kind))) { flash('Attribute name and at least one value are required.', 'err'); return; }
   if (catAttrs(cat).some(a => norm(a.name) === norm(r.name))) { flash(esc(r.name) + ' already exists in ' + esc(cat) + '.', 'err'); return; }
@@ -446,7 +449,7 @@ ACTIONS['at-add'] = el => {
 ACTIONS['at-edit'] = el => { IC_UI.editAttr = el.dataset.id; icRender(); };
 ACTIONS['at-cancel'] = () => { IC_UI.editAttr = null; icRender(); };
 ACTIONS['at-save'] = el => {
-  if (!requirePerm('development', 'edit')) return;
+  if (!icSuper()) return;
   const a = Store.get('attributes', el.dataset.id); const r = atRead(el.closest('tr'));
   if (!r.name || (!r.values.length && ['list', 'multi'].includes(r.kind))) { flash('Attribute name and at least one value are required.', 'err'); return; }
   if (catAttrs(a.category).some(x => x.id !== a.id && norm(x.name) === norm(r.name))) { flash(esc(r.name) + ' already exists in ' + esc(a.category) + '.', 'err'); return; }
@@ -460,7 +463,7 @@ ACTIONS['at-save'] = el => {
   IC_UI.editAttr = null; icRender();
 };
 ACTIONS['at-move'] = el => {
-  if (!requirePerm('development', 'edit')) return;
+  if (!icSuper()) return;
   const a = Store.get('attributes', el.dataset.id); const list = catAttrs(a.category);
   const i = list.findIndex(x => x.id === a.id); const j = i + num(el.dataset.dir);
   if (j < 0 || j >= list.length) return;
@@ -469,7 +472,7 @@ ACTIONS['at-move'] = el => {
   audit('attribute.sequence', a.category, list.map(x => x.name).join(' > ')); icRender();
 };
 ACTIONS['at-del'] = el => {
-  if (!requirePerm('development', 'edit')) return;
+  if (!icSuper()) return;
   const a = Store.get('attributes', el.dataset.id);
   const used = typesOf(a.category).filter(t => usesAttr(t, a.name));
   used.forEach(t => { t.attrs = (t.attrs || []).filter(n => norm(n) !== norm(a.name)); Store.put('item_types', t); });
@@ -491,7 +494,7 @@ function itCheck(r, cat, selfId) {
   return '';
 }
 ACTIONS['it-add'] = el => {
-  if (!requirePerm('development', 'edit')) return;
+  if (!icSuper()) return;
   const cat = IC_UI.scat; const r = itRead(el.closest('tr')); const err = itCheck(r, cat);
   if (err) { flash(esc(err), 'err'); return; }
   Store.put('item_types', Object.assign({ id: uid(), category: cat }, r));
@@ -500,14 +503,14 @@ ACTIONS['it-add'] = el => {
 ACTIONS['it-edit'] = el => { IC_UI.editType = el.dataset.id; icRender(); };
 ACTIONS['it-cancel'] = () => { IC_UI.editType = null; icRender(); };
 ACTIONS['it-save'] = el => {
-  if (!requirePerm('development', 'edit')) return;
+  if (!icSuper()) return;
   const t = Store.get('item_types', el.dataset.id); const r = itRead(el.closest('tr')); const err = itCheck(r, t.category, t.id);
   if (err) { flash(esc(err), 'err'); return; }
   Object.assign(t, r); Store.put('item_types', t);
   audit('itemtype.edit', t.category + ' · ' + t.name, r.attrs.join(', ')); IC_UI.editType = null; icRender();
 };
 ACTIONS['it-del'] = el => {
-  if (!requirePerm('development', 'edit')) return;
+  if (!icSuper()) return;
   const t = Store.get('item_types', el.dataset.id); Store.del('item_types', t.id); audit('itemtype.delete', t.category + ' · ' + t.name, ''); icRender();
 };
 
@@ -554,6 +557,7 @@ function icSeedDefaults() {
 }
 // called from migrateDb on every login; fixed ids keep two browsers seeding at once consistent
 function seedItemMasters() {
+  if (!isSuperAdmin()) return;
   // build 35 stored attributes globally (no category): move them under categories with a sequence
   const legacy = Store.all('attributes').filter(a => !a.category);
   if (legacy.length) {
