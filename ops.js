@@ -120,9 +120,13 @@ VIEWS.home = {
 
     // Super Admin looking at their own Home: approvals, 2nd escalations, MIS score, bottlenecks
     if (sa && self) {
-      h += saHomeHtml() + myRequestsCard(names);
+      h = h.replace('<span class="grow"></span>', '<span class="grow"></span>' + seg('sxTab', [{ v: 'today', l: 'Today' }, { v: 'score', l: 'Score' }], SX_UI.tab));
+      h += SX_UI.tab === 'score' ? sxHtml() : saHomeHtml() + myRequestsCard(names);
       setMain(h);
-      onSeg(e => { if (e.target.dataset.seg === 'mrf') { MR_UI.f = e.detail; VIEWS.home.render(); } });
+      onSeg(e => { const k = e.target.dataset.seg;
+        if (k === 'mrf') MR_UI.f = e.detail; else if (k === 'sxTab') SX_UI.tab = e.detail; else if (k === 'sxView') SX_UI.view = e.detail; else if (k === 'sxGran') SX_UI.gran = e.detail; else if (k === 'sxMx') SX_UI.mx = e.detail; else return;
+        VIEWS.home.render(); });
+      sxBind();
       const w0 = $('#htWho'); if (w0) w0.addEventListener('change', () => { HT_UI.who = w0.value; VIEWS.home.render(); });
       $('#main').addEventListener('change', e => { if (e.target.id === 'saFrom' || e.target.id === 'saTo') { SA_UI[e.target.id === 'saFrom' ? 'from' : 'to'] = e.target.value; VIEWS.home.render(); } });
       return;
@@ -140,11 +144,8 @@ VIEWS.home = {
       '<a class="dk-c" data-act="ht-held"><span class="l">Held up</span><span class="v ' + (D.held.length ? 'late-txt' : '') + '">' + D.held.length + '</span><span class="s">others waiting on ' + (self ? 'you' : esc(who)) + '</span></a></div>';
 
     // main grid: tasks | score, held up, escalations
-    h += '<div class="dgrid"><div>' + homeTaskTable(T) + '</div><div>';
-    const tot = T.length || 1; const seg4 = [['Delayed', 'var(--late)'], ['Pending', 'var(--pending)'], ['Upcoming', 'var(--accent)'], ['Completed', 'var(--done)']];
-    h += '<div class="dcard"><div class="dh3">Task mix<span class="grow"></span><span class="muted small">' + T.length + ' tasks</span></div><div class="dbar">' +
-      seg4.map(([k, c]) => cnt(k) ? '<i style="width:' + (cnt(k) * 100 / tot) + '%;background:' + c + '" title="' + k + ' ' + cnt(k) + '"></i>' : '').join('') + '</div><div class="dleg">' +
-      seg4.map(([k, c]) => '<span><i style="background:' + c + '"></i>' + k + ' <b>' + cnt(k) + '</b></span>').join('') + '</div></div>';
+    h += '<div class="dgrid hgrid"><div>' + homeTaskTable(T) + '</div><div>';
+    h += myScoreCard(who);
     const heldShow = HT_UI.heldAll ? D.held : D.held.slice(0, 6);
     h += '<div class="dcard" id="heldCard"><div class="dh3">' + (self ? 'Held up because of me' : 'Held up because of ' + esc(person)) + '<span class="n">' + D.held.length + '</span></div>' +
       (D.held.length ? heldShow.map(x => '<div class="dl"><div><div class="t">' + esc(x.what) + '</div><div class="m">' + esc([x.ref, x.party].filter(Boolean).join(' · ')) + (x.waits ? ' · waiting: ' + esc(x.waits) : '') + '</div><div class="m">Planned ' + fmtDT(x.planned) + '</div></div><div class="d">' + fmtDelay(x.delay) + '</div></div>').join('') +
@@ -211,7 +212,7 @@ VIEWS.home = {
 ACTIONS['ht-f'] = el => { HT_UI.f = HT_UI.f === el.dataset.f ? 'all' : el.dataset.f; VIEWS.home.render(); };
 ACTIONS['ht-held'] = () => { const c = $('#heldCard'); if (c) c.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
 ACTIONS['ht-held-all'] = () => { HT_UI.heldAll = !HT_UI.heldAll; VIEWS.home.render(); const c = $('#heldCard'); if (c) c.scrollIntoView({ block: 'start' }); };
-ACTIONS['ht-who'] = el => { if (!el.dataset.d) return; HT_UI.who = el.dataset.d; HT_UI.f = 'all'; VIEWS.home.render(); window.scrollTo(0, 0); };
+ACTIONS['ht-who'] = el => { if (!el.dataset.d) return; if ($('#sxModal')) ACTIONS['sx-close'](); HT_UI.who = el.dataset.d; HT_UI.f = 'all'; VIEWS.home.render(); window.scrollTo(0, 0); };
 ACTIONS['ht-demo-del'] = () => {
   if (!isSuperAdmin()) return;
   const d = Store.all('checklist').filter(t => t.demo); d.forEach(t => Store.del('checklist', t.id));
