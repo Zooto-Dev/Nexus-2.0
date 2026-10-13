@@ -74,14 +74,8 @@ const ESC_L2 = 'SUPER ADMIN';
 function escL2() { return (escCfg().l2 || ESC_L2).toUpperCase(); }
 function isSuperDoer(d) { const u = userOfDoer(d); const r = u && Store.get('roles', u.role_id); return !!(r && r.system); }
 function escPc() { const u = Store.all('users').find(x => x.active !== false && x.doer && /^PC$/i.test(String(x.designation || '').trim())); return u ? u.doer.toUpperCase() : ''; }
-function escL1(doer) {
-  const c = escCfg(); const dept = deptOfDoer(doer);
-  if (dept && (c.l1 || {})[dept]) return c.l1[dept];
-  if (c.l1_all) return c.l1_all;
-  const pc = escPc(); if (pc && norm(pc) !== norm(doer)) return pc;
-  const head = Store.all('users').find(u => u.active !== false && u.doer && norm(u.doer) !== norm(doer) && dept && u.department === dept && /HEAD|MANAGER|INCHARGE/i.test(u.designation || ''));
-  return head ? head.doer.toUpperCase() : escL2();
-}
+// Level 1 = the PC (designation PC, e.g. ANAMIKA); her own delays go straight to Level 2 (Super Admin)
+function escL1(doer) { const pc = escPc(); return pc && norm(pc) !== norm(doer) ? pc : escL2(); }
 function escIsL2(t, doer) { return t.level === 2 && !!doer && (norm(t.l2 || '') === norm(doer) || isSuperDoer(doer)); }
 function escHash(s) { let h = 5381; for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0; return h.toString(36).toUpperCase(); }
 // involved = the doer, the Level 1 owner, and the Level 2 owner once the ticket reaches Level 2
@@ -279,15 +273,11 @@ ACTIONS['esc-hist'] = el => {
   const d = $('#fxDlg'); if (d) $('.jckv', d).innerHTML = '<tr class="hd"><th>When</th><th>By</th><th>What</th></tr>' + (e.history || []).map(x => '<tr><td class="nowrap">' + fmtDT(x.at) + '</td><td>' + esc(x.by) + '</td><td>' + esc(x.what) + '</td></tr>').join('');
 };
 function escSetupHtml() {
-  const c = escCfg(); const doers = allDoers();
-  const depts = Array.from(new Set(Store.all('users').map(u => u.department).filter(Boolean))).sort();
-  const common = c.l1_all || escPc();
+  const c = escCfg();
   return '<div class="panel" style="max-width:760px"><table class="jckv">' +
     '<tr><td class="k">Level 1 after delay of</td><td class="v"><select id="escAfter">' + [0.5, 1, 2, 3].map(x => '<option value="' + x + '"' + (Math.abs(c.after / 510 - x) < 0.01 ? ' selected' : '') + '>' + x + ' working day' + (x > 1 ? 's' : '') + '</option>').join('') + '</select></td></tr>' +
-    '<tr><td class="k">Level 1 owner</td><td class="v"><select id="escL1all">' + doerOpts(doers, c.l1_all || '', 'PC (' + (escPc() || 'none') + ')') + '</select></td></tr>' +
-    '<tr><td class="k">Level 2 owner</td><td class="v">All Super Admins (' + esc(Store.all('users').filter(u => u.active !== false && u.doer && isSuperDoer(u.doer)).map(u => u.doer.toUpperCase()).join(', ')) + ')</td></tr></table></div>' +
-    '<div class="tbl-wrap"><table class="nopage"><tr><th>Department</th><th>Level 1 owner</th></tr>' +
-    depts.map(d => '<tr><td>' + esc(d) + '</td><td><select data-l1d="' + esc(d) + '">' + doerOpts(doers, (c.l1 || {})[d] || '', 'Same as above (' + esc(common || escL2()) + ')') + '</select></td></tr>').join('') + '</table></div>';
+    '<tr><td class="k">Level 1 owner</td><td class="v">PC · ' + esc(escPc() || 'no user with designation PC') + '</td></tr>' +
+    '<tr><td class="k">Level 2 owner</td><td class="v">Super Admin (' + esc(Store.all('users').filter(u => u.active !== false && u.doer && isSuperDoer(u.doer)).map(u => u.doer.toUpperCase()).join(', ')) + ')</td></tr></table></div>';
 }
 
 /* ================= Scorecard screen ================= */

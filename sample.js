@@ -95,7 +95,7 @@ ACTIONS['sm-save'] = () => {
 VIEWS.samples = {
   mod: 'development', render() {
     const q = norm(SMP_UI.q);
-    const rows = Store.all('samples').slice().sort((a, b) => b.created_at < a.created_at ? -1 : 1).map(s => ({ s, st: smpState(s) })).filter(x => {
+    const bs = brandScope(); const rows = Store.all('samples').filter(s => brandOk(s.brand, bs)).sort((a, b) => b.created_at < a.created_at ? -1 : 1).map(s => ({ s, st: smpState(s) })).filter(x => {
       if (q && !norm([x.s.no, x.s.batch_no, x.s.brand, x.s.article, x.s.colour, x.s.category].join(' ')).includes(q)) return false;
       switch (SMP_UI.f) {
         case 'open': return x.st.open && x.s.status !== 'Hold'; case 'late': return x.st.cls === 'Late'; case 'hold': return x.s.status === 'Hold';

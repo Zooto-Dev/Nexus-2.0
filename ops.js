@@ -62,7 +62,7 @@ function fmsPhotos(o) {
   const out = [];
   (o.lines || []).forEach(l => {
     const j = l.jc_no && jcBy(l.jc_no);
-    const b = !(j && j.photo) && Store.all('boms').filter(x => norm(x.article) === norm(l.article) && x.photo && (!l.colour || !x.colour || norm(x.colour) === norm(l.colour))).sort((a, c) => (c.version || 0) - (a.version || 0))[0];
+    const b = !(j && j.photo) && Store.all('boms').filter(x => norm(x.article) === norm(l.article) && (!x.brand || norm(x.brand) === norm(o.customer_name || '')) && x.photo && (!l.colour || !x.colour || norm(x.colour) === norm(l.colour))).sort((a, c) => (c.version || 0) - (a.version || 0))[0];
     const src = (j && j.photo) || (b && b.photo); if (src && !out.includes(src)) out.push(src);
   });
   return out.slice(0, 4);
@@ -116,6 +116,7 @@ VIEWS.home = {
     // header
     let h = '<div class="dhd"><div><h1>Good ' + (new Date().getHours() < 12 ? 'morning' : new Date().getHours() < 17 ? 'afternoon' : 'evening') + ', ' + esc(ME.name.split(' ')[0]) + '</h1><div class="muted small">' + new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) + ' · ' + esc(settings().company || '') + '</div></div><span class="grow"></span>' +
       (pick ? '<label class="small muted">Showing <select id="htWho">' + doers.map(d => '<option' + (norm(d) === norm(who) ? ' selected' : '') + '>' + esc(d) + '</option>').join('') + '</select></label>' + (who && !self ? '<button class="btn sm primary" data-act="sx-open" data-t="doer" data-k="' + esc(who) + '">Full summary</button>' : '') : '') +
+      '<button class="btn sm primary" data-act="home-ticket">+ Raise Ticket</button>' +
       (sa && Store.all('checklist').some(t => t.demo) ? '<button class="btn sm danger" data-act="ht-demo-del" data-confirm="Remove all demo tasks?">Remove demo tasks</button>' : '') + '</div>';
 
     // Super Admin looking at their own Home: approvals, 2nd escalations, MIS score, bottlenecks
@@ -190,7 +191,7 @@ VIEWS.home = {
         dep('Purchase', 'purchasedash', [['open PO', pos.length, false], ['overdue', poOver.length, poOver.length > 0]]) +
         dep('Merchant', 'swatch', [['QC mismatch', swPend.length, swPend.length > 0], ['open JCs', jcOpen.length, false]]) +
         dep('Store', 'issuance', [['req to issue', reqs.length, false], ['QC pending', smPend.length, false]]) +
-        dep('Production', 'prodtracker', [['orders in flow', openOrders.length, false], ['late steps', late.length, late.length > 0]]) +
+        dep('Production', 'planning', [['orders in flow', openOrders.length, false], ['late steps', late.length, late.length > 0]]) +
         dep('Accounts', 'invoices', [['payment pending', payPend.length, false]]) +
         dep('Dispatch', 'dispatch', [['ready', readyForDispatch().length, false]]) + '</table></div></div>' +
         '<div class="dcard"><div class="dh3">Late by doer</div><div class="tbl-wrap"><table class="nopage"><tr><th>Doer</th><th class="num">Late</th><th class="num">Avg delay</th></tr>' +
@@ -294,7 +295,7 @@ VIEWS.punch = {
     h += '<datalist id="dlArt">' + Store.all('items').map(i => '<option value="' + esc(i.code) + '">' + esc(i.name + ' · ' + (i.group || '')) + '</option>').join('') + '</datalist>';
     h += '<div class="hdr">' +
       '<label>Order date<input id="pDate" type="date" value="' + esc(P.order_date) + '"></label>' +
-      '<label>Brand *<select id="pBrand">' + selOpts(Store.all('customers').map(c => c.name).sort(), P.brand || P.customer_name) + '</select></label>' +
+      '<label>Brand *<select id="pBrand">' + selOpts(Store.all('customers').filter(c => brandOk(c.name)).map(c => c.name).sort(), P.brand || P.customer_name) + '</select></label>' +
       '<label>Buyer PO no *<input id="pPo" value="' + esc(P.buyer_po) + '"></label>' +
       '<label>PO expiry date *<input id="pExp" type="date" value="' + esc(P.po_expiry_date) + '"></label>' +
       '<label>Tooling / Mould no<input id="pTool" value="' + esc(P.tooling_no) + '"></label>' +
@@ -466,7 +467,7 @@ VIEWS.orders = {
   mod: 'orders', render(param) {
     if (param === 'late') ORD_UI.f = 'late'; else if (param) { ORD_UI.q = param; ORD_UI.f = 'all'; }
     const q = norm(ORD_UI.q);
-    const rows = Store.all('orders').slice().sort((a, b) => b.created_at < a.created_at ? -1 : 1).map(o => ({ o, st: orderState(o), t: orderTotals(o), d: dispatchedQty(o) })).filter(x => {
+    const bs = brandScope(); const rows = Store.all('orders').filter(o => brandOk(o.customer_name, bs)).sort((a, b) => b.created_at < a.created_at ? -1 : 1).map(o => ({ o, st: orderState(o), t: orderTotals(o), d: dispatchedQty(o) })).filter(x => {
       if (q && !norm(x.o.no + ' ' + x.o.customer_name + ' ' + x.o.buyer_po + ' ' + x.o.tooling_no + ' ' + (x.o.lines || []).map(l => l.article + ' ' + l.style + ' ' + l.colour).join(' ')).includes(q)) return false;
       switch (ORD_UI.f) {
         case 'open': return x.st.open; case 'late': return x.st.open && x.st.late > 0; case 'hold': return x.o.priority === 'On Hold';

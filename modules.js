@@ -622,14 +622,17 @@ ACTIONS['fu-save'] = el => {
 const JC_UI = { f: 'open', form: false, open: null };
 let JCF = null;   // job card form state
 function jcOrderLine(o, idx) { return (o.lines || [])[idx] || {}; }
-function jcBomFor(article, colour) {
-  const all = Store.all('boms').filter(x => norm(x.article) === norm(article));
-  return all.find(x => colour && norm(x.colour) === norm(colour)) || all.filter(x => !x.colour || true).sort((p, q) => q.version - p.version)[0] || null;
+// the same article can have a BOM for more than one brand: only the order's brand (or a BOM with no brand) may load
+function jcBomFor(article, colour, brand, style) {
+  let all = Store.all('boms').filter(x => norm(x.article) === norm(article));
+  if (brand) all = all.filter(x => !x.brand || norm(x.brand) === norm(brand));
+  const rank = x => (brand && x.brand && norm(x.brand) === norm(brand) ? 8 : 0) + (colour && x.colour && norm(x.colour) === norm(colour) ? 4 : 0) + (style && x.style && norm(x.style) === norm(style) ? 2 : 0);
+  return all.sort((p, q) => rank(q) - rank(p) || (q.version || 0) - (p.version || 0))[0] || null;
 }
 VIEWS.jobcards = {
   mod: 'merchant', render() {
     const edit = can('merchant', 'edit');
-    const rows = Store.all('job_cards').slice().sort((a2, b2) => b2.no < a2.no ? -1 : 1).filter(j => JC_UI.f === 'all' || (JC_UI.f === 'open' ? j.status !== 'Closed' : j.status === 'Closed'));
+    const bs = brandScope(); const rows = Store.all('job_cards').filter(j => brandOk(j.brand, bs)).sort((a2, b2) => b2.no < a2.no ? -1 : 1).filter(j => JC_UI.f === 'all' || (JC_UI.f === 'open' ? j.status !== 'Closed' : j.status === 'Closed'));
     let h = subTitle('Job Card', 'format: ZF-0001') + '<div class="toolbar">' + seg('f', [{ v: 'open', l: 'Open' }, { v: 'closed', l: 'Closed' }, { v: 'all', l: 'All' }], JC_UI.f) + '<span class="grow"></span>' + (edit ? newBtn('New job card', 'jc-new') : '') + '</div>';
     if (JC_UI.form && edit) h += jcForm();
     h += '<div class="tbl-wrap"><table class="bomflat"><tr><th>JC No</th><th>JC Date</th><th>Order</th><th>Brand</th><th>Article</th><th>Style</th><th>Colour</th><th class="num">Qty</th><th>Material</th><th>Corrections</th><th>Status</th><th>By</th><th></th></tr>' +
@@ -667,7 +670,7 @@ function jcDetail(j) {
 function jcForm() {
   // JC picker: every open order line's JC number that has no job card yet
   const used = new Set(Store.all('job_cards').map(j => norm(j.no)));
-  const picks = Store.all('orders').filter(o => orderState(o).open)
+  const bs = brandScope(); const picks = Store.all('orders').filter(o => brandOk(o.customer_name, bs) && orderState(o).open)
     .flatMap(o => (o.lines || []).filter(l => l.jc_no && !used.has(norm(l.jc_no)))
       .map(l => '<option value="' + esc(l.jc_no) + '">' + esc(o.customer_name + ' · ' + l.article + (l.colour ? ' ' + l.colour : '') + ' · ' + qtyFmt(l.qty)) + '</option>')).join('');
   return '<div class="card"><div class="card-b"><datalist id="dlJcPick">' + picks + '</datalist>' +
@@ -788,9 +791,9 @@ function jcfFillFromOrder() {
     $('[data-sz="act"]', tr).value = szl[i] ? (szl[i].qty || '') : '';
   });
   // BOM auto-load
-  const b = jcBomFor(l.article, l.colour);
+  const b = jcBomFor(l.article, l.colour, o.customer_name || o.brand || '', l.style || '');
   $$('#jfBom tr[data-bomrow]').forEach(tr => tr.remove());
-  if (b) { b.lines.forEach(x => $('#jfBom').insertAdjacentHTML('beforeend', jcfBomRow(x))); $('#jfBomTag').textContent = 'Auto-loaded from BOM (' + b.article + (b.colour ? ' ' + b.colour : '') + ' v' + b.version + ', ' + b.lines.length + ' items)'; if (b.photo && !JCF.photo) { JCF.photo = b.photo; $('#jfPhotoTag').innerHTML = '<img src="' + b.photo + '">'; } }
+  if (b) { b.lines.forEach(x => $('#jfBom').insertAdjacentHTML('beforeend', jcfBomRow(x))); $('#jfBomTag').textContent = 'Auto-loaded from BOM (' + (b.brand ? b.brand + ' · ' : '') + b.article + (b.colour ? ' ' + b.colour : '') + ' v' + b.version + ', ' + b.lines.length + ' items)'; if (b.photo && !JCF.photo) { JCF.photo = b.photo; $('#jfPhotoTag').innerHTML = '<img src="' + b.photo + '">'; } }
   else { $('#jfBom').insertAdjacentHTML('beforeend', jcfBomRow()); $('#jfBomTag').textContent = ''; flash('No Development BOM for this article — fill the rows manually or create one in Development.', 'err'); }
   jcfRecalc();
 }
@@ -874,7 +877,7 @@ function jccRow(l, oi, j) {
 VIEWS.jccorrection = {
   mod: 'merchant', render() {
     const edit = can('merchant', 'edit');
-    const open = Store.all('job_cards').filter(j => j.status !== 'Closed').sort((a, b) => String(a.no).localeCompare(String(b.no)));
+    const bs = brandScope(); const open = Store.all('job_cards').filter(j => j.status !== 'Closed' && brandOk(j.brand, bs)).sort((a, b) => String(a.no).localeCompare(String(b.no)));
     if (JCC_UI.id && !open.some(j => j.id === JCC_UI.id)) JCC_UI.id = '';
     const j = JCC_UI.id ? Store.get('job_cards', JCC_UI.id) : null;
     let h = '';
@@ -890,7 +893,7 @@ VIEWS.jccorrection = {
     }
     // history: every correction, newest first
     const hist = [];
-    Store.all('job_cards').forEach(x => (x.corrections || []).forEach(c => hist.push({ j: x, c })));
+    Store.all('job_cards').filter(x => brandOk(x.brand, bs)).forEach(x => (x.corrections || []).forEach(c => hist.push({ j: x, c })));
     hist.sort((a, b) => (b.c.at || '') < (a.c.at || '') ? -1 : 1);
     h += '<div class="tbl-wrap"><table><tr><th>JC No</th><th>Brand</th><th>Article</th><th>Colour</th><th>Date</th><th>By</th><th>Reason</th><th>Changes</th></tr>' +
       (hist.length ? hist.map(x => '<tr><td><b>' + esc(x.j.no) + '</b></td><td>' + esc(x.j.brand || '') + '</td><td>' + esc(x.j.article || '') + '</td><td>' + esc(x.j.colour || '') + '</td><td class="nowrap">' + fmtDT(x.c.at) + '</td><td>' + esc(x.c.by || '') + '</td><td>' + esc(x.c.note || '') + '</td><td style="white-space:normal;min-width:280px">' + (x.c.changes || []).map(esc).join('<br>') + '</td></tr>').join('')
@@ -1274,7 +1277,7 @@ VIEWS.bom = {
     // punched-order lines that still need a BOM (a BOM for the same brand+article+style
     // with the same colour — or blank colour = all colours — counts as made)
     const pend = [];
-    Store.all('orders').forEach(o => (o.lines || []).forEach(l => {
+    const bs = brandScope(); Store.all('orders').filter(o => brandOk(o.customer_name, bs)).forEach(o => (o.lines || []).forEach(l => {
       const key = norm(o.customer_name + '|' + l.article + '|' + (l.style || '') + '|' + (l.colour || ''));
       if (pend.some(p => p.key === key)) return;
       const has = Store.all('boms').some(b2 => norm(b2.brand || '') === norm(o.customer_name) && norm(b2.article) === norm(l.article) &&
@@ -1391,7 +1394,7 @@ ACTIONS['bom-save'] = () => {
 VIEWS.boms = {
   mod: 'development', render() {
     const byKey = {};
-    Store.all('boms').forEach(b2 => { const k = norm(b2.article + '|' + (b2.brand || '') + '|' + (b2.style || '') + '|' + (b2.colour || '')); if (!byKey[k] || byKey[k].version < b2.version) byKey[k] = b2; });
+    const bs = brandScope(); Store.all('boms').filter(b2 => brandOk(b2.brand, bs)).forEach(b2 => { const k = norm(b2.article + '|' + (b2.brand || '') + '|' + (b2.style || '') + '|' + (b2.colour || '')); if (!byKey[k] || byKey[k].version < b2.version) byKey[k] = b2; });
     const rows = Object.values(byKey).sort((a2, b3) => a2.article.localeCompare(b3.article));
     setMain(subTitle('Created BOMs', 'latest version per article+brand+style+colour') + '<div class="toolbar"><span class="grow"></span>' + (can('development', 'edit') ? '<a class="btn primary" href="#/bom">+ Make BOM</a>' : '') + '</div>' +
       '<div class="tbl-wrap"><table class="bomflat"><tr><th>Brand</th><th>Article</th><th>Style</th><th>Colour</th><th>Gender</th><th>Ver</th><th class="num">Sr</th><th>Process</th><th>Section</th><th>Category</th><th>Item Name</th><th>Item Code</th><th>UOM</th><th class="num">Norms</th><th class="num">Price</th><th class="num">Cost</th><th>Supplier</th><th>Remark</th><th>Date</th><th></th></tr>' +
@@ -1614,32 +1617,38 @@ VIEWS.prodtracker = {
   }
 };
 
+/* ================= MRS: one row per material (same numbers as Net Requirement); click a row for its POs ================= */
 VIEWS.mrs = {
   mod: 'production', render() {
-    const { stk } = stockMaps();
-    let h = subTitle('MRS', 'Material Requirement Sheet — order × BOM') + '<div class="panel" style="margin-bottom:12px"><div class="row"><label>Order *<input id="mrsOrd" list="dlOrdM" value="' + esc(VIEWS.mrs.sel || '') + '"><datalist id="dlOrdM">' + Store.all('orders').filter(o => orderState(o).open).map(o => '<option value="' + esc(o.no) + '">' + esc(o.customer_name) + '</option>').join('') + '</datalist></label><button class="btn primary" data-act="mrs-run">Calculate</button></div></div>';
-    const o = Store.all('orders').find(x => norm(x.no) === norm(VIEWS.mrs.sel || ''));
-    if (o) {
-      const need = {};
-      const noBom = [];
-      o.lines.forEach(l => {
-        const bs = Store.all('boms').filter(b => norm(b.article) === norm(l.article)).sort((a, b) => b.version - a.version);
-        const b = bs[0];
-        if (!b) { noBom.push(l.article); return; }
-        b.lines.forEach(bl => { const k = norm(bl.material); need[k] = need[k] || { material: bl.material, uom: bl.uom, qty: 0 }; need[k].qty += num(bl.qty) * num(l.qty); });
-      });
-      const rows = Object.values(need);
-      if (noBom.length) h += '<div class="panel" style="border-left:3px solid var(--late);margin-bottom:10px">BOM missing: <b>' + noBom.map(esc).join(', ') + '</b> — create them in Development; the MRS is incomplete until then.</div>';
-      h += '<div class="toolbar"><span class="muted small">' + esc(o.no) + ' · ' + esc(o.customer_name) + ' · ' + qtyFmt(orderTotals(o).qty) + ' pairs</span><span class="grow"></span><button class="btn" data-act="mrs-csv">Export CSV</button></div>';
-      h += '<div class="tbl-wrap"><table><tr><th>Material</th><th>UOM</th><th class="num">Required</th><th class="num">In stock</th><th class="num">Shortfall</th></tr>' +
-        (rows.length ? rows.map(x => { const st = stk[norm(x.material)] || 0; const short = Math.max(0, x.qty - st); return '<tr><td><b>' + esc(x.material) + '</b></td><td>' + esc(x.uom) + '</td><td class="num">' + qtyFmt(x.qty) + '</td><td class="num">' + qtyFmt(st) + '</td><td class="num ' + (short ? 'late-txt' : '') + '">' + (short ? qtyFmt(short) : '—') + '</td></tr>'; }).join('') : '<tr><td colspan="5" class="empty">No BOM found for the articles in this order</td></tr>') + '</table></div>';
-      VIEWS.mrs.rows = rows.map(x => [x.material, x.uom, x.qty, stk[norm(x.material)] || 0, Math.max(0, x.qty - (stk[norm(x.material)] || 0))]);
-    }
-    setMain(h);
+    const rows = netReqRows(); VIEWS.mrs.rows = rows;
+    setMain('<div class="tbl-wrap"><table><tr><th>Item Code</th><th>Item Name</th><th>UOM</th><th class="num">Total JC Requirement</th><th class="num">Stock</th><th class="num">Open PO</th><th class="num">Min Level</th><th class="num">Net Requirement</th></tr>' +
+      (rows.length ? rows.map(r => '<tr class="click" data-act="mrs-open" data-m="' + esc(r.material) + '"><td><b>' + esc(r.material) + '</b></td><td>' + esc(r.name) + '</td><td>' + esc(r.uom) + '</td><td class="num">' + qtyFmt(r.demand) + '</td><td class="num">' + qtyFmt(r.stock) + '</td><td class="num">' + qtyFmt(r.openPo) + '</td><td class="num">' + (r.min ? qtyFmt(r.min) : '') + '</td><td class="num"><b' + (r.net > 0 ? ' class="late-txt"' : '') + '>' + qtyFmt(r.net) + '</b></td></tr>').join('')
+        : '<tr><td colspan="8" class="empty">No open requirement</td></tr>') + '</table></div>');
   }
 };
-ACTIONS['mrs-run'] = () => { VIEWS.mrs.sel = $('#mrsOrd').value.trim(); VIEWS.mrs.render(); };
-ACTIONS['mrs-csv'] = () => downloadCsv('mrs-' + (VIEWS.mrs.sel || '') + '.csv', [['Material', 'UOM', 'Required', 'In stock', 'Shortfall']].concat(VIEWS.mrs.rows || []));
+function mrsDetail(code) {
+  const r = (VIEWS.mrs.rows || netReqRows()).find(x => norm(x.material) === norm(code)) || { material: code, name: (matBy(code) || {}).name || '', uom: (matBy(code) || {}).uom || '', jcs: [], demand: 0, stock: Math.max(0, stockOf(code)), openPo: 0, min: 0, net: 0 };
+  const pos = Store.all('purchase_orders').filter(p => !p.cancelled && p.approval !== 'Rejected').flatMap(p => (p.lines || []).filter(l => norm(l.material) === norm(code)).map(l => ({ p, l })))
+    .sort((a, b) => (b.p.date || '') < (a.p.date || '') ? -1 : 1);
+  const today = todayYmd();
+  const k = (l, v, c) => '<div class="sxk"><b class="' + (c || '') + '">' + v + '</b><i>' + l + '</i></div>';
+  return '<div class="plm mrsm"><div class="plm-hd"><div><span class="plm-jc">' + esc(r.material) + '</span><span class="plm-meta">' + esc(r.name) + (r.uom ? ' · ' + esc(r.uom) : '') + '</span></div><div class="plm-r"><button class="btn sm ghost" data-act="mrs-close">✕</button></div></div><div class="sxm-b">' +
+    '<div class="mrs-k">' + k('Total JC Requirement', qtyFmt(r.demand)) + k('Stock', qtyFmt(r.stock)) + k('Open PO', qtyFmt(r.openPo)) + k('Min Level', r.min ? qtyFmt(r.min) : '—') + k('Net Requirement', qtyFmt(r.net), r.net > 0 ? 'late-txt' : 'done-txt') + '</div>' +
+    '<div class="dcard"><div class="dh3">Purchase orders<span class="n">' + pos.length + '</span></div><div class="tbl-wrap"><table class="nopage"><tr><th>PO No</th><th>PO Date</th><th>Vendor</th><th>Brand</th><th class="num">PO Qty</th><th class="num">Received</th><th class="num">Balance</th><th>Delivery Date</th><th>Status</th></tr>' +
+    (pos.length ? pos.map(({ p, l }) => { const bal = Math.max(0, num(l.qty) - num(l.received)); const st = poStatus(p); const late = bal > 0 && p.expected && p.expected < today && st !== 'Pending Approval';
+      return '<tr><td><b>' + esc(p.no) + '</b></td><td class="nowrap">' + fmtD(p.date) + '</td><td>' + esc(p.vendor) + '</td><td>' + esc(l.brand || '') + '</td><td class="num">' + qtyFmt(l.qty) + '</td><td class="num">' + qtyFmt(num(l.received)) + '</td><td class="num' + (bal > 0 ? ' pend-txt' : '') + '">' + qtyFmt(bal) + '</td><td class="nowrap' + (late ? ' late-txt' : '') + '">' + fmtD(p.expected) + '</td><td><span class="st ' + poStCls(bal <= 0 && st !== 'Pending Approval' ? 'Received' : st) + '">' + (bal <= 0 && st !== 'Pending Approval' ? 'Received' : st) + '</span></td></tr>'; }).join('')
+      : '<tr><td colspan="9" class="empty">No PO for this item</td></tr>') + '</table></div></div>' +
+    '<div class="dcard"><div class="dh3">Job cards / requirements<span class="n">' + r.jcs.length + '</span></div><div class="tbl-wrap"><table class="nopage"><tr><th>JC / Req No</th><th>Brand</th><th>Article</th><th>Colour</th><th>Supplier</th><th class="num">Balance to issue</th></tr>' +
+    (r.jcs.length ? r.jcs.map(x => '<tr><td><b>' + esc(x.jc) + '</b></td><td>' + esc(x.brand || '') + '</td><td>' + esc(x.article || '') + '</td><td>' + esc(x.colour || '') + '</td><td>' + esc(x.supplier || '') + '</td><td class="num">' + qtyFmt(x.bal) + '</td></tr>').join('') : '<tr><td colspan="6" class="empty">No open job card needs this item</td></tr>') + '</table></div></div></div></div>';
+}
+ACTIONS['mrs-open'] = el => {
+  ACTIONS['mrs-close']();
+  const d = document.createElement('div'); d.id = 'mrsModal'; d.className = 'dlg-back plm-back'; d.innerHTML = mrsDetail(el.dataset.m);
+  d.addEventListener('click', e => { if (e.target === d) ACTIONS['mrs-close'](); }); document.body.appendChild(d);
+};
+ACTIONS['mrs-close'] = () => { const m = $('#mrsModal'); if (m) m.remove(); };
+document.addEventListener('keydown', e => { if (e.key === 'Escape') ACTIONS['mrs-close'](); });
+window.addEventListener('hashchange', () => ACTIONS['mrs-close']());
 
 /* ================= ACCOUNTS ================= */
 VIEWS.invoices = {
@@ -1669,14 +1678,14 @@ VIEWS.tickets = {
     let h = subTitle('Tickets') + '<div class="toolbar">' + seg('f', [{ v: 'open', l: 'Open' }, { v: 'esc', l: 'Escalated' }, { v: 'closed', l: 'Closed' }, { v: 'all', l: 'All' }], TKT_UI.f) + '<span class="grow"></span>' + (edit ? newBtn('Raise ticket', 'tkt-new') : '') + '</div>';
     if (TKT_UI.form && edit) h += '<div class="panel" style="margin-bottom:12px"><div class="row"><label style="flex:2">Subject *<input id="ntSub"></label><label>Department *' + seg('ntDept', ['Purchase', 'Merchant', 'Store', 'Development', 'Production', 'Accounts', 'Dispatch', 'IT'], '') + '</label></div>' +
       '<div class="row" style="margin-top:8px"><label>Priority' + seg('ntPri', ['Low', 'Normal', 'High', 'Critical'], 'Normal') + '</label><label style="flex:1">Detail<input id="ntDet"></label><button class="btn primary" data-act="tkt-save">Raise</button><span id="ntMsg" class="small"></span></div></div>';
-    h += '<div class="tbl-wrap"><table class="bomflat"><tr><th>Ticket</th><th>Subject</th><th>Detail</th><th>Dept</th><th>Priority</th><th>Raised By</th><th>Age</th><th>Escalated</th><th>Status</th><th>Last Comment</th><th>Comment By</th>' + (edit ? '<th>Comment</th><th></th>' : '') + '</tr>' +
+    h += '<div class="tbl-wrap"><table class="bomflat"><tr><th>Ticket</th><th>Regarding</th><th>Reference</th><th>Subject</th><th>Detail</th><th>Dept</th><th>Priority</th><th>Raised By</th><th>Age</th><th>Escalated</th><th>Status</th><th>Last Comment</th><th>Comment By</th>' + (edit ? '<th>Comment</th><th></th>' : '') + '</tr>' +
       (rows.length ? rows.map(t => {
         const esc48 = ticketEscalated(t); const age = Math.floor((Date.now() - new Date(t.at)) / 3600000);
         const last = (t.comments || []).slice(-1)[0];
-        return '<tr><td><b>' + esc(t.no) + '</b></td><td>' + esc(t.subject) + '</td><td>' + esc(t.detail || '') + '</td><td>' + esc(t.dept) + '</td><td class="' + (t.priority === 'Critical' ? 'late-txt' : t.priority === 'High' ? '' : 'muted') + '">' + esc(t.priority) + '</td><td>' + esc(t.by) + '</td><td class="nowrap">' + (age < 48 ? age + 'h' : Math.floor(age / 24) + 'd') + '</td>' +
+        return '<tr><td><b>' + esc(t.no) + '</b></td><td>' + esc(t.about || '') + '</td><td>' + esc(t.ref || '') + '</td><td>' + esc(t.subject) + '</td><td>' + esc(t.detail || '') + '</td><td>' + esc(t.dept) + '</td><td class="' + (t.priority === 'Critical' ? 'late-txt' : t.priority === 'High' ? '' : 'muted') + '">' + esc(t.priority) + '</td><td>' + esc(t.by) + '</td><td class="nowrap">' + (age < 48 ? age + 'h' : Math.floor(age / 24) + 'd') + '</td>' +
           '<td>' + (esc48 ? '<span class="late-txt">Yes</span>' : '') + '</td><td><span class="st ' + (t.status === 'Closed' ? 'Done' : t.status === 'In Progress' ? 'Pending' : 'Late') + '">' + t.status + '</span></td><td>' + (last ? esc(last.note) : '') + '</td><td>' + (last ? esc(last.by) : '') + '</td>' +
           (edit ? '<td>' + (t.status !== 'Closed' ? '<input data-tk-note style="width:140px">' : '') + '</td><td class="right">' + (t.status !== 'Closed' ? '<button class="btn sm" data-act="tkt-comment" data-id="' + esc(t.id) + '">Add</button> ' + (t.status === 'Open' ? '<button class="btn sm" data-act="tkt-status" data-id="' + esc(t.id) + '" data-s="In Progress">Start</button> ' : '') + '<button class="btn sm primary" data-act="tkt-status" data-id="' + esc(t.id) + '" data-s="Closed">Close</button>' : '') + '</td>' : '') + '</tr>';
-      }).join('') : '<tr><td colspan="13" class="empty">No tickets</td></tr>') + '</table></div>';
+      }).join('') : '<tr><td colspan="15" class="empty">No tickets</td></tr>') + '</table></div>';
     setMain(h);
     onSeg(e => { if (e.target.dataset.seg === 'f') { TKT_UI.f = e.detail; VIEWS.tickets.render(); } });
   }

@@ -163,7 +163,7 @@ VIEWS.itemcreate = {
 };
 VIEWS.itemconfig = {
   mod: 'development', render() {
-    setMain(subTitle('Item Category Configuration') + icSetupHtml(isSuperAdmin()));
+    setMain(subTitle('IC CONFIGURATION') + icSetupHtml(isSuperAdmin()));
     icBind();
   }
 };

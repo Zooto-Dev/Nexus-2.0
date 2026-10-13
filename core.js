@@ -313,6 +313,13 @@ function myRole() { return ME ? Store.get('roles', ME.role_id) : null; }
 // Departments and designations: taken from Nexus Payroll (staff), shared by every screen.
 const DEF_ORG = [{"dept": "ACCOUNTS", "desigs": ["EXECUTIVE"]}, {"dept": "ACCOUNTS AND FINANCE", "desigs": ["ACCOUNTS EXECUTIVE", "EXECUTIVE", "MANAGER"]}, {"dept": "ADMIN", "desigs": ["EXECUTIVE"]}, {"dept": "DEVELOPMENT", "desigs": ["DESIGNER", "EXECUTIVE", "GRAPHIC DESIGNER", "MANAGER", "STITCHER"]}, {"dept": "DISPATCH", "desigs": ["EXECUTIVE", "OPERATOR"]}, {"dept": "FACILITY", "desigs": ["HOUSEKEEPING STAFF"]}, {"dept": "HR", "desigs": ["EXECUTIVE"]}, {"dept": "MAINTENANCE", "desigs": ["EXECUTIVE", "HELPER"]}, {"dept": "MANAGEMENT", "desigs": ["CEO", "EXECUTIVE ASSISTANT"]}, {"dept": "MERCHANDISING", "desigs": ["INTERN", "JUNIOR MERCHANT", "SR MERCHANT"]}, {"dept": "MIS", "desigs": ["EXECUTIVE"]}, {"dept": "OPERATIONS", "desigs": ["HEAD OF OPERATIONS", "MIS EXECUTIVE", "PC"]}, {"dept": "PLANNING", "desigs": ["MANAGER"]}, {"dept": "PPC", "desigs": ["EXECUTIVE", "HEAD"]}, {"dept": "PRODUCTION", "desigs": ["HELPER", "MANAGER", "MOULDER", "OPERATOR", "PRODUCTION INCHARGE", "QC PERSON", "SPOTTER", "SUPERVISOR"]}, {"dept": "PURCHASE", "desigs": ["EXECUTIVE", "HEAD", "MANAGER"]}, {"dept": "QUALITY", "desigs": ["EXECUTIVE", "QC PERSON"]}, {"dept": "STORE", "desigs": ["DATA ENTRY OPERATOR", "EXECUTIVE", "MANAGER"]}];
 function orgList() { const o = settings().org; return o && o.length ? o : DEF_ORG; }
+// merchants see only their own brands (CDB merchandiser / junior merchandiser); Admin and Super Admin see all
+function brandScope() {
+  if (!ME || isAdminRole() || typeof myBrandNames !== 'function') return null;
+  const b = myBrandNames(); if (!b.length && !/MERCH/i.test(ME.department || '')) return null;
+  return new Set(b.map(norm));
+}
+function brandOk(name, scope) { const s = scope === undefined ? brandScope() : scope; return !s || s.has(norm(name || '')); }
 function isAdminRole() { const r = myRole(); return !!(r && (r.system || r.admin)); }
 function accessOf() { const a = settings().access; return a && a.dept ? a : defaultAccess(); }
 // Access for a User: designation setting wins over the department setting.
@@ -547,8 +554,7 @@ const NAV = [
     { v: 'jobcards', l: 'Job Card', mod: 'merchant' },
     { v: 'swatch', l: 'Swatch Approval', mod: 'merchant' },
     { v: 'jccorrection', l: 'Job Card Correction', mod: 'merchant' },
-    { v: 'customers', l: 'CDB', mod: 'masters' },
-    { v: 'items', l: 'Articles', mod: 'masters' }] },
+    { v: 'customers', l: 'CDB', mod: 'masters' }] },
   { menu: 'Store', items: [
     { v: 'inward', l: 'Inwarding', mod: 'store' },
     { v: 'swatchmatch', l: 'QC Check', mod: 'store' },
@@ -557,8 +563,7 @@ const NAV = [
     { v: 'issuance', l: 'Issuance', mod: 'store' },
     { v: 'stock', l: 'Stock View', mod: 'store' },
     { v: 'rejstock', l: 'Rejection Stock', mod: 'store' },
-    { v: 'rtv', l: 'RTV', mod: 'store' },
-    { v: 'materials', l: 'Materials', mod: 'masters' }] },
+    { v: 'rtv', l: 'RTV', mod: 'store' }] },
   { menu: 'Development', items: [
     { v: 'samplenew', l: 'Sample Entry', mod: 'development', edit: true },
     { v: 'samples', l: 'Sample Tracker', mod: 'development' },
@@ -569,7 +574,6 @@ const NAV = [
     { v: 'planning', l: 'Planning & DPR', mod: 'production' },
     { v: 'requisition', l: 'Requisition Slip', mod: 'production' },
     { v: 'prodreport', l: 'Production Report', mod: 'production' },
-    { v: 'prodtracker', l: 'Production Tracker', mod: 'production' },
     { v: 'mrs', l: 'MRS', mod: 'production' }] },
   { menu: 'Accounts', items: [
     { v: 'invoices', l: 'Invoices', mod: 'accounts' }] },
@@ -578,7 +582,7 @@ const NAV = [
     { v: 'escalations', l: 'Escalations', mod: 'tasks' },
     { v: 'scorecard', l: 'Scorecard', mod: 'tasks' },
     { v: 'activity', l: 'Activity List', mod: 'audit' },
-    { v: 'itemconfig', l: 'Item Category Configuration', mod: 'development' },
+    { v: 'itemconfig', l: 'IC CONFIGURATION', mod: 'development' },
     { v: 'planactual', l: 'Plan vs Actual', mod: 'audit' },
     { v: 'tickets', l: 'Raise Ticket', mod: 'tickets' },
     { v: 'users', l: 'Manage Users', mod: 'users' },
@@ -593,7 +597,7 @@ const NAV = [
     { v: 'dispatch', p: 'history', l: 'Dispatch History', mod: 'dispatch' }] },
   { menu: 'Task', cnt: 'tasks', items: [
     { v: 'tasks', l: 'My Tasks', mod: 'tasks' },
-    { v: 'checklist', l: 'Checklist', mod: 'checklist' },
+    { v: 'checklist', l: 'Checklist', mod: 'checklist', sa: true },
     { v: 'builder', l: 'FMS Builder', mod: 'builder' },
     { dyn: 'fms' }] }
 ];
@@ -625,7 +629,7 @@ function navIc(name) { const p = NAV_IC[name]; return p ? '<svg class="ic" viewB
 function renderNav() {
   const { v: cur, param: curP } = curView(); const c = navCounts();
   const cntHtml = k => k && k.n ? '<span class="cnt' + (k.late ? ' late' : '') + '">' + k.n + '</span>' : '';
-  const itemOk = n => can(n.mod, n.edit ? 'edit' : 'view');
+  const itemOk = n => (!n.sa || isSuperAdmin()) && can(n.mod, n.edit ? 'edit' : 'view');
   const itemOn = n => cur === n.v && (n.v === 'dispatch' ? (n.p || '') === (curP || '') : true);
   let html = '<div class="brand"><img class="logo-mark" src="nexus-mark.png" alt="">Nexus <b>2.0</b></div>';
   NAV.forEach(n => {

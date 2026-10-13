@@ -269,3 +269,18 @@ function sxBind() {
     VIEWS.home.render();
   });
 }
+
+/* ---------- Raise Ticket from Home: every user, any topic; it lands in Operations › Raise Ticket ---------- */
+const TKT_ABOUT = ['Correction in an entry', 'Wrong data showing', 'Cannot save / error', 'Access needed', 'New requirement', 'Other'];
+const TKT_DEPTS = ['Purchase', 'Merchant', 'Store', 'Development', 'Production', 'Accounts', 'Dispatch', 'Operations'];
+ACTIONS['home-ticket'] = () => {
+  formDialog('Raise Ticket', [{ k: 'about', l: 'Regarding', type: 'select', options: [''].concat(TKT_ABOUT), req: true },
+    { k: 'dept', l: 'Department', type: 'select', options: [''].concat(TKT_DEPTS), req: true },
+    { k: 'ref', l: 'Reference No (JC / PO / GRN …)' }, { k: 'sub', l: 'Subject', req: true }, { k: 'det', l: 'Detail', type: 'textarea' },
+    { k: 'pri', l: 'Priority', type: 'select', options: ['Normal', 'Low', 'High', 'Critical'] }], 'Raise', v => {
+    const t = Store.put('tickets', { id: uid(), no: nextNo('tickets', 'TKT'), at: nowIso(), by: ME.name, by_id: ME.id, dept: v.dept, about: v.about, ref: v.ref.toUpperCase(), priority: v.pri || 'Normal', subject: v.sub, detail: v.det, status: 'Open', comments: [] });
+    audit('ticket.create', t.no, v.about + ' · ' + v.dept + ' · ' + v.sub + (v.ref ? ' · ' + v.ref : ''));
+    flash(esc(t.no) + ' raised — it shows in Operations › Raise Ticket and in My requests.');
+    if (curView().v === 'home') VIEWS.home.render();
+  });
+};
