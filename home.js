@@ -78,7 +78,7 @@ function vzLine(labels, values, opt) {
     const tip = '<b>' + vzE((opt.tips || labels)[p.i]) + '</b><br>Score: ' + p.v.toFixed(2) + (opt.sub ? '<br>' + vzE(opt.sub[p.i] || '') : '');
     g += '<g class="vz-hit" data-tip="' + vzE(tip) + '"><rect x="' + (x(p.i) - step / 2) + '" y="' + T + '" width="' + step + '" height="' + ih + '" fill="transparent"/><circle cx="' + x(p.i) + '" cy="' + y(p.v) + '" r="4" fill="#fff" stroke="' + sxCol(p.v) + '" stroke-width="2.5"/></g>';
   });
-  const last = pts[pts.length - 1]; g += '<text x="' + x(last.i) + '" y="' + (y(last.v) - 9) + '" text-anchor="middle" class="vz-lb">' + last.v.toFixed(1) + '</text>';
+  const last = pts[pts.length - 1]; g += '<text x="' + x(last.i) + '" y="' + (y(last.v) < T + 14 ? y(last.v) + 18 : y(last.v) - 9) + '" text-anchor="middle" class="vz-lb">' + last.v.toFixed(1) + '</text>';
   return '<svg class="vz" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="' + vzE(opt.aria || 'Score trend') + '">' + g + '</svg>';
 }
 function sxSpark(vals) {
@@ -111,6 +111,7 @@ function myScoreCard(who) {
 function sxHtml() {
   if (SX_UI.per !== 'cu' || !SX_UI.from) { const r = sxRange(SX_UI.per); SX_UI.from = r[0]; SX_UI.to = r[1]; }
   const from = SX_UI.from, to = SX_UI.to, gran = sxGran(from, to, SX_UI.gran);
+  if (SX_UI.open) return sxDetail(SX_UI.open);
   const all = sxRows(from, to); const rows = all.filter(r => !SX_UI.dept || sxDeptOf(r) === SX_UI.dept);
   const depts = Array.from(new Set(all.map(sxDeptOf).concat(Store.all('users').map(u => u.department).filter(Boolean)))).sort();
   const srcs = Array.from(new Set(allTasks().map(t => t.src))).sort();
@@ -119,7 +120,7 @@ function sxHtml() {
     '<select id="sxPer">' + SX_PERIODS.map(p => '<option value="' + p.v + '"' + (p.v === SX_UI.per ? ' selected' : '') + '>' + p.l + '</option>').join('') + '</select>' +
     (SX_UI.per === 'cu' ? '<input id="sxFrom" type="date" value="' + esc(from) + '"><input id="sxTo" type="date" value="' + esc(to) + '">' : '<span class="muted small">' + fmtD(from) + ' – ' + fmtD(to) + '</span>') +
     '<select id="sxDept">' + selOpts(depts, SX_UI.dept, 'All departments') + '</select><select id="sxSrc">' + selOpts(srcs, SX_UI.src, 'All sources') + '</select>' +
-    '<span class="grow"></span><a class="btn sm" href="#/scorecard">Scorecard</a></div>';
+    '<span class="grow"></span>' + sxWhoSel(null) + '<a class="btn sm" href="#/scorecard">Scorecard</a></div>';
   const tile = (l, v, s, c) => '<div class="dt ' + (c || '') + '"><span class="dt-l">' + l + '</span><span class="dt-v">' + v + '</span><span class="dt-s">' + (s || '&nbsp;') + '</span></div>';
   h += '<div class="dtiles sx-tiles">' + tile('Team score', sxS(A.score), A.people + ' people', A.score == null ? '' : A.score >= -10 ? 'dt-good' : A.score >= -30 ? 'dt-warn' : 'dt-crit') +
     tile('Tasks', A.total, A.completed + ' done') + tile('Done', pct(A.completionPct), A.pending + ' pending', A.completionPct >= 90 ? 'dt-good' : '') +
@@ -180,73 +181,88 @@ function sxTimeView(rows, bk, gran) {
   return h;
 }
 
-/* ---------- summary of one department or one person ---------- */
-function sxSummary(o) {
+/* ---------- detailed summary page of one person or one department ---------- */
+function sxWhoSel(o) {
+  const doers = Array.from(new Set(allDoers().concat(allTasks().filter(t => t.doer && t.doer !== 'SYSTEM' && !t.demo).map(t => t.doer.toUpperCase())))).sort(); const depts = Array.from(new Set(Store.all('users').map(u => u.department).filter(Boolean))).sort();
+  const cur = o ? o.t + '|' + o.k : '';
+  return '<select id="sxWho" class="sx-who"><option value="">Summary of…</option><optgroup label="Doer">' + doers.map(d => { const u = userOfDoer(d); return '<option value="doer|' + esc(d) + '"' + (cur === 'doer|' + d ? ' selected' : '') + '>' + esc(d) + (u && u.name && norm(u.name) !== norm(d) ? ' · ' + esc(u.name) : '') + '</option>'; }).join('') + '</optgroup>' +
+    '<optgroup label="Department">' + depts.concat(['No department']).map(d => '<option value="dept|' + esc(d) + '"' + (cur === 'dept|' + d ? ' selected' : '') + '>' + esc(d) + '</option>').join('') + '</optgroup></select>';
+}
+function sxDetail(o) {
   const from = o.from || SX_UI.from, to = o.to || SX_UI.to, gran = sxGran(from, to, SX_UI.gran), bk = sxBuckets(from, to, gran);
   const allR = sxRows(from, to); const isD = o.t === 'dept';
-  const mine = isD ? allR.filter(r => sxDeptOf(r) === o.k) : allR.filter(r => norm(r.doer) === norm(o.k));
-  const A = sxAgg(mine); const E = sxEsc(mine.map(r => r.doer), from, to);
-  const tasks = [].concat(...mine.map(r => r.tasks));
-  const u = !isD && userOfDoer(o.k);
-  const rank = isD ? sxDeptRows(allR).findIndex(d => d.dept === o.k) + 1 : allR.findIndex(r => norm(r.doer) === norm(o.k)) + 1;
-  const of = isD ? sxDeptRows(allR).length : allR.length;
+  const inMe = r => isD ? sxDeptOf(r) === o.k : norm(r.doer) === norm(o.k);
+  const mine = allR.filter(inMe);
+  const A = sxAgg(mine); const R = mine[0];
+  const scored = [].concat(...mine.map(r => r.tasks));
+  const f = new Date(from + 'T00:00:00'), tt = new Date(to + 'T23:59:59');
+  const doerSet = new Set(isD ? Store.all('users').filter(u => u.doer && (u.department || 'No department') === o.k).map(u => norm(u.doer)).concat(mine.map(r => norm(r.doer))) : [norm(o.k)]);
+  const list = allTasks().filter(t => doerSet.has(norm(t.doer || '')) && (!SX_UI.src || t.src === SX_UI.src) && !t.demo && t.planned && t.planned >= f && t.planned <= tt).sort((a, b) => b.planned - a.planned);
+  const escs = Store.all('escalations').filter(e => doerSet.has(norm(e.doer || '')) && (e.raised_at || e.planned || '') >= from + 'T00:00:00' && (e.raised_at || e.planned || '') <= to + 'T23:59:59').sort((a, b) => (b.raised_at || '') < (a.raised_at || '') ? -1 : 1);
+  const u = !isD && userOfDoer(o.k); const role = u && Store.get('roles', u.role_id);
+  const dRows = sxDeptRows(allR);
+  const rank = isD ? dRows.findIndex(d => d.dept === o.k) + 1 : allR.findIndex(r => norm(r.doer) === norm(o.k)) + 1, of = isD ? dRows.length : allR.length;
+  const dept = isD ? o.k : R ? sxDeptOf(R) : (deptOfDoer(o.k) || 'No department');
+  const inDept = isD ? [] : allR.filter(r => sxDeptOf(r) === dept); const dRank = inDept.findIndex(r => norm(r.doer) === norm(o.k)) + 1;
   const ringC = A.score == null ? 'var(--line)' : sxCol(A.score);
-  const kpi = (l, v, c) => '<div class="sxk"><b class="' + (c || '') + '">' + v + '</b><i>' + l + '</i></div>';
-  let h = '<div class="plm sxm"><div class="plm-hd"><div><span class="plm-jc">' + esc(o.k) + '</span><span class="plm-meta">' + (isD ? A.people + ' people' : esc((u && u.name) || '') + ' · ' + esc(mine[0] ? sxDeptOf(mine[0]) : deptOfDoer(o.k) || '')) + ' · ' + fmtD(from) + ' – ' + fmtD(to) + (SX_UI.src ? ' · ' + esc(SX_UI.src) : '') + '</span></div>' +
-    '<div class="plm-r">' + (isD ? '' : '<button class="btn sm" data-act="sx-tasks" data-d="' + esc(o.k) + '" data-f="' + from + '" data-to="' + to + '">All tasks</button><button class="btn sm" data-act="ht-who" data-d="' + esc(o.k) + '">Home</button>') + '<button class="btn sm ghost" data-act="sx-close">✕</button></div></div><div class="sxm-b">';
-  h += '<div class="sxm-k"><div class="sxk sxk-r"><div class="ring" style="background:conic-gradient(' + ringC + ' ' + sxQ(A.score) + '%, var(--line2) 0)"><b>' + sxS(A.score) + '</b></div><i>' + (rank ? 'Rank ' + rank + ' of ' + of : 'Score') + '</i></div>' +
-    kpi('Tasks', A.total) + kpi('Done', A.completed + ' · ' + pct(A.completionPct)) + kpi('On time', A.onTime + ' · ' + pct(A.onTimePct), A.onTimePct >= 90 ? 'done-txt' : '') + kpi('Done late', A.late, A.late ? 'pend-txt' : '') +
-    kpi('Overdue', A.overdue, A.overdue ? 'late-txt' : '') + kpi('Pending', A.pending) + kpi('Escalations', E.l1 + ' · L2 ' + E.l2, E.l2 ? 'late-txt' : '') + '</div>';
-  // column 1: breakdown / people, by source
-  let c1 = '';
-  if (isD) {
-    c1 += '<div class="pv-card"><h4>People</h4>' + (mine.length ? '<table class="plm-t"><tr><th>Doer</th><th class="num">Tasks</th><th class="num">On time</th><th class="num">Overdue</th><th class="num">Score</th></tr>' +
-      mine.map(r => '<tr class="click" data-act="sx-open" data-t="doer" data-k="' + esc(r.doer) + '" data-f="' + from + '" data-to="' + to + '"><td><b>' + esc(r.doer) + '</b></td><td class="num">' + r.total + '</td><td class="num">' + pct(r.onTimePct) + '</td><td class="num' + (r.overdue ? ' late-txt' : '') + '">' + r.overdue + '</td>' + sxScoreCell(r.score) + '</tr>').join('') + '</table>' : '<div class="pv-ok">No tasks</div>') + '</div>';
-  } else if (mine[0]) {
-    const r = mine[0], W = scoreW();
-    const bar = (l, v, w) => '<div class="pv-bar"><span>' + l + ' <small class="muted">×' + Math.round(w * 100) + '%</small></span><b>' + pct(v) + '</b><div><i' + (v >= 90 ? ' class="g"' : '') + ' style="width:' + Math.max(0, Math.min(100, v)) + '%"></i></div></div>';
-    c1 += '<div class="pv-card"><h4>Score breakdown</h4>' + bar('Completion', r.completionPct, W.completion) + bar('On time', r.onTimePct, W.onTime) + bar('Volume', r.volumePct, W.volume) + bar('Consistency', r.consistencyPct, W.consistency) + '</div>';
-  }
-  const bySrc = {}; tasks.forEach(t => { const x = bySrc[t.src] || (bySrc[t.src] = { n: 0, d: 0, ok: 0, od: 0 }); x.n++; if (t.done) { x.d++; if (!t.late) x.ok++; } else if (t.late) x.od++; });
-  c1 += '<div class="pv-card"><h4>By source</h4>' + (Object.keys(bySrc).length ? '<table class="plm-t"><tr><th>Source</th><th class="num">Tasks</th><th class="num">Done</th><th class="num">On time</th><th class="num">Overdue</th></tr>' +
-    Object.entries(bySrc).sort((a, b) => b[1].n - a[1].n).map(([k, x]) => '<tr><td>' + esc(k) + '</td><td class="num">' + x.n + '</td><td class="num">' + x.d + '</td><td class="num">' + (x.d ? pct(x.ok * 100 / x.d) : '') + '</td><td class="num' + (x.od ? ' late-txt' : '') + '">' + x.od + '</td></tr>').join('') + '</table>' : '<div class="pv-ok">No tasks</div>') + '</div>';
-  // column 2: trend
-  const pick = isD ? sxPickDept(o.k) : sxPickDoer(o.k);
-  const tr = sxTrend(bk, pick);
-  const c2 = '<div class="pv-card"><h4>Score · ' + gran + '</h4>' + vzLine(bk.map(b => b.l), tr.map(x => x ? x.score : null), { h: 190, tips: bk.map(b => b.ll), sub: tr.map(x => x ? x.completed + '/' + x.total + ' done · ' + pct(x.onTimePct) + ' on time' : '') }) + '</div>' +
-    '<div class="pv-card"><h4>Tasks · ' + gran + '</h4>' + vzColumns(bk.map(b => b.l), [{ name: 'On time', color: VZ.good, values: tr.map(x => x ? x.onTime : 0) }, { name: 'Late', color: VZ.warn, values: tr.map(x => x ? x.late : 0) }, { name: 'Overdue', color: VZ.crit, values: tr.map(x => x ? x.overdue : 0) }], v => String(Math.round(v)), { int: true, empty: 'No tasks' }) + '</div>';
-  // column 3: what is late now, slow processes
-  const od = tasks.filter(t => !t.done && t.late).sort((a, b) => b.delay - a.delay);
-  const byP = {}; tasks.forEach(t => { const x = byP[t.task] || (byP[t.task] = { n: 0, late: 0, sum: 0 }); x.n++; if (t.late) { x.late++; x.sum += t.delay; } });
-  const slow = Object.entries(byP).filter(([, x]) => x.late).sort((a, b) => b[1].sum - a[1].sum).slice(0, 8);
-  const c3 = '<div class="pv-card"><h4>Overdue now · ' + od.length + '</h4>' + (od.length ? od.slice(0, 8).map(t => '<a class="pv-row lt" href="' + esc(t.link) + '"><div><b>' + esc(t.task) + '</b><i>' + esc([t.ref, t.party, isD ? t.doer : ''].filter(Boolean).join(' · ')) + '</i></div><i>' + fmtDelay(t.delay) + '</i></a>').join('') + (od.length > 8 ? '<a class="small" data-act="sx-tasks" data-d="' + esc(isD ? '' : o.k) + '" data-dept="' + esc(isD && o.k !== 'No department' ? o.k : '') + '" data-f="' + from + '" data-to="' + to + '">+' + (od.length - 8) + ' more</a>' : '') : '<div class="pv-ok">Nothing overdue</div>') + '</div>' +
-    '<div class="pv-card"><h4>Slow processes</h4>' + (slow.length ? '<table class="plm-t"><tr><th>Process</th><th class="num">Tasks</th><th class="num">Late</th><th class="num">Avg delay</th></tr>' +
-      slow.map(([k, x]) => '<tr><td>' + esc(k) + '</td><td class="num">' + x.n + '</td><td class="num late-txt">' + x.late + '</td><td class="num">' + fmtDelay(Math.round(x.sum / x.late)) + '</td></tr>').join('') + '</table>' : '<div class="pv-ok">Nothing late</div>') + '</div>';
-  h += '<div class="sxm-g"><div class="sxm-c">' + c1 + '</div><div class="sxm-c">' + c2 + '</div><div class="sxm-c">' + c3 + '</div></div></div></div>';
+  const kpi = (l, v, c, s2) => '<div class="sxk"><b class="' + (c || '') + '">' + v + '</b><i>' + l + '</i>' + (s2 ? '<span>' + s2 + '</span>' : '') + '</div>';
+  // toolbar
+  let h = '<div class="toolbar sx-bar"><button class="btn sm" data-act="sx-close">← Back</button>' + sxWhoSel(o) +
+    '<select id="sxPer">' + SX_PERIODS.map(p => '<option value="' + p.v + '"' + (p.v === SX_UI.per && !o.from ? ' selected' : '') + '>' + p.l + '</option>').join('') + (o.from ? '<option selected>' + fmtD(from) + ' – ' + fmtD(to) + '</option>' : '') + '</select>' +
+    (SX_UI.per === 'cu' && !o.from ? '<input id="sxFrom" type="date" value="' + esc(from) + '"><input id="sxTo" type="date" value="' + esc(to) + '">' : '<span class="muted small">' + fmtD(from) + ' – ' + fmtD(to) + '</span>') +
+    '<select id="sxSrc">' + selOpts(Array.from(new Set(allTasks().map(t => t.src))).sort(), SX_UI.src, 'All sources') + '</select><span class="grow"></span>' +
+    (isD ? '' : '<button class="btn sm" data-act="ht-who" data-d="' + esc(o.k) + '">Home</button>') + '</div>';
+  // profile + numbers
+  h += '<div class="sxp"><div class="sxp-id"><div class="ring" style="background:conic-gradient(' + ringC + ' ' + sxQ(A.score) + '%, var(--line2) 0)"><b>' + sxS(A.score) + '</b></div><div><div class="sxp-n">' + esc(o.k) + '</div>' +
+    '<div class="sxp-m">' + (isD ? A.people + ' people with tasks · ' + doerSet.size + ' people' : esc([u && u.name, dept, u && u.designation, role && role.name].filter(Boolean).join(' · '))) + '</div>' +
+    '<div class="sxp-m">' + (rank ? 'Rank <b>' + rank + '</b> of ' + of + (isD ? ' departments' : ' in company') : 'No scored tasks') + (dRank ? ' · Rank <b>' + dRank + '</b> of ' + inDept.length + ' in ' + esc(dept) : '') + '</div></div></div>' +
+    '<div class="sxp-k">' + kpi('Tasks', A.total) + kpi('Done', A.completed, '', pct(A.completionPct)) + kpi('On time', A.onTime, A.onTimePct >= 90 ? 'done-txt' : '', pct(A.onTimePct)) + kpi('Done late', A.late, A.late ? 'pend-txt' : '') +
+    kpi('Overdue', A.overdue, A.overdue ? 'late-txt' : '') + kpi('Pending', A.pending) + kpi('Escalations', escs.length, escs.length ? 'pend-txt' : '', 'Level 2: ' + escs.filter(e => e.level === 2).length) + '</div></div>';
+  // breakdown / people · trends
+  let c1;
+  if (isD) c1 = '<div class="dcard"><div class="dh3">People<span class="n">' + mine.length + '</span></div><div class="tbl-wrap"><table class="nopage nofilter"><tr><th>Doer</th><th class="num">Tasks</th><th class="num">Done %</th><th class="num">On-time %</th><th class="num">Overdue</th><th class="num">Score</th></tr>' +
+    (mine.length ? mine.map(r => '<tr class="click" data-act="sx-open" data-t="doer" data-k="' + esc(r.doer) + '"><td><b>' + esc(r.doer) + '</b></td><td class="num">' + r.total + '</td><td class="num">' + pct(r.completionPct) + '</td><td class="num">' + pct(r.onTimePct) + '</td><td class="num' + (r.overdue ? ' late-txt' : '') + '">' + r.overdue + '</td>' + sxScoreCell(r.score) + '</tr>').join('') : '<tr><td colspan="6" class="empty">No tasks</td></tr>') + '</table></div></div>';
+  else { const W = scoreW(); const bar = (l, v, w, hint) => '<div class="pv-bar"><span>' + l + ' <small class="muted">×' + Math.round(w * 100) + '% · ' + hint + '</small></span><b>' + pct(v) + '</b><div><i' + (v >= 90 ? ' class="g"' : '') + ' style="width:' + Math.max(0, Math.min(100, v)) + '%"></i></div></div>';
+    c1 = '<div class="dcard"><div class="dh3">Score breakdown</div><div class="ms-b">' + (R ? bar('Completion', R.completionPct, W.completion, R.completed + ' of ' + R.total + ' done') + bar('On time', R.onTimePct, W.onTime, R.onTime + ' of ' + R.completed + ' on time') + bar('Volume', R.volumePct, W.volume, R.total + ' tasks vs highest') + bar('Consistency', R.consistencyPct, W.consistency, 'month to month') +
+      '<div class="small muted">Score = ' + sxS(R.score) + ' (0 is best)</div>' : '<div class="dl-empty">No scored tasks</div>') + '</div></div>'; }
+  const tr = sxTrend(bk, isD ? sxPickDept(o.k) : sxPickDoer(o.k));
+  h += '<div class="sxp-g3">' + c1 +
+    '<div class="dcard"><div class="dh3">Score · ' + gran + '</div><div class="dcard-b">' + vzLine(bk.map(b => b.l), tr.map(x => x ? x.score : null), { h: 210, tips: bk.map(b => b.ll), sub: tr.map(x => x ? x.completed + '/' + x.total + ' done · ' + pct(x.onTimePct) + ' on time' : '') }) + '</div></div>' +
+    '<div class="dcard"><div class="dh3">Tasks · ' + gran + '</div><div class="dcard-b">' + vzColumns(bk.map(b => b.l), [{ name: 'On time', color: VZ.good, values: tr.map(x => x ? x.onTime : 0) }, { name: 'Late', color: VZ.warn, values: tr.map(x => x ? x.late : 0) }, { name: 'Overdue', color: VZ.crit, values: tr.map(x => x ? x.overdue : 0) }], v => String(Math.round(v)), { int: true, empty: 'No tasks' }) + '</div></div></div>';
+  // by source · by process
+  const grp = key => { const m = {}; scored.forEach(t => { const k = key(t); const x = m[k] || (m[k] = { k, n: 0, d: 0, ok: 0, late: 0, od: 0, sum: 0 }); x.n++; if (t.done) { x.d++; t.late ? x.late++ : x.ok++; } else if (t.late) x.od++; if (t.late) x.sum += t.delay; }); return Object.values(m).sort((a, b) => b.n - a.n); };
+  const gTbl = (title, head, rows) => '<div class="dcard"><div class="dh3">' + title + '<span class="n">' + rows.length + '</span></div><div class="tbl-wrap"><table class="nopage"><tr><th>' + head + '</th><th class="num">Tasks</th><th class="num">Done</th><th class="num">On time</th><th class="num">Late</th><th class="num">Overdue</th><th class="num">On-time %</th><th class="num">Avg delay</th></tr>' +
+    (rows.length ? rows.map(x => '<tr><td><b>' + esc(x.k) + '</b></td><td class="num">' + x.n + '</td><td class="num">' + x.d + '</td><td class="num">' + x.ok + '</td><td class="num' + (x.late ? ' pend-txt' : '') + '">' + x.late + '</td><td class="num' + (x.od ? ' late-txt' : '') + '">' + x.od + '</td><td class="num">' + (x.d ? pct(x.ok * 100 / x.d) : '') + '</td><td class="num">' + (x.late + x.od ? fmtDelay(Math.round(x.sum / (x.late + x.od))) : '') + '</td></tr>').join('') : '<tr><td colspan="8" class="empty">No tasks</td></tr>') + '</table></div></div>';
+  h += '<div class="sxp-g2">' + gTbl('By source', 'Source', grp(t => t.src)) + gTbl('By process', 'Process', grp(t => t.task)) + '</div>';
+  // every task in the period
+  const escBy = new Map(Store.all('escalations').map(e => [e.key, e]));
+  const stc = x => x.status === 'Done on time' ? 'Done' : x.status === 'Done late' ? 'Pending' : x.status === 'Delayed' ? 'Late' : x.status === 'Pending' ? 'Pending' : 'Waiting';
+  const od = list.filter(t => !t.done && t.late).length;
+  h += '<div class="dcard"><div class="dh3">All tasks<span class="n">' + list.length + '</span>' + (od ? '<span class="n red">' + od + ' overdue</span>' : '') + '</div><div class="tbl-wrap"><table><tr><th>Source</th><th>Task</th><th>Reference</th><th>Party</th>' + (isD ? '<th>Doer</th>' : '') + '<th>Planned</th><th>Actual</th><th>Status</th><th class="num">Delay</th><th>Escalation</th><th></th></tr>' +
+    (list.length ? list.map(x => { const e = escBy.get(x.key); return '<tr><td>' + esc(x.src) + '</td><td>' + esc(x.task) + '</td><td><b>' + esc(x.ref || '') + '</b></td><td>' + esc(x.party || '') + '</td>' + (isD ? '<td>' + esc(x.doer) + '</td>' : '') +
+      '<td class="nowrap">' + fmtDT(x.planned) + '</td><td class="nowrap">' + (x.actual ? fmtDT(x.actual) : '') + '</td><td><span class="st ' + stc(x) + '">' + x.status + '</span></td><td class="num' + (x.delay ? ' late-txt' : '') + '">' + (x.delay ? fmtDelay(x.delay) : '') + '</td>' +
+      '<td>' + (e ? esc(e.no) + ' · L' + e.level : '') + '</td><td><a href="' + esc(x.link) + '">Open</a></td></tr>'; }).join('') : '<tr><td colspan="11" class="empty">No tasks in this period</td></tr>') + '</table></div></div>';
+  // escalations
+  h += '<div class="dcard"><div class="dh3">Escalations<span class="n' + (escs.length ? ' red' : '') + '">' + escs.length + '</span></div><div class="tbl-wrap"><table><tr><th>Ticket</th><th>Raised</th><th>Task</th><th>Reference</th>' + (isD ? '<th>Doer</th>' : '') + '<th>Planned</th><th>Level</th><th>New date</th><th>Reason</th><th>Status</th><th>Result</th></tr>' +
+    (escs.length ? escs.map(e => '<tr><td><b>' + esc(e.no) + '</b></td><td class="nowrap">' + fmtDT(e.raised_at) + '</td><td>' + esc(e.task) + '</td><td>' + esc(e.ref || '') + '</td>' + (isD ? '<td>' + esc(e.doer) + '</td>' : '') + '<td class="nowrap">' + fmtDT(e.planned) + '</td><td><span class="st ' + (e.status !== 'Open' ? 'Done' : e.level === 2 ? 'Late' : 'Pending') + '">L' + e.level + '</span></td>' +
+      '<td class="nowrap">' + (e.commit_at ? fmtDT(e.commit_at) : '') + '</td><td>' + esc(e.commit_why || '') + '</td><td>' + esc(e.status) + '</td><td>' + esc(e.resolution || e.result || '') + '</td></tr>').join('') : '<tr><td colspan="11" class="empty">No escalations</td></tr>') + '</table></div></div>';
   return h;
-}
-function sxModal() {
-  const old = $('#sxModal'); if (old) old.remove(); if (!SX_UI.open) return;
-  const d = document.createElement('div'); d.id = 'sxModal'; d.className = 'dlg-back plm-back';
-  d.innerHTML = sxSummary(SX_UI.open);
-  d.addEventListener('click', e => { if (e.target === d) ACTIONS['sx-close'](); });
-  document.body.appendChild(d);
 }
 ACTIONS['sx-open'] = el => {
   if (!isSuperAdmin()) return;
-  SX_UI.open = { t: el.dataset.t, k: el.dataset.k, from: el.dataset.f || '', to: el.dataset.to || '' }; sxModal();
+  SX_UI.open = { t: el.dataset.t, k: el.dataset.k, from: el.dataset.f || '', to: el.dataset.to || '' }; SX_UI.tab = 'score'; HT_UI.who = ME.doer || '';
   audit('home.score_view', (el.dataset.t === 'dept' ? 'Department ' : 'Doer ') + el.dataset.k, (el.dataset.f || SX_UI.from) + ' – ' + (el.dataset.to || SX_UI.to));
+  if (curView().v !== 'home') go('home'); else VIEWS.home.render(); window.scrollTo(0, 0);
 };
-ACTIONS['sx-close'] = () => { SX_UI.open = null; const m = $('#sxModal'); if (m) m.remove(); };
-document.addEventListener('keydown', e => { if (e.key === 'Escape' && $('#sxModal')) ACTIONS['sx-close'](); });
-window.addEventListener('hashchange', () => { const m = $('#sxModal'); if (m) { m.remove(); SX_UI.open = null; } });
+ACTIONS['sx-close'] = () => { SX_UI.open = null; VIEWS.home.render(); window.scrollTo(0, 0); };
 ACTIONS['sx-tasks'] = el => { Object.assign(AT_UI, { who: el.dataset.d || '', dept: el.dataset.dept || '', st: el.dataset.dept != null ? 'delayed' : 'all', from: el.dataset.f, to: el.dataset.to, tab: 'tasks' }); go('alltasks'); };
 ACTIONS['sx-tab'] = el => { SX_UI.tab = el.dataset.v; VIEWS.home.render(); };
 function sxBind() {
   $('#main').addEventListener('change', e => {
     const id = e.target.id;
-    if (id === 'sxPer') { SX_UI.per = e.target.value; if (SX_UI.per !== 'cu') SX_UI.from = ''; }
-    else if (id === 'sxFrom' || id === 'sxTo') { const v = e.target.value; if (!v) return; SX_UI[id === 'sxFrom' ? 'from' : 'to'] = v; if (SX_UI.from > SX_UI.to) { const t = SX_UI.from; SX_UI.from = SX_UI.to; SX_UI.to = t; } }
+    if (id === 'sxWho') { const v = e.target.value; if (!v) return; const k = v.indexOf('|'); ACTIONS['sx-open']({ dataset: { t: v.slice(0, k), k: v.slice(k + 1) } }); return; }
+    if (id === 'sxPer') { if (!SX_PERIODS.some(p => p.v === e.target.value)) return; SX_UI.per = e.target.value; if (SX_UI.per !== 'cu') SX_UI.from = ''; if (SX_UI.open) { SX_UI.open.from = ''; SX_UI.open.to = ''; } }
+    else if (id === 'sxFrom' || id === 'sxTo') { if (SX_UI.open) { SX_UI.open.from = ''; SX_UI.open.to = ''; } const v = e.target.value; if (!v) return; SX_UI[id === 'sxFrom' ? 'from' : 'to'] = v; if (SX_UI.from > SX_UI.to) { const t = SX_UI.from; SX_UI.from = SX_UI.to; SX_UI.to = t; } }
     else if (id === 'sxDept') SX_UI.dept = e.target.value;
     else if (id === 'sxSrc') SX_UI.src = e.target.value;
     else return;
