@@ -112,17 +112,18 @@ VIEWS.customers = {
         '<label>Brand Name *<input id="cdbName" value="' + esc(ed ? ed.name : '') + '"></label>' +
         '<label>Contact Person<input id="cdbPerson" value="' + esc(ed ? ed.contact_person || '' : '') + '"></label>' +
         '<label>Merchandiser<input id="cdbMerch" list="dlDoersC" value="' + esc(ed ? ed.merchandiser || '' : '') + '"><datalist id="dlDoersC">' + Store.all('users').filter(u => u.doer && u.active !== false).sort((a, b) => a.doer.localeCompare(b.doer)).map(u => '<option value="' + esc(u.doer) + '" label="' + esc(doerLabel(u)) + '">' + esc(doerLabel(u)) + '</option>').join('') + '</datalist></label>' +
+        '<label>Junior Merchandiser<input id="cdbJunior" list="dlDoersC" value="' + esc(ed ? ed.junior_merchandiser || '' : '') + '"></label>' +
         '<label>Phone<input id="cdbPhone" value="' + esc(ed ? ed.phone || '' : '') + '"></label>' +
         '<button class="btn primary" data-act="cdb-save">' + (ed ? 'Update' : 'Add Brand') + '</button></div>' +
         '<div id="cdbMsg" class="small" style="margin-top:6px"></div></div></div>';
     }
     const rows = Store.all('customers').slice().sort((x, y) => String(x.name).localeCompare(String(y.name)));
-    h += '<div class="tbl-wrap"><table><tr><th>Customer ID</th><th>Brand Name</th><th>Contact Person</th><th>Merchandiser</th><th>Phone</th><th class="num">Orders</th>' + (edit ? '<th></th>' : '') + '</tr>' +
+    h += '<div class="tbl-wrap"><table><tr><th>Customer ID</th><th>Brand Name</th><th>Contact Person</th><th>Merchandiser</th><th>Junior Merchandiser</th><th>Phone</th><th class="num">Orders</th>' + (edit ? '<th></th>' : '') + '</tr>' +
       (rows.length ? rows.map(c => {
         const oc = Store.all('orders').filter(o => o.customer_id === c.id).length;
-        return '<tr' + (CDB_UI.edit === c.id ? ' style="background:var(--accent-bg)"' : '') + '><td class="mono">' + esc(c.code || '') + '</td><td><b>' + esc(c.name) + '</b></td><td>' + esc(c.contact_person || '') + '</td><td>' + esc(c.merchandiser || '') + '</td><td>' + esc(c.phone || '') + '</td><td class="num">' + (oc || '—') + '</td>' +
+        return '<tr' + (CDB_UI.edit === c.id ? ' style="background:var(--accent-bg)"' : '') + '><td class="mono">' + esc(c.code || '') + '</td><td><b>' + esc(c.name) + '</b></td><td>' + esc(c.contact_person || '') + '</td><td>' + esc(c.merchandiser || '') + '</td><td>' + esc(c.junior_merchandiser || '') + '</td><td>' + esc(c.phone || '') + '</td><td class="num">' + (oc || '—') + '</td>' +
           (edit ? '<td class="right nowrap"><button class="btn sm" data-act="cdb-edit" data-id="' + esc(c.id) + '">Edit</button> ' + (oc ? '' : '<button class="btn sm ghost danger" data-act="cdb-del" data-id="' + esc(c.id) + '" data-confirm="Delete?">×</button>') + '</td>' : '') + '</tr>';
-      }).join('') : '<tr><td colspan="7" class="empty">No brands yet — add one above</td></tr>') + '</table></div>';
+      }).join('') : '<tr><td colspan="8" class="empty">No brands yet — add one above</td></tr>') + '</table></div>';
     setMain(h);
     if (edit && !ed) { const n = $('#cdbName'); if (n && !rows.length) n.focus(); }
   }
@@ -136,12 +137,12 @@ ACTIONS['cdb-save'] = () => {
   if (Store.all('customers').some(c => c.id !== CDB_UI.edit && norm(c.name) === norm(name))) { $('#cdbMsg').innerHTML = '<span class="late-txt">This brand already exists.</span>'; return; }
   const d = CDB_UI.edit ? Store.get('customers', CDB_UI.edit) : { id: uid(), code: 'B' + String(Store.all('customers').length + 1).padStart(3, '0') };
   const oldName = d.name;
-  d.name = name; d.contact_person = $('#cdbPerson').value.trim(); d.merchandiser = $('#cdbMerch').value.trim().toUpperCase(); d.phone = $('#cdbPhone').value.trim();
+  d.name = name; d.contact_person = $('#cdbPerson').value.trim(); d.merchandiser = $('#cdbMerch').value.trim().toUpperCase(); d.junior_merchandiser = $('#cdbJunior').value.trim().toUpperCase(); d.phone = $('#cdbPhone').value.trim();
   Store.put('customers', d);
   if (CDB_UI.edit && oldName && norm(oldName) !== norm(name)) {
     Store.all('orders').filter(o => o.customer_id === d.id).forEach(o => { o.customer_name = name; o.brand = name; Store.put('orders', o); });
   }
-  audit(CDB_UI.edit ? 'cdb.edit' : 'cdb.create', name, (d.contact_person || '') + (d.merchandiser ? ' · ' + d.merchandiser : ''));
+  audit(CDB_UI.edit ? 'cdb.edit' : 'cdb.create', name, (d.contact_person || '') + (d.merchandiser ? ' · ' + d.merchandiser : '') + (d.junior_merchandiser ? ' · Jr ' + d.junior_merchandiser : ''));
   flash((CDB_UI.edit ? 'Updated' : 'Added') + ': <b>' + esc(name) + '</b>'); CDB_UI.edit = null; VIEWS.customers.render();
 };
 ACTIONS['cdb-del'] = el => {

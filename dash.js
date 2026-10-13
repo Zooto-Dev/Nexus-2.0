@@ -190,7 +190,7 @@ VIEWS.purchasedash = {
 /* ================= Merchant Dashboard: where each order is stuck, which step is the bottleneck, which doer holds work.
    A merchant sees the brands mapped to them in CDB (Merchandiser); Admin / Super Admin see all brands. ================= */
 const MD_UI = { brand: '' };
-function myBrandNames() { return Store.all('customers').filter(c => c.merchandiser && isMyMerchant(c.merchandiser)).map(c => c.name); }
+function myBrandNames() { return Store.all('customers').filter(c => (c.merchandiser && isMyMerchant(c.merchandiser)) || (c.junior_merchandiser && isMyMerchant(c.junior_merchandiser))).map(c => c.name); }
 VIEWS.merchantdash = {
   mod: 'merchant', render() {
     const admin = isAdminRole();

@@ -14,7 +14,7 @@ function fieldOpts(key) { const f = (B.draft.fields || []).find(x => x.key === k
 function doerNames() { return Array.from(new Set(Store.all('users').map(u => u.doer).filter(Boolean))).sort(); }
 function tatStr(t) { return t ? t.value + (t.unit === 'hours' ? 'h' : 'd') + (t.urgent != null && t.urgent !== '' ? ' / urgent ' + t.urgent + (t.unit === 'hours' ? 'h' : 'd') : '') : ''; }
 function doerText(d) { if (!d) return ''; if (typeof d === 'string') return d; if (d.type === 'fixed') return d.name || ''; if (d.type === 'field') return fieldLabel(d.field); if (d.type === 'lookup') return d.table + ' (by ' + fieldLabel(d.by) + ')'; return (d.rules || []).map(r => r.name).concat(d.default ? [d.default] : []).join(' / '); }
-function fieldLabel(k) { const f = (B.draft.fields || []).find(x => x.key === k); return f ? f.label : k; }
+function fieldLabel(k) { const f = (B.draft.fields || []).find(x => x.key === k) || FMS_SYS_FIELDS.find(x => x.key === k); return f ? f.label : k; }
 function describeTrigger(t) {
   if (!t) return '';
   const w = t.when ? ' (if ' + condText(t.when) + ')' : '';
@@ -343,7 +343,7 @@ function bldEditor() {
   // who
   h += '<div class="q"><div class="qh">2. Who does it?</div><select data-k="doerType">' + opt(WHO_OPTS, doer.type) + '</select>';
   if (doer.type === 'fixed') h += personSel('doerName', doer.name);
-  else if (doer.type === 'field') h += '<select data-k="doerField">' + bldFields().map(f => '<option value="' + esc(f.key) + '"' + (f.key === doer.field ? ' selected' : '') + '>' + esc(f.label) + '</option>').join('') + '</select>';
+  else if (doer.type === 'field') h += '<select data-k="doerField">' + bldFields().concat(FMS_SYS_FIELDS.filter(x => !bldFields().some(f => f.key === x.key))).map(f => '<option value="' + esc(f.key) + '"' + (f.key === doer.field ? ' selected' : '') + '>' + esc(f.label) + '</option>').join('') + '</select>';
   else if (doer.type === 'lookup') h += '<select data-k="doerTable">' + Object.keys(B.draft.doerTables || {}).map(t => '<option' + (t === doer.table ? ' selected' : '') + '>' + esc(t) + '</option>').join('') + '</select>';
   else {
     const rules = doer.rules || [];

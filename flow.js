@@ -517,7 +517,8 @@ VIEWS.swatch = {
     Store.all('inwards').filter(invApproved).forEach(i => (i.qc || []).forEach(q => {
       if (q.result !== 'Mismatch' || q.m_status) return;
       const ms = q.merchants || [];
-      if (isSuperAdmin() || ms.some(isMyMerchant) || (!ms.length && canApprove())) mine.push({ i, q });
+      const jr = (q.brands || []).some(b => { const c = Store.all('customers').find(x => norm(x.name) === norm(b)); return c && c.junior_merchandiser && isMyMerchant(c.junior_merchandiser); });
+      if (isSuperAdmin() || ms.some(isMyMerchant) || jr || (!ms.length && canApprove())) mine.push({ i, q });
     }));
     let h = '<div class="tbl-wrap"><table><tr><th>Inward</th><th>Vendor</th><th>PO</th><th>Item Code</th><th>Item Name</th><th>Brand</th><th>Merchant</th><th>QC By</th><th>Approval Card + Sample Photo</th><th>Note</th>' + (edit ? '<th></th>' : '') + '</tr>' +
       (mine.length ? mine.map(({ i, q }) => { const k = i.id + '|' + q.material;

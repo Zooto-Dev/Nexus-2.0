@@ -350,7 +350,7 @@ function orderFields(o) {
     created_at: o.created_at, order_no: o.no, brand: o.customer_name, category: o.category,
     channel: o.channel, priority: o.priority || '', po_expiry_date: o.po_expiry_date,
     order_date: o.order_date, qty: t.qty,
-    brand_merchant: ((Store.all('customers').find(c => norm(c.name) === norm(o.customer_name)) || {}).merchandiser || '')
+    brand_merchant: brandPeople(o.customer_name).merchant, brand_junior_merchant: brandPeople(o.customer_name).junior
   });
 }
 // FMS instances: sales orders (O2D) and sample development records share the same step engine
@@ -366,9 +366,13 @@ function sampleLeadClearedAt(o) {
   if (ch === 'No') return a.changes || ''; if (ch === 'Yes') return a.r_submission || '';
   return '';
 }
+// merchant and junior merchant of a brand (CDB); no junior set → the merchant does those steps
+function brandPeople(brand) { const c = Store.all('customers').find(x => norm(x.name) === norm(brand)) || {}; const m = String(c.merchandiser || '').trim(); return { merchant: m, junior: String(c.junior_merchandiser || '').trim() || m }; }
+// doers that can come from the order without being a field of the FMS
+const FMS_SYS_FIELDS = [{ key: 'brand_merchant', label: 'Brand Merchandiser (CDB)', type: 'text', source: 'system' }, { key: 'brand_junior_merchant', label: 'Brand Junior Merchandiser (CDB)', type: 'text', source: 'system' }];
 function sampleFields(o) {
   const L = o.lead_id && Store.get('samples', o.lead_id);
-  return Object.assign({}, o.extra || {}, { follows: L ? L.no : '', lead_cleared_at: sampleLeadClearedAt(o), created_at: o.created_at, order_no: o.no, sample_no: o.no, batch_no: o.batch_no, brand: o.brand, article: o.article, colour: o.colour, size: o.size, gender: o.gender, category: o.category, status: o.status || '' });
+  return Object.assign({}, o.extra || {}, { follows: L ? L.no : '', lead_cleared_at: sampleLeadClearedAt(o), created_at: o.created_at, order_no: o.no, sample_no: o.no, batch_no: o.batch_no, brand: o.brand, article: o.article, colour: o.colour, size: o.size, gender: o.gender, category: o.category, status: o.status || '', brand_merchant: brandPeople(o.brand).merchant, brand_junior_merchant: brandPeople(o.brand).junior });
 }
 function resolveOrder(o) {
   const lead = o.lead_id && Store.get('samples', o.lead_id);
@@ -480,7 +484,7 @@ function undoStep(orderId, stepId) {
 /* ================= validation of a process spec (browser port of validate_spec.js) ================= */
 function validateSpec(spec) {
   const errors = [], warns = [];
-  const ids = new Set(); const fieldKeys = new Set((spec.fields || []).map(f => f.key)); fieldKeys.add('created_at');
+  const ids = new Set(); const fieldKeys = new Set((spec.fields || []).map(f => f.key)); fieldKeys.add('created_at'); FMS_SYS_FIELDS.forEach(f => fieldKeys.add(f.key));
   const tables = spec.doerTables || {};
   if (!spec.process || !spec.process.id) errors.push('process.id missing');
   if (!Array.isArray(spec.steps) || !spec.steps.length) errors.push('No steps');
