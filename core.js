@@ -328,11 +328,29 @@ function accessLevel(dept, desig, mod) {
   if (d && d[mod]) return d[mod];
   return ((a.dept || {})[dept || ''] || {})[mod] || 'none';
 }
+// Screen access: every screen can be set on its own (key 's:<screen>'); otherwise it follows its module.
+// Order: designation screen > designation module > department screen > department module.
+function navScreens() { const out = []; NAV.forEach(g => (g.items || [g]).forEach(i => { if (i.v && i.mod && !out.some(x => x.v === i.v)) out.push({ v: i.v, l: i.l, mod: i.mod, menu: g.menu || '' }); })); return out; }
+function screenMod(v) { const s = navScreens().find(x => x.v === v); return s ? s.mod : (VIEWS[v] || {}).mod; }
+function screenAccess(dept, desig, v, mod) {
+  const a = accessOf(); const g = (a.desig || {})[(dept || '') + '|' + (desig || '')] || {}; const d = (a.dept || {})[dept || ''] || {}; const k = 's:' + v;
+  return g[k] || g[mod] || d[k] || d[mod] || 'none';
+}
+function canScreen(v, level) {
+  const mod = screenMod(v); if (!mod) return false;
+  const r = myRole(); if (!r) return false;
+  if (mod === 'users') return !!r.system;
+  if (r.system || r.admin || r.perms) return can(mod, level);
+  const p = screenAccess(ME.department, ME.designation, v, mod);
+  return level === 'edit' ? p === 'edit' : (p === 'view' || p === 'edit');
+}
 function can(mod, level) {             // level: 'view' | 'edit'
   const r = myRole(); if (!r) return false;
   if (mod === 'users') return !!r.system;           // user management: Super Admin only
   if (r.system || r.admin) return true;
-  const p = r.perms ? (r.perms[mod] || 'none') : accessLevel(ME.department, ME.designation, mod);
+  // inside a screen, the screen's own setting decides for its module
+  const cv = typeof curView === 'function' ? curView().v : ''; const onScreen = cv && screenMod(cv) === mod;
+  const p = r.perms ? (r.perms[mod] || 'none') : onScreen ? screenAccess(ME.department, ME.designation, cv, mod) : accessLevel(ME.department, ME.designation, mod);
   return level === 'edit' ? p === 'edit' : (p === 'view' || p === 'edit');
 }
 function requirePerm(mod, level) { if (can(mod, level)) return true; flash('You do not have ' + level + ' access to ' + mod + '.', 'err'); return false; }
@@ -629,7 +647,7 @@ function navIc(name) { const p = NAV_IC[name]; return p ? '<svg class="ic" viewB
 function renderNav() {
   const { v: cur, param: curP } = curView(); const c = navCounts();
   const cntHtml = k => k && k.n ? '<span class="cnt' + (k.late ? ' late' : '') + '">' + k.n + '</span>' : '';
-  const itemOk = n => (!n.sa || isSuperAdmin()) && can(n.mod, n.edit ? 'edit' : 'view');
+  const itemOk = n => (!n.sa || isSuperAdmin()) && canScreen(n.v, n.edit ? 'edit' : 'view');
   const itemOn = n => cur === n.v && (n.v === 'dispatch' ? (n.p || '') === (curP || '') : true);
   let html = '<div class="brand"><img class="logo-mark" src="nexus-mark.png" alt="">Nexus <b>2.0</b></div>';
   NAV.forEach(n => {
@@ -655,7 +673,7 @@ function route() {
   const { v, param } = curView(); const view = VIEWS[v];
   $('#nav').classList.remove('open');
   if (!view) { go('home'); return; }
-  if (!can(view.mod, view.edit ? 'edit' : 'view')) { setMain('<div class="panel empty">You do not have access to this screen. Ask an admin to update your role.</div>'); renderNav(); return; }
+  if (!(screenMod(v) && navScreens().some(x => x.v === v) ? canScreen(v, view.edit ? 'edit' : 'view') : can(view.mod, view.edit ? 'edit' : 'view'))) { setMain('<div class="panel empty">You do not have access to this screen. Ask an admin to update your role.</div>'); renderNav(); return; }
   renderNav();
   try { view.render(param); } catch (e) { console.error(e); setMain('<div class="panel">Error: ' + esc(e.message) + '</div>'); }
 }

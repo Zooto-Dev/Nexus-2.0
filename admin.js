@@ -280,12 +280,23 @@ VIEWS.roles = {
     const L = { none: 'No access', view: 'View', edit: 'Edit' };
     let h = '<div class="toolbar"><label>Department<select id="acDept">' + deptList().map(x => '<option' + (x === AC_UI.dept ? ' selected' : '') + '>' + esc(x) + '</option>').join('') + '</select></label>' +
       '<label>Designation<select id="acDesig"><option value="">All designations</option>' + desigList(AC_UI.dept).map(x => '<option' + (x === AC_UI.desig ? ' selected' : '') + '>' + esc(x) + '</option>').join('') + '</select></label></div>';
-    h += '<div class="tbl-wrap"><table class="bomflat nopage"><tr><th>Screen</th><th>Access</th><th>Users</th></tr>' + MODULES.map(m => {
+    const users = Store.all('users').filter(u => u.active !== false && !(Store.get('roles', u.role_id) || {}).system && !(Store.get('roles', u.role_id) || {}).admin && u.department === AC_UI.dept && (!AC_UI.desig || u.designation === AC_UI.desig));
+    const sel = (k, cur, opts) => '<select data-acm="' + esc(k) + '"' + (edit ? '' : ' disabled') + '>' + opts.map(([v, l]) => '<option value="' + v + '"' + (v === cur ? ' selected' : '') + '>' + esc(l) + '</option>').join('') + '</select>';
+    const scr = navScreens();
+    h += '<div class="tbl-wrap"><table class="bomflat nopage nofilter ac-t"><tr><th>Module / Screen</th><th>Access</th><th>Users</th></tr>' + MODULES.map(m => {
       const dl = dm[m.key] || 'none';
+      const modLv = gm ? (gm[m.key] || dl) : dl;
       const cur = gm ? (gm[m.key] || '') : dl;
       const opts = (gm ? [['', 'Same as department (' + L[dl] + ')']] : []).concat(Object.entries(L));
-      return '<tr><td>' + esc(m.label) + '</td><td><select data-acm="' + m.key + '"' + (edit ? '' : ' disabled') + '>' + opts.map(([v, l]) => '<option value="' + v + '"' + (v === cur ? ' selected' : '') + '>' + esc(l) + '</option>').join('') + '</select></td><td class="num">' +
-        Store.all('users').filter(u => u.active !== false && !(Store.get('roles', u.role_id) || {}).system && !(Store.get('roles', u.role_id) || {}).admin && u.department === AC_UI.dept && (!AC_UI.desig || u.designation === AC_UI.desig) && accessLevel(u.department, u.designation, m.key) !== 'none').length + '</td></tr>';
+      const rows = scr.filter(x => x.mod === m.key && x.mod !== 'users').map(x => {
+        const k = 's:' + x.v; const dS = dm[k] || ''; const gS = gm ? (gm[k] || '') : '';
+        const inherit = gm ? (gm[m.key] ? gm[m.key] : dS || dl) : modLv;
+        const curS = gm ? gS : dS;
+        const o = [['', 'Same as module (' + L[inherit] + ')']].concat(Object.entries(L));
+        const eff = curS || inherit;
+        return '<tr class="ac-s"><td><span class="ac-ind">' + esc(x.menu ? x.menu + ' › ' : '') + '</span>' + esc(x.l) + '</td><td>' + sel(k, curS, o) + '</td><td class="small muted">' + (eff === 'none' ? '' : users.length + ' user(s)') + '</td></tr>';
+      }).join('');
+      return '<tr class="ac-m"><td><b>' + esc(m.label) + '</b></td><td>' + sel(m.key, cur, opts) + '</td><td class="small">' + esc(users.filter(u => accessLevel(u.department, u.designation, m.key) !== 'none').map(u => u.name).join(', ')) + '</td></tr>' + rows;
     }).join('') + '</table></div>';
     const m = setMain(h);
     $('#acDept').addEventListener('change', e => { AC_UI.dept = e.target.value; AC_UI.desig = ''; VIEWS.roles.render(); });
@@ -294,8 +305,8 @@ VIEWS.roles = {
       const k = e.target.dataset.acm; if (!k || !requirePerm('roles', 'edit')) return;
       const st = settings(); const acc = clone(accessOf()); acc.dept = acc.dept || {}; acc.desig = acc.desig || {};
       if (AC_UI.desig) { const g = acc.desig[AC_UI.dept + '|' + AC_UI.desig] = acc.desig[AC_UI.dept + '|' + AC_UI.desig] || {}; if (e.target.value) g[k] = e.target.value; else delete g[k]; }
-      else { const g = acc.dept[AC_UI.dept] = acc.dept[AC_UI.dept] || {}; g[k] = e.target.value; }
-      st.access = acc; Store.setSettings(st); audit('access.edit', AC_UI.dept + (AC_UI.desig ? ' / ' + AC_UI.desig : ''), k + ' → ' + (e.target.value || 'same as department'));
+      else { const g = acc.dept[AC_UI.dept] = acc.dept[AC_UI.dept] || {}; if (e.target.value) g[k] = e.target.value; else delete g[k]; }
+      st.access = acc; Store.setSettings(st); audit('access.edit', AC_UI.dept + (AC_UI.desig ? ' / ' + AC_UI.desig : ''), (k.startsWith('s:') ? 'screen ' + k.slice(2) : k) + ' → ' + (e.target.value || (k.startsWith('s:') ? 'same as module' : 'same as department')));
       flash('Saved.'); renderNav(); VIEWS.roles.render();
     });
   }

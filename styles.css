@@ -828,3 +828,8 @@ td, th { vertical-align: middle; }
 .sa-row > .dcard, .sa-row > div > .dcard { margin: 0; height: 100%; }
 .sa-row > div { display: flex; flex-direction: column; }
 @media (max-width: 1000px) { .sa-row { grid-template-columns: 1fr; } .dk.sa-k { grid-template-columns: repeat(3, 1fr); } }
+.ac-t tr.ac-m td { background: #f6f8fc; border-top: 1px solid var(--line); }
+.ac-t tr.ac-s td:first-child { padding-left: 30px; }
+.ac-t .ac-ind { color: var(--faint); font-size: 12px; }
+.ac-t select { min-width: 230px; }
+.ac-t select { width: 260px; max-width: 260px; }
