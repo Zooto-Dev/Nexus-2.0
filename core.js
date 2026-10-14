@@ -336,20 +336,26 @@ function screenAccess(dept, desig, v, mod) {
   const a = accessOf(); const g = (a.desig || {})[(dept || '') + '|' + (desig || '')] || {}; const d = (a.dept || {})[dept || ''] || {}; const k = 's:' + v;
   return g[k] || g[mod] || d[k] || d[mod] || 'none';
 }
+// Admin role: full access unless a screen / module is limited in Access (settings.access.admin)
+function adminAccess(v, mod) { const a = accessOf().admin || {}; return (v && a['s:' + v]) || a[mod] || 'edit'; }
+const lvlOk = (p, level) => level === 'edit' ? p === 'edit' : (p === 'view' || p === 'edit');
 function canScreen(v, level) {
   const mod = screenMod(v); if (!mod) return false;
   const r = myRole(); if (!r) return false;
   if (mod === 'users') return !!r.system;
-  if (r.system || r.admin || r.perms) return can(mod, level);
+  if (r.system) return true;
+  if (r.admin) return lvlOk(adminAccess(v, mod), level);
+  if (r.perms) return can(mod, level);
   const p = screenAccess(ME.department, ME.designation, v, mod);
   return level === 'edit' ? p === 'edit' : (p === 'view' || p === 'edit');
 }
 function can(mod, level) {             // level: 'view' | 'edit'
   const r = myRole(); if (!r) return false;
   if (mod === 'users') return !!r.system;           // user management: Super Admin only
-  if (r.system || r.admin) return true;
+  if (r.system) return true;
   // inside a screen, the screen's own setting decides for its module
   const cv = typeof curView === 'function' ? curView().v : ''; const onScreen = cv && screenMod(cv) === mod;
+  if (r.admin) return lvlOk(adminAccess(onScreen ? cv : '', mod), level);
   const p = r.perms ? (r.perms[mod] || 'none') : onScreen ? screenAccess(ME.department, ME.designation, cv, mod) : accessLevel(ME.department, ME.designation, mod);
   return level === 'edit' ? p === 'edit' : (p === 'view' || p === 'edit');
 }

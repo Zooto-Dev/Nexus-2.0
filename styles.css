@@ -833,3 +833,13 @@ td, th { vertical-align: middle; }
 .ac-t .ac-ind { color: var(--faint); font-size: 12px; }
 .ac-t select { min-width: 230px; }
 .ac-t select { width: 260px; max-width: 260px; }
+.ac-t th.c, .ac-t td.c { text-align: center; width: 210px; }
+.ac-t tr.ac-m td { background: #f6f8fc; border-top: 1px solid var(--line); height: 46px; }
+.ac-t tr.ac-m td.click { cursor: pointer; user-select: none; }
+.ac-t tr.ac-s td:first-child { padding-left: 38px; }
+.ac-t .ac-car { display: inline-block; width: 18px; color: var(--muted); }
+.ac-t select { width: 170px; max-width: 170px; }
+.ac-chip { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11.5px; font-weight: 600; }
+.ac-chip.ac-edit, select.ac-edit { background: #e6f4ea; color: #0b6b1f; }
+.ac-chip.ac-view, select.ac-view { background: #eaf1fd; color: #1a56c8; }
+.ac-chip.ac-none, select.ac-none { background: #f1f3f6; color: #6b7482; }
