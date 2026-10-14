@@ -318,21 +318,21 @@ function saHomeHtml() {
   const score = scoreRows(SA_UI.from, SA_UI.to);
   const avg = score.length ? score.reduce((a, r) => a + r.score, 0) / score.length : null;
   const card = (href, v, l, cls) => '<a class="dk-c" href="' + href + '"><span class="l">' + l + '</span><span class="v ' + (cls || '') + '">' + v + '</span></a>';
-  let h = '<div class="dk">' + card('#/excessapproval', exc.length, 'Excess approvals', exc.length ? 'late-txt' : '') + card('#/poapproval', poa.length, 'PO approvals', poa.length ? 'pend-txt' : '') +
+  let h = '<div class="dk sa-k">' + card('#/excessapproval', exc.length, 'Excess approvals', exc.length ? 'late-txt' : '') + card('#/poapproval', poa.length, 'PO approvals', poa.length ? 'pend-txt' : '') +
     card('#/escalations', l2.length, '2nd escalations', l2.length ? 'late-txt' : '') + card('#/escalations', l1n, '1st escalations', l1n ? 'pend-txt' : '') +
     card('#/alltasks', delayed.length, 'Delayed tasks', delayed.length ? 'late-txt' : '') + card('#/home', avg == null ? '—' : avg.toFixed(2), 'Team score', scoreCls(avg)).replace('href="#/home"', 'data-act="sx-tab" data-v="score"') + '</div>';
   const tbl = (pg, head, rows, cols) => '<div class="tbl-wrap"><table data-pg="' + pg + '"><tr>' + head.map(x => '<th' + (/^#|Delay|Total|Done|Late|Open|Avg|Score|On|Overdue|Level|%/.test(x) ? ' class="num"' : '') + '>' + x + '</th>').join('') + '</tr>' + (rows.length ? rows.join('') : '<tr><td colspan="' + cols + '" class="empty">Nothing pending</td></tr>') + '</table></div>';
   const dl = m => m ? '<span class="late-txt">' + fmtDelay(m) + '</span>' : '';
   // approvals only the Super Admin gives
-  h += '<div class="dgrid"><div>';
+  h += '<div class="dgrid sa-row">';
   h += '<div class="dcard"><div class="dh3">Excess approvals<span class="n' + (exc.length ? ' red' : '') + '">' + exc.length + '</span><span class="grow"></span><a class="small" href="#/excessapproval">Open</a></div>' +
     tbl('sa_excess', ['GRN · Material', 'Vendor', 'Since', 'Planned', 'Delay'], exc.map(r => '<tr class="click" data-act="go" data-v="excessapproval"><td><b>' + esc(r.ref) + '</b></td><td>' + esc(r.party) + '</td><td class="nowrap">' + fmtDT(r.start) + '</td><td class="nowrap">' + fmtDT(r.planned) + '</td><td class="num">' + dl(r.delay) + '</td></tr>'), 5) + '</div>';
   h += '<div class="dcard"><div class="dh3">PO approvals<span class="n">' + poa.length + '</span><span class="grow"></span><a class="small" href="#/poapproval">Open</a></div>' +
     tbl('sa_po', ['PO', 'Vendor', 'Since', 'Planned', 'Delay'], poa.map(r => '<tr class="click" data-act="go" data-v="poapproval"><td><b>' + esc(r.ref) + '</b></td><td>' + esc(r.party) + '</td><td class="nowrap">' + fmtDT(r.start) + '</td><td class="nowrap">' + fmtDT(r.planned) + '</td><td class="num">' + dl(r.delay) + '</td></tr>'), 5) + '</div>';
-  h += '</div><div>';
+  h += '</div>';
   h += '<div class="dcard"><div class="dh3">2nd escalations<span class="n' + (l2.length ? ' red' : '') + '">' + l2.length + '</span><span class="grow"></span><a class="small" href="#/escalations">All</a></div>' +
     tbl('sa_esc2', ['Ticket', 'Task', 'Reference', 'Doer', 'Planned', 'New date', ''], l2.map(e => '<tr><td><b>' + esc(e.no) + '</b></td><td>' + esc(e.task) + '<div class="muted small">' + esc(e.src) + '</div></td><td>' + (e.link ? '<a href="' + esc(e.link) + '">' + esc(e.ref) + '</a>' : esc(e.ref)) + '</td><td>' + esc(e.doer) + '</td><td class="nowrap">' + fmtDT(e.planned) + '</td><td class="nowrap">' + (e.commit_at ? fmtDT(e.commit_at) : '') + '</td><td><button class="btn sm primary" data-act="esc-resolve" data-id="' + esc(e.id) + '">Resolve</button></td></tr>'), 7) + '</div>';
-  h += '</div></div>';
+
   // who is holding work up, which process is slow
   const byDoer = {};
   delayed.forEach(t => { const k = t.doer || 'NOT SET'; const x = byDoer[k] || (byDoer[k] = { doer: k, dept: t.dept, n: 0, sum: 0, max: 0, top: '' }); x.n++; x.sum += t.delay; if (t.delay > x.max) { x.max = t.delay; x.top = t.task + (t.ref ? ' · ' + t.ref : ''); } });
@@ -343,7 +343,7 @@ function saHomeHtml() {
     x.total++; if (t.done) { x.done++; if (t.late) { x.late++; x.dsum += t.delay; } } else if (t.late) { x.open++; x.osum += t.delay; }
   });
   const pRows = Object.values(byProc).filter(x => x.late || x.open).sort((a, b) => (b.osum + b.dsum) - (a.osum + a.dsum));
-  h += '<div class="dgrid"><div><div class="dcard"><div class="dh3">Held up by person<span class="n' + (dRows.length ? ' red' : '') + '">' + dRows.length + '</span></div>' +
+  h += '<div class="dgrid sa-row"><div><div class="dcard"><div class="dh3">Held up by person<span class="n' + (dRows.length ? ' red' : '') + '">' + dRows.length + '</span></div>' +
     tbl('sa_doer', ['Doer', 'Department', 'Delayed', 'Total delay', 'Longest', 'Longest task'], dRows.map(x => '<tr class="click" data-act="sc-open" data-d="' + esc(x.doer === 'NOT SET' ? '' : x.doer) + '"><td><b>' + (x.doer === 'NOT SET' ? '<span class="late-txt">Not set</span>' : esc(x.doer)) + '</b></td><td>' + esc(x.dept || '') + '</td><td class="num">' + x.n + '</td><td class="num late-txt">' + fmtDelay(x.sum) + '</td><td class="num">' + fmtDelay(x.max) + '</td><td>' + esc(x.top) + '</td></tr>'), 6) + '</div></div>' +
     '<div><div class="dcard"><div class="dh3">Slow processes<span class="n">' + pRows.length + '</span></div>' +
     tbl('sa_proc', ['Process', 'Source', 'Total', 'Late %', 'Avg delay (done)', 'Open late', 'Avg delay (open)'], pRows.map(x => '<tr><td><b>' + esc(x.task) + '</b></td><td>' + esc(x.src) + '</td><td class="num">' + x.total + '</td><td class="num">' + Math.round((x.late + x.open) * 100 / x.total) + '%</td><td class="num">' + (x.late ? fmtDelay(Math.round(x.dsum / x.late)) : '') + '</td><td class="num' + (x.open ? ' late-txt' : '') + '">' + x.open + '</td><td class="num">' + (x.open ? fmtDelay(Math.round(x.osum / x.open)) : '') + '</td></tr>'), 7) + '</div></div></div>';
