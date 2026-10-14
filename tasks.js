@@ -320,7 +320,7 @@ function saHomeHtml() {
   const card = (href, v, l, cls) => '<a class="dk-c" href="' + href + '"><span class="l">' + l + '</span><span class="v ' + (cls || '') + '">' + v + '</span></a>';
   let h = '<div class="dk">' + card('#/excessapproval', exc.length, 'Excess approvals', exc.length ? 'late-txt' : '') + card('#/poapproval', poa.length, 'PO approvals', poa.length ? 'pend-txt' : '') +
     card('#/escalations', l2.length, '2nd escalations', l2.length ? 'late-txt' : '') + card('#/escalations', l1n, '1st escalations', l1n ? 'pend-txt' : '') +
-    card('#/alltasks', delayed.length, 'Delayed tasks', delayed.length ? 'late-txt' : '') + card('#/home', avg == null ? '—' : avg.toFixed(2), 'Team score · this month', scoreCls(avg)).replace('href="#/home"', 'data-act="sx-tab" data-v="score"') + '</div>';
+    card('#/alltasks', delayed.length, 'Delayed tasks', delayed.length ? 'late-txt' : '') + card('#/home', avg == null ? '—' : avg.toFixed(2), 'Team score', scoreCls(avg)).replace('href="#/home"', 'data-act="sx-tab" data-v="score"') + '</div>';
   const tbl = (pg, head, rows, cols) => '<div class="tbl-wrap"><table data-pg="' + pg + '"><tr>' + head.map(x => '<th' + (/^#|Delay|Total|Done|Late|Open|Avg|Score|On|Overdue|Level|%/.test(x) ? ' class="num"' : '') + '>' + x + '</th>').join('') + '</tr>' + (rows.length ? rows.join('') : '<tr><td colspan="' + cols + '" class="empty">Nothing pending</td></tr>') + '</table></div>';
   const dl = m => m ? '<span class="late-txt">' + fmtDelay(m) + '</span>' : '';
   // approvals only the Super Admin gives

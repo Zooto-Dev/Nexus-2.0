@@ -785,3 +785,40 @@ a.pv-row { color: var(--text); } a.pv-row:hover { text-decoration: none; filter:
 .mrs-k .sxk { background: #fff; border: 1px solid #e3e8f1; }
 .mrsm .dcard { margin: 0; }
 .mrsm .sxm-b { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 12px; padding: 12px 16px 14px; overflow: auto; background: #f7f9fd; }
+
+/* ===== alignment & consistency pass (build 123) ===== */
+/* number columns: header text lines up with the numbers; the filter button sits on the left */
+/* filter button stays at the right; number cells keep the same right gap so digits sit under the header text */
+table:has(th.xf-th) td.num { padding-right: 26px; }
+td, th { vertical-align: middle; }
+.tbl-wrap th { white-space: nowrap; }
+/* page header: everything on one line, same height */
+.dhd > .grow + * , .dhd > label, .dhd > .seg, .dhd > .btn { align-self: center; }
+.dhd label { display: inline-flex; align-items: center; gap: 8px; margin: 0; }
+.dhd select { margin-left: 0; height: 32px; }
+.dhd .seg button, .dhd .btn { height: 32px; }
+/* dialogs: one style for every field */
+.dlg-h { color: var(--text); font-size: 16px; margin-bottom: 14px; }
+.dlg .jckv { border-collapse: separate; border-spacing: 0 8px; }
+.dlg .jckv td { border: 0; padding: 0; background: none; }
+.dlg .jckv td.k { width: 150px; padding-right: 12px; color: var(--muted); font-weight: 600; font-size: 12.5px; background: none; white-space: normal; }
+.dlg .jckv input, .dlg .jckv select, .dlg .jckv textarea { width: 100%; height: 34px; border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; background: #fff; font-size: 13px; }
+.dlg .jckv textarea { height: auto; min-height: 70px; resize: vertical; }
+.dlg .jckv input:focus, .dlg .jckv select:focus, .dlg .jckv textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-bg); background: #fff; }
+.dlg .jckv tr.hd th { background: var(--th-bg); color: var(--muted); padding: 6px 8px; }
+.dlg-f { margin-top: 8px; }
+/* IC CONFIGURATION: same table look as the rest of the app */
+.icgrid { border-collapse: separate; border-spacing: 0; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.icgrid tr.hd th { background: var(--th-bg); color: var(--muted); font-size: 12px; text-transform: none; text-align: left; padding: 8px 10px; border: 0; border-bottom: 1px solid var(--line); }
+.icgrid tr.hd th.c { text-align: center; }
+.icgrid td { border: 0; border-bottom: 1px solid var(--line2); padding: 8px 10px; font-size: 12.5px; }
+.icgrid tr:last-child td { border-bottom: 0; }
+.icgrid input, .icgrid select, .icgrid textarea { height: 32px; border: 1px solid var(--line); border-radius: 7px; font-size: 12.5px; }
+.icgrid input[type=checkbox] { accent-color: var(--accent); }
+.icgrid .tick { color: var(--done); }
+.icgrid tr.addrow td { background: #f7f9fd; }
+.icgrid .seqn { background: var(--accent); }
+.icgrid .btn.sm { height: 28px; min-width: 28px; }
+.dhd label { flex-direction: row !important; align-items: center !important; }
+.dlg .jckv tr:last-child td { border-bottom: 0 !important; }
+.icgrid td .muted.small, .icgrid td label { display: block; margin-top: 4px; }
