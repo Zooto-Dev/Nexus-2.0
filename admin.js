@@ -271,83 +271,92 @@ ACTIONS['us-new'] = () => { if (requirePerm('users', 'edit')) usDialog(null); };
 ACTIONS['us-edit'] = el => { const u = Store.get('users', el.dataset.id); if (u && usCanTouch(u) && requirePerm('users', 'edit')) usDialog(u); };
 
 /* ---------- access by department / designation ---------- */
-const AC_UI = { who: 'dept', dept: '', desig: '', open: '' };
-// Access — left: who (Super Admin · Admin · each Department and its Designations); right: the menus in navigation order.
-// A Designation follows its Department unless a screen is set for it.
-function acTarget(acc, who, dept, desig) { return who === 'admin' ? (acc.admin = acc.admin || {}) : desig ? ((acc.desig = acc.desig || {})[dept + '|' + desig] = acc.desig[dept + '|' + desig] || {}) : ((acc.dept = acc.dept || {})[dept] = acc.dept[dept] || {}); }
-function acUsers(who, dept, desig) {
+const AC_UI = { tab: 'role', role: 'admin', dept: '', desig: '', user: '', open: '' };
+const AC_L = { none: 'No access', view: 'View', edit: 'Edit' };
+// where a tab stores its settings inside settings.access
+function acStore(acc, T) {
+  if (T.tab === 'role') return T.role === 'admin' ? (acc.admin = acc.admin || {}) : (acc.role_user = acc.role_user || {});
+  if (T.tab === 'dept') return (acc.dept = acc.dept || {})[T.dept] = acc.dept[T.dept] || {};
+  if (T.tab === 'desig') { const k = T.dept + '|' + T.desig; return (acc.desig = acc.desig || {})[k] = acc.desig[k] || {}; }
+  return (acc.user = acc.user || {})[T.user] = acc.user[T.user] || {};
+}
+// a module-wide value (old style) is spread to its screens before one screen changes, so "Auto" can work per screen
+function acSpread(tgt, mod) { if (!tgt[mod]) return; if (tgt[mod] === 'none') { delete tgt[mod]; return; } navScreens().filter(x => x.mod === mod).forEach(x => { if (!tgt['s:' + x.v]) tgt['s:' + x.v] = tgt[mod]; }); delete tgt[mod]; }
+function acPeople(T) {
   return Store.all('users').filter(u => { if (u.active === false) return false; const r = Store.get('roles', u.role_id) || {};
-    if (who === 'super') return !!r.system; if (who === 'admin') return !r.system && !!r.admin;
-    return !r.system && !r.admin && u.department === dept && (!desig || u.designation === desig); });
+    if (T.tab === 'role') return T.role === 'super' ? !!r.system : T.role === 'admin' ? !r.system && !!r.admin : !r.system && !r.admin;
+    if (T.tab === 'person') return u.id === T.user;
+    if (r.system || r.admin) return false;
+    return u.department === T.dept && (T.tab !== 'desig' || u.designation === T.desig); });
 }
 VIEWS.roles = {
   mod: 'roles', render() {
-    const edit = can('roles', 'edit'); const a = accessOf();
-    const depts = deptList(); if (!AC_UI.dept || !depts.includes(AC_UI.dept)) AC_UI.dept = depts[0] || '';
-    const L = { none: 'No access', view: 'View', edit: 'Edit' };
-    const W = AC_UI.who, D = AC_UI.dept, G = W === 'dept' ? AC_UI.desig : '';
-    const dm = (a.dept || {})[D] || {}, gm = G ? ((a.desig || {})[D + '|' + G] || {}) : {};
-    const deptLv = x => dm['s:' + x.v] || dm[x.mod] || 'none';
-    const eff = x => W === 'super' ? 'edit' : W === 'admin' ? adminAccess(x.v, x.mod) : G ? (gm['s:' + x.v] || gm[x.mod] || deptLv(x)) : deptLv(x);
-    const own = x => G ? (gm['s:' + x.v] || gm[x.mod] || '') : eff(x);
+    const edit = can('roles', 'edit'); const a = accessOf(); const T = AC_UI;
+    const depts = deptList(); if (!T.dept || !depts.includes(T.dept)) T.dept = depts[0] || '';
+    const desigs = desigList(T.dept); if (T.tab === 'desig' && !desigs.includes(T.desig)) T.desig = desigs[0] || '';
+    const users = Store.all('users').filter(u => u.active !== false).sort((x, y) => x.name.localeCompare(y.name)); if (!users.some(u => u.id === T.user)) T.user = (users[0] || {}).id || '';
+    const U = Store.get('users', T.user);
     const scr = navScreens();
     const groups = NAV.filter(g => g.items || g.v).map(g => ({ name: g.menu || g.l, items: (g.items || [g]).map(i => scr.find(x => x.v === i.v)).filter((x, k, arr) => x && x.mod !== 'users' && arr.indexOf(x) === k) })).filter(g => g.items.length);
-    const lock = W === 'super' || !edit;
-    const sel = (key, cur, effv, all) => '<select class="ac-' + (cur || effv) + '" data-k="' + esc(key) + '"' + (lock ? ' disabled' : '') + '>' +
-      (all ? '<option value="">Set all…</option>' : G ? '<option value=""' + (cur ? '' : ' selected') + '>Same as department (' + L[deptLv(scr.find(x => x.v === key) || {})] + ')</option>' : '') +
-      Object.entries(L).map(([v, l]) => '<option value="' + v + '"' + (!all && v === cur ? ' selected' : '') + '>' + l + '</option>').join('') + (all && G ? '<option value="inherit">Same as department</option>' : '') + '</select>';
-    // left: who
-    const item = (who, dept, desig, label, sub) => { const on = W === who && (who !== 'dept' || (D === dept && (AC_UI.desig || '') === (desig || '')));
-      return '<a class="ac-who' + (on ? ' on' : '') + (desig ? ' sub' : '') + '" data-act="ac-who" data-w="' + who + '" data-d="' + esc(dept || '') + '" data-g="' + esc(desig || '') + '"><span>' + esc(label) + '</span><i>' + sub + '</i></a>'; };
-    let left = '<div class="ac-l"><div class="ac-lh">Roles</div>' + item('super', '', '', 'Super Admin', acUsers('super').length) + item('admin', '', '', 'Admin', acUsers('admin').length) + '<div class="ac-lh">Departments</div>';
-    depts.forEach(d => { left += item('dept', d, '', d, acUsers('dept', d).length); if (W === 'dept' && D === d) desigList(d).forEach(g => { left += item('dept', d, g, g, acUsers('dept', d, g).length); }); });
-    left += '</div>';
-    // right: access of the chosen one
-    const title = W === 'super' ? 'Super Admin' : W === 'admin' ? 'Admin' : D + (G ? ' › ' + G : '');
-    const ppl = acUsers(W, D, G);
-    const others = [['admin', '', 'Admin']].concat(depts.map(d => ['dept', d, d])).concat(depts.flatMap(d => desigList(d).map(g => ['desig', d + '|' + g, d + ' › ' + g]))).filter(o => !(o[0] === W && o[1] === D) && !(o[0] === 'desig' && o[1] === D + '|' + G) && !(o[0] === 'dept' && !G && W === 'dept' && o[1] === D));
-    let right = '<div class="ac-r"><div class="ac-rh"><div><div class="ac-title">' + esc(title) + '</div><div class="small muted">' + (W === 'super' ? 'Full access to every screen — cannot be changed' : W === 'admin' ? 'Department heads with the Admin role · company-wide' : G ? 'Only this designation · anything not set follows ' + esc(D) : 'Everyone in ' + esc(D) + ' (role User)') + '</div>' +
-      '<div class="ac-ppl">' + (ppl.length ? ppl.map(u => '<span class="chip">' + esc(u.name) + '</span>').join(' ') : '<span class="small muted">No users</span>') + '</div></div>' +
-      (lock ? '' : '<div class="ac-tools"><select id="acCopy"><option value="">Copy access from…</option>' + others.map(o => '<option value="' + esc(o[0] + '#' + o[1]) + '">' + esc(o[2]) + '</option>').join('') + '</select>' + (G ? '<button class="btn sm" data-act="ac-reset">Reset to department</button>' : '') + '</div>') + '</div>';
-    right += '<div class="tbl-wrap"><table class="nopage nofilter ac-t"><tr><th>Menu / Screen</th><th class="c">Access</th></tr>' + groups.map(g => {
-      const open = AC_UI.open === g.name; const c = { none: 0, view: 0, edit: 0 }; g.items.forEach(x => c[eff(x)]++);
-      let r = '<tr class="ac-m"><td class="click" data-act="ac-open" data-g="' + esc(g.name) + '"><span class="ac-car">' + (open ? '▾' : '▸') + '</span><b>' + esc(g.name) + '</b> <span class="muted small">' + g.items.length + ' screen' + (g.items.length > 1 ? 's' : '') + '</span></td><td class="c">' +
-        (open && !lock ? sel('g:' + g.name, '', '', true) : ['edit', 'view', 'none'].filter(k => c[k]).map(k => '<span class="ac-chip ac-' + k + '">' + L[k] + ' ' + c[k] + '</span>').join(' ')) + '</td></tr>';
-      if (open) r += g.items.map(x => '<tr class="ac-s"><td>' + esc(x.l) + '</td><td class="c">' + (W === 'super' ? '<span class="ac-chip ac-edit">Edit</span>' : sel(x.v, own(x), eff(x))) + '</td></tr>').join('');
+    const dm = (a.dept || {})[T.dept] || {}, gm = (a.desig || {})[T.dept + '|' + T.desig] || {}, ad = a.admin || {}, ru = a.role_user || {}, pu = (a.user || {})[T.user] || {};
+    const mv = (o, x) => o['s:' + x.v] || (o[x.mod] && o[x.mod] !== 'none' ? o[x.mod] : '');
+    const deptEff = x => mv(dm, x) || ru['s:' + x.v] || 'none';
+    const isSuper = T.tab === 'role' && T.role === 'super' || (T.tab === 'person' && U && (Store.get('roles', U.role_id) || {}).system);
+    // own value ('' = Auto) and what Auto gives, for this tab
+    const own = x => T.tab === 'role' ? (T.role === 'admin' ? ad['s:' + x.v] || ad[x.mod] || '' : ru['s:' + x.v] || '')
+      : T.tab === 'dept' ? mv(dm, x) : T.tab === 'desig' ? mv(gm, x) : pu['s:' + x.v] || '';
+    const auto = x => { if (T.tab === 'role') return T.role === 'admin' ? { lv: 'edit', src: 'default' } : { lv: 'none', src: 'default' };
+      if (T.tab === 'dept') return { lv: ru['s:' + x.v] || 'none', src: 'Role · User' };
+      if (T.tab === 'desig') return { lv: deptEff(x), src: 'Department' };
+      return U ? accessFor(U, x.v, x.mod, true) : { lv: 'none', src: '' }; };
+    const eff = x => isSuper ? 'edit' : own(x) || auto(x).lv;
+    const lock = !edit || isSuper;
+    const sel = (key, cur, au) => '<select class="ac-' + (cur || (au ? au.lv : '')) + '" data-k="' + esc(key) + '"' + (lock ? ' disabled' : '') + '>' +
+      (au ? '<option value=""' + (cur ? '' : ' selected') + '>Auto · ' + AC_L[au.lv] + (au.src && au.src !== 'default' ? ' (' + au.src + ')' : '') + '</option>' : '<option value="">Set all…</option><option value="auto">Auto</option>') +
+      Object.entries(AC_L).map(([v, l]) => '<option value="' + v + '"' + (v === cur ? ' selected' : '') + '>' + l + '</option>').join('') + '</select>';
+    // tabs + who
+    let h = '<div class="toolbar">' + seg('acTab', [{ v: 'role', l: 'Role' }, { v: 'dept', l: 'Department' }, { v: 'desig', l: 'Designation' }, { v: 'person', l: 'Person' }], T.tab);
+    if (T.tab === 'role') h += '<select id="acRole">' + [['admin', 'Admin'], ['user', 'User'], ['super', 'Super Admin']].map(([v, l]) => '<option value="' + v + '"' + (v === T.role ? ' selected' : '') + '>' + l + '</option>').join('') + '</select>';
+    if (T.tab === 'dept' || T.tab === 'desig') h += '<select id="acDept">' + depts.map(x => '<option' + (x === T.dept ? ' selected' : '') + '>' + esc(x) + '</option>').join('') + '</select>';
+    if (T.tab === 'desig') h += '<select id="acDesig">' + (desigs.length ? desigs.map(x => '<option' + (x === T.desig ? ' selected' : '') + '>' + esc(x) + '</option>').join('') : '<option value="">—</option>') + '</select>';
+    if (T.tab === 'person') h += '<select id="acUser">' + users.map(u => '<option value="' + esc(u.id) + '"' + (u.id === T.user ? ' selected' : '') + '>' + esc(u.name) + (u.department ? ' · ' + esc(u.department) : '') + '</option>').join('') + '</select>';
+    h += '<span class="grow"></span>' + (lock ? '' : '<button class="btn sm" data-act="ac-clear">Clear all</button>') + '</div>';
+    const ppl = acPeople(T);
+    h += '<div class="ac-ppl">' + (ppl.length ? ppl.map(u => '<span class="chip">' + esc(u.name) + '</span>').join(' ') : '<span class="small muted">No users</span>') + '</div>';
+    h += '<div class="tbl-wrap"><table class="nopage nofilter ac-t"><tr><th>Menu / Screen</th><th class="c">Access</th>' + (T.tab === 'person' ? '<th class="c">Final</th>' : '') + '</tr>' + groups.map(g => {
+      const open = T.open === g.name; const c = { none: 0, view: 0, edit: 0 }; g.items.forEach(x => c[eff(x)]++);
+      const chips = ['edit', 'view', 'none'].filter(k => c[k]).map(k => '<span class="ac-chip ac-' + k + '">' + AC_L[k] + ' ' + c[k] + '</span>').join(' ');
+      let r = '<tr class="ac-m"><td class="click" data-act="ac-open" data-g="' + esc(g.name) + '"><span class="ac-car">' + (open ? '▾' : '▸') + '</span><b>' + esc(g.name) + '</b> <span class="muted small">' + g.items.length + '</span></td><td class="c">' + (open && !lock ? sel('g:' + g.name, '', null) : chips) + '</td>' + (T.tab === 'person' ? '<td class="c">' + chips + '</td>' : '') + '</tr>';
+      if (open) r += g.items.map(x => { const f = U && T.tab === 'person' ? accessFor(U, x.v, x.mod) : null;
+        return '<tr class="ac-s"><td>' + esc(x.l) + '</td><td class="c">' + (isSuper ? '<span class="ac-chip ac-edit">Edit</span>' : sel(x.v, own(x), auto(x))) + '</td>' +
+          (f ? '<td class="c"><span class="ac-chip ac-' + f.lv + '">' + AC_L[f.lv] + '</span> <span class="small muted">' + esc(f.src) + '</span></td>' : '') + '</tr>'; }).join('');
       return r;
-    }).join('') + '</table></div></div>';
-    const m = setMain('<div class="ac-wrap">' + left + right + '</div>');
+    }).join('') + '</table></div>';
+    const m = setMain(h);
+    onSeg(e => { if (e.target.dataset.seg === 'acTab') { T.tab = e.detail; VIEWS.roles.render(); } });
+    const bind = (id, k) => { const el = $('#' + id); if (el) el.addEventListener('change', e => { T[k] = e.target.value; if (k === 'dept') T.desig = ''; VIEWS.roles.render(); }); };
+    bind('acRole', 'role'); bind('acDept', 'dept'); bind('acDesig', 'desig'); bind('acUser', 'user');
     if (lock) return;
-    const save = (acc, what, to) => { const st = settings(); st.access = acc; Store.setSettings(st); audit('access.edit', title, what + ' → ' + to); flash('Saved.'); renderNav(); VIEWS.roles.render(); };
     m.addEventListener('change', e => {
-      const t = e.target; if (!requirePerm('roles', 'edit')) return;
-      if (t.id === 'acCopy') {
-        if (!t.value) return; const [kind, key] = t.value.split('#'); const acc = clone(accessOf());
-        const dOf = d => (acc.dept || {})[d] || {}; const gOf = k2 => (acc.desig || {})[k2] || {};
-        const effOf = x => kind === 'admin' ? adminAccess(x.v, x.mod) : kind === 'dept' ? (dOf(key)['s:' + x.v] || dOf(key)[x.mod] || 'none')
-          : (gOf(key)['s:' + x.v] || gOf(key)[x.mod] || dOf(key.split('|')[0])['s:' + x.v] || dOf(key.split('|')[0])[x.mod] || 'none');
-        const label = t.options[t.selectedIndex].text;
-        if (!confirm('Copy all access of ' + label + ' to ' + title + '?')) { t.value = ''; return; }
-        const vals = scr.filter(x => x.mod !== 'users').map(x => [x.v, effOf(x)]);   // the effective right of every screen
-        const tgt = acTarget(acc, W, D, G); Object.keys(tgt).forEach(k => delete tgt[k]); vals.forEach(([v, l]) => { tgt['s:' + v] = l; });
-        return save(acc, 'copied from', label);
-      }
-      const k = t.dataset.k; if (!k || (!t.value && (!G || k.startsWith('g:')))) return;
-      const acc = clone(accessOf()); const tgt = acTarget(acc, W, D, G);
+      const t = e.target; const k = t.dataset.k; if (!k || !requirePerm('roles', 'edit')) return;
+      if (k.startsWith('g:') && !t.value) return;
+      const val = t.value === 'auto' ? '' : t.value;
+      const acc = clone(accessOf()); const tgt = acStore(acc, T);
       const list = k.startsWith('g:') ? groups.find(g => g.name === k.slice(2)).items : [scr.find(x => x.v === k)];
-      const val = t.value === 'inherit' ? '' : t.value;
-      list.forEach(x => { if (val) tgt['s:' + x.v] = val; else delete tgt['s:' + x.v]; });
-      save(acc, k.startsWith('g:') ? 'All ' + k.slice(2) : list[0].l, val ? L[val] : 'same as department');
+      list.forEach(x => { acSpread(tgt, x.mod); if (val) tgt['s:' + x.v] = val; else delete tgt['s:' + x.v]; });
+      const st = settings(); st.access = acc; Store.setSettings(st);
+      audit('access.edit', acTitle(), (k.startsWith('g:') ? 'All ' + k.slice(2) : list[0].l) + ' → ' + (val ? AC_L[val] : 'Auto'));
+      flash('Saved.'); renderNav(); VIEWS.roles.render();
     });
   }
 };
+function acTitle() { const T = AC_UI; return T.tab === 'role' ? 'Role · ' + T.role : T.tab === 'dept' ? 'Department · ' + T.dept : T.tab === 'desig' ? 'Designation · ' + T.dept + ' › ' + T.desig : 'Person · ' + ((Store.get('users', T.user) || {}).name || ''); }
 ACTIONS['ac-open'] = el => { AC_UI.open = AC_UI.open === el.dataset.g ? '' : el.dataset.g; VIEWS.roles.render(); };
-ACTIONS['ac-who'] = el => { AC_UI.who = el.dataset.w; if (el.dataset.w === 'dept') { AC_UI.dept = el.dataset.d; AC_UI.desig = el.dataset.g; } VIEWS.roles.render(); };
-ACTIONS['ac-reset'] = () => {
-  if (!requirePerm('roles', 'edit') || !AC_UI.desig) return;
-  if (!confirm('Remove every setting of ' + AC_UI.desig + ' so it follows ' + AC_UI.dept + '?')) return;
-  const acc = clone(accessOf()); delete (acc.desig || {})[AC_UI.dept + '|' + AC_UI.desig];
-  const st = settings(); st.access = acc; Store.setSettings(st); audit('access.edit', AC_UI.dept + ' › ' + AC_UI.desig, 'reset to department'); flash('Saved.'); renderNav(); VIEWS.roles.render();
+ACTIONS['ac-clear'] = () => {
+  if (!requirePerm('roles', 'edit')) return;
+  if (!confirm('Clear every setting of ' + acTitle() + ' (all screens go to Auto)?')) return;
+  const acc = clone(accessOf()); const tgt = acStore(acc, AC_UI); Object.keys(tgt).forEach(k => delete tgt[k]);
+  const st = settings(); st.access = acc; Store.setSettings(st); audit('access.edit', acTitle(), 'cleared — all Auto'); flash('Saved.'); renderNav(); VIEWS.roles.render();
 };
 
 /* ---------- settings ---------- */

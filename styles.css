@@ -859,3 +859,7 @@ td, th { vertical-align: middle; }
 .ac-t td.c, .ac-t th.c { width: 260px; }
 .ac-t select { width: 230px; max-width: 230px; }
 @media (max-width: 900px) { .ac-wrap { grid-template-columns: 1fr; } .ac-l { position: static; max-height: none; } }
+.ac-ppl { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; }
+.toolbar #acRole, .toolbar #acDept, .toolbar #acDesig, .toolbar #acUser { min-width: 200px; }
+.ac-t td.c, .ac-t th.c { width: 300px; }
+.ac-t select { width: 270px; max-width: 270px; }

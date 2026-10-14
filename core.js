@@ -334,20 +334,31 @@ function navScreens() { const out = []; NAV.forEach(g => (g.items || [g]).forEac
 function screenMod(v) { const s = navScreens().find(x => x.v === v); return s ? s.mod : (VIEWS[v] || {}).mod; }
 function screenAccess(dept, desig, v, mod) {
   const a = accessOf(); const g = (a.desig || {})[(dept || '') + '|' + (desig || '')] || {}; const d = (a.dept || {})[dept || ''] || {}; const k = 's:' + v;
-  return g[k] || g[mod] || d[k] || d[mod] || 'none';
+  return g[k] || g[mod] || d[k] || d[mod] || ((a.role_user || {})[k]) || 'none';
 }
 // Admin role: full access unless a screen / module is limited in Access (settings.access.admin)
 function adminAccess(v, mod) { const a = accessOf().admin || {}; return (v && a['s:' + v]) || a[mod] || 'edit'; }
 const lvlOk = (p, level) => level === 'edit' ? p === 'edit' : (p === 'view' || p === 'edit');
+// One answer for "what does this person get on this screen, and why":
+// Person › Designation › Department › Role (the first one that is set wins); Super Admin always has everything.
+function accessFor(u, v, mod, skipPerson) {
+  const r = (u && Store.get('roles', u.role_id)) || {}; const a = accessOf(); const k = 's:' + v;
+  if (r.system) return { lv: 'edit', src: 'Super Admin' };
+  const pu = skipPerson ? '' : ((a.user || {})[u.id] || {})[k]; if (pu) return { lv: pu, src: 'Person' };
+  if (r.admin) { const ad = a.admin || {}; return { lv: ad[k] || ad[mod] || 'edit', src: 'Role · Admin' }; }
+  // an old module-wide "No access" counts as not set, so the level below can still give the screen
+  const mv = o => o[k] || (o[mod] && o[mod] !== 'none' ? o[mod] : '');
+  const g = (a.desig || {})[(u.department || '') + '|' + (u.designation || '')] || {}; if (mv(g)) return { lv: mv(g), src: 'Designation' };
+  const d = (a.dept || {})[u.department || ''] || {}; if (mv(d)) return { lv: mv(d), src: 'Department' };
+  const ru = (a.role_user || {})[k]; if (ru) return { lv: ru, src: 'Role · User' };
+  return { lv: 'none', src: 'Not set' };
+}
 function canScreen(v, level) {
   const mod = screenMod(v); if (!mod) return false;
   const r = myRole(); if (!r) return false;
   if (mod === 'users') return !!r.system;
-  if (r.system) return true;
-  if (r.admin) return lvlOk(adminAccess(v, mod), level);
-  if (r.perms) return can(mod, level);
-  const p = screenAccess(ME.department, ME.designation, v, mod);
-  return level === 'edit' ? p === 'edit' : (p === 'view' || p === 'edit');
+  if (r.perms && !r.system && !r.admin) return can(mod, level);
+  return lvlOk(accessFor(ME, v, mod).lv, level);
 }
 function can(mod, level) {             // level: 'view' | 'edit'
   const r = myRole(); if (!r) return false;
@@ -355,8 +366,9 @@ function can(mod, level) {             // level: 'view' | 'edit'
   if (r.system) return true;
   // inside a screen, the screen's own setting decides for its module
   const cv = typeof curView === 'function' ? curView().v : ''; const onScreen = cv && screenMod(cv) === mod;
-  if (r.admin) return lvlOk(adminAccess(onScreen ? cv : '', mod), level);
-  const p = r.perms ? (r.perms[mod] || 'none') : onScreen ? screenAccess(ME.department, ME.designation, cv, mod) : accessLevel(ME.department, ME.designation, mod);
+  if (onScreen && !r.perms) return lvlOk(accessFor(ME, cv, mod).lv, level);
+  if (r.admin) return lvlOk(adminAccess('', mod), level);
+  const p = r.perms ? (r.perms[mod] || 'none') : accessLevel(ME.department, ME.designation, mod);
   return level === 'edit' ? p === 'edit' : (p === 'view' || p === 'edit');
 }
 function requirePerm(mod, level) { if (can(mod, level)) return true; flash('You do not have ' + level + ' access to ' + mod + '.', 'err'); return false; }
