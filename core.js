@@ -46,7 +46,10 @@ function flash(msg, type) {
 }
 
 /* ================= store ================= */
-const DB_KEY = 'nexus2_db_v8';
+// ?demo — a demo copy with sample data that lives only in this browser; it never connects to the cloud
+const DEMO = /[?&]demo\b/.test(location.search);
+const DB_KEY = DEMO ? 'nexus2_demo_db' : 'nexus2_db_v8';
+const ME_KEY = DEMO ? 'nexus2_demo_me' : 'nexus2_me';
 // browser copy of the data: local mode only. In cloud mode the data always loads fresh from Supabase,
 // so no copy is kept in the browser (it can be too big for browser storage, and data stays off the device)
 function saveLocal() {
@@ -58,7 +61,7 @@ function saveLocal() {
 const COLS = ['users', 'roles', 'customers', 'items', 'materials', 'processes', 'orders', 'samples', 'dispatches', 'purchase_orders', 'sourcing', 'grns', 'inwards', 'vendors', 'issues', 'rsjw', 'rtvs', 'boms', 'job_cards', 'requisitions', 'tickets', 'checklist', 'checklist_log', 'escalations', 'attributes', 'item_types', 'mail_queue', 'requirements', 'prod_reports', 'prod_plans', 'wa_log', 'audit'];
 let DB = null;
 const CFG = window.NEXUS_CONFIG || {};
-const CLOUD = !!(CFG.SUPABASE_URL && CFG.SUPABASE_ANON_KEY && window.supabase);
+const CLOUD = !DEMO && !!(CFG.SUPABASE_URL && CFG.SUPABASE_ANON_KEY && window.supabase);
 let SB = null;
 
 /* ---- small dialogs used by approvals: a reason box, and an edit box for sending corrections back ---- */
@@ -179,7 +182,7 @@ async function reauth() {
   $('#reGo', d).onclick = go; $('#rePw', d).addEventListener('keydown', ev => { if (ev.key === 'Enter') go(); });
 }
 const RETRY_Q = new Map();   // failed writes: key col|id -> {col, id, isDelete}
-function syncBadge() { const s = $('#syncState'); if (s) s.textContent = CLOUD ? (pendingWrites ? 'Saving…' : RETRY_Q.size ? RETRY_Q.size + ' change(s) retrying…' : 'Synced') : 'Local mode'; }
+function syncBadge() { const s = $('#syncState'); if (s) s.textContent = CLOUD ? (pendingWrites ? 'Saving…' : RETRY_Q.size ? RETRY_Q.size + ' change(s) retrying…' : 'Synced') : DEMO ? 'DEMO' : 'Local mode'; }
 async function cloudWrite(col, doc, isDelete) {
   pendingWrites++; syncBadge();
   try {
@@ -716,7 +719,7 @@ ACTIONS['menu'] = el => { const m = el.parentElement; const was = m.classList.co
 document.addEventListener('click', ev => { if (!ev.target.closest('.menu')) $$('#nav .menu.open').forEach(x => x.classList.remove('open')); }, true);
 ACTIONS['go'] = el => go(el.dataset.v, el.dataset.p);
 ACTIONS['undo-step'] = el => undoStep(el.dataset.o, el.dataset.s);
-ACTIONS['logout'] = async () => { localStorage.removeItem('nexus2_me'); if (SB) await SB.auth.signOut({ scope: 'local' }); location.reload(); };   // this device only, other devices stay signed in
+ACTIONS['logout'] = async () => { localStorage.removeItem(ME_KEY); if (SB) await SB.auth.signOut({ scope: 'local' }); location.reload(); };   // this device only, other devices stay signed in
 document.addEventListener('keydown', ev => {
   const typing = /INPUT|TEXTAREA|SELECT/.test((document.activeElement || {}).tagName || '');
   if (ev.key === '/' && !typing) { ev.preventDefault(); $('#gsearch').focus(); }
@@ -779,7 +782,7 @@ function loadFailed(e) {
 }
 function startApp(u) {
   if (CLOUD && !CLOUD_OK) { loadFailed(new Error('not loaded')); return; }
-  ME = u; localStorage.setItem('nexus2_me', u.id);
+  ME = u; localStorage.setItem(ME_KEY, u.id);
   $('#login').classList.add('hidden'); $('#app').classList.remove('hidden');
   const r = myRole();
   $('#who').innerHTML = esc(u.name) + ' <span class="muted">· ' + esc(r ? r.name : '') + (u.doer ? ' · ' + esc(u.doer) : '') + '</span>';
@@ -791,21 +794,21 @@ async function boot() {
   Store.loadLocal();
   if (CLOUD) { SB = window.supabase.createClient(CFG.SUPABASE_URL, CFG.SUPABASE_ANON_KEY); $('#pinLabel').textContent = 'Password'; }
   $('#loginMsg').innerHTML = CLOUD ? '' : 'Local mode — demo login: <b>admin@nexus.local</b> / PIN <b>1234</b>';
-  const saved = localStorage.getItem('nexus2_me');
+  const saved = localStorage.getItem(ME_KEY);
   if (saved) {
-    if (CLOUD) { const { data } = await SB.auth.getSession(); if (data && data.session) { try { await cloudLoad(); } catch (e) { loadFailed(e); return; } } else localStorage.removeItem('nexus2_me'); }
-    const u = (!CLOUD || CLOUD_OK) && Store.get('users', localStorage.getItem('nexus2_me'));
+    if (CLOUD) { const { data } = await SB.auth.getSession(); if (data && data.session) { try { await cloudLoad(); } catch (e) { loadFailed(e); return; } } else localStorage.removeItem(ME_KEY); }
+    const u = (!CLOUD || CLOUD_OK) && Store.get('users', localStorage.getItem(ME_KEY));
     if (u && u.active !== false) return startApp(u);
   }
   $('#login').classList.remove('hidden');
-  const f0 = $('#loginForm'); let rem = ''; try { rem = localStorage.getItem('nexus2_email') || ''; } catch (e) { }
+  const f0 = $('#loginForm'); let rem = ''; try { rem = localStorage.getItem(DEMO ? 'nexus2_demo_email' : 'nexus2_email') || ''; } catch (e) { }
   if (rem) { f0.email.value = rem; f0.pin.focus(); }
   $('#lgEye').addEventListener('click', () => { const show = f0.pin.type === 'password'; f0.pin.type = show ? 'text' : 'password'; $('#lgEye').classList.toggle('on', show); f0.pin.focus(); });
   f0.addEventListener('submit', async ev => {
     ev.preventDefault(); const f = ev.target; const btn = $('#lgGo'); $('#loginMsg').textContent = ''; btn.disabled = true; btn.classList.add('busy'); btn.firstChild.textContent = 'Signing in…';
     try {
       const u = await doLogin(f.email.value, f.pin.value);
-      try { if ($('#lgRem').checked) localStorage.setItem('nexus2_email', f.email.value.trim()); else localStorage.removeItem('nexus2_email'); } catch (e) { }
+      try { if ($('#lgRem').checked) localStorage.setItem(DEMO ? 'nexus2_demo_email' : 'nexus2_email', f.email.value.trim()); else localStorage.removeItem(DEMO ? 'nexus2_demo_email' : 'nexus2_email'); } catch (e) { }
       startApp(u);
     } catch (e) { $('#loginMsg').innerHTML = '<span class="lg-err">' + esc(e.message) + '</span>'; f.pin.select(); }
     btn.disabled = false; btn.classList.remove('busy'); btn.firstChild.textContent = 'Sign in';

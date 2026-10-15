@@ -421,7 +421,7 @@ ACTIONS['hol-add'] = () => {
 };
 ACTIONS['hol-del'] = el => { const st = settings(); st.holidays = st.holidays.filter(x => x.date !== el.dataset.d); Store.setSettings(st); audit('holiday.delete', el.dataset.d, ''); VIEWS.settings.render(); };
 ACTIONS['backup'] = () => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(DB, null, 1)], { type: 'application/json' })); a.download = 'nexus-backup-' + todayYmd() + '.json'; a.click(); audit('backup', '', 'downloaded'); };
-ACTIONS['reset-demo'] = () => { localStorage.removeItem(DB_KEY); localStorage.removeItem('nexus2_me'); location.reload(); };
+ACTIONS['reset-demo'] = () => { localStorage.removeItem(DB_KEY); localStorage.removeItem(ME_KEY); location.reload(); };
 function restoreBackup(file) {
   if (!file) return; const rd = new FileReader();
   rd.onload = () => {
