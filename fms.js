@@ -372,7 +372,7 @@ function bldEditor() {
   if (!onDate) h += '<div class="q"><div class="qh">5. ' + (before ? 'How many days before?' : 'How much time?') + '</div><div class="qline"><input data-k="tatv" type="number" step="any" min="0" value="' + esc(tat.value) + '" style="width:80px"><select data-k="tatUnit"><option value="days">working days</option><option value="hours"' + (tat.unit === 'hours' ? ' selected' : '') + '>hours</option></select></div>' +
     (before ? '' : '<div class="qline"><span>If urgent</span><input data-k="tatu" type="number" step="any" min="0" value="' + esc(tat.urgent == null ? '' : tat.urgent) + '" style="width:80px" placeholder="same"></div>') + '</div>';
   // close
-  const stt = s.status || { type: 'manual' }; const rule = FMS_RULES.find(r => r.id === stt.rule) || FMS_RULES[0];
+  const stt = s.status || { type: 'manual' }; const rule = FMS_RULES.find(r => r.id === stt.rule) || FMS_RULES.find(r => r.id === autoRuleFor(s));
   const capFields = bldFields(['date', 'datetime', 'text', 'number', 'select']).filter(f => f.source !== 'system');
   h += '<div class="q"><div class="qh">' + (onDate ? '5' : '6') + '. How does it finish?</div><select data-k="statusType"><option value="manual">Doer clicks Done</option><option value="auto"' + (stt.type === 'auto' ? ' selected' : '') + '>Finishes by itself</option></select>' +
     (stt.type === 'auto' ? '<div class="qline"><span>When</span><select data-k="stRule">' + FMS_RULES.map(r => '<option value="' + r.id + '"' + (r.id === rule.id ? ' selected' : '') + '>' + esc(r.label) + '</option>').join('') + '</select>' +
@@ -416,8 +416,16 @@ function bldCollect() {
   if (mode === 'one') delete cands[0].when;
   s.trigger = cands.length === 1 ? cands[0] : cands;
   if ($('[data-k="tatv"]', el)) { const tu = val('tatu'); s.tat = { value: num(val('tatv')), unit: val('tatUnit') || 'days' }; if (tu !== '' && tu != null) s.tat.urgent = num(tu); else if (tu == null && s.tat.urgent != null) delete s.tat.urgent; }
-  if (val('statusType') === 'auto') { s.status = { type: 'auto', rule: val('stRule') || (s.status && s.status.rule) || FMS_RULES[0].id }; const sf = val('stField'); if (sf) s.status.field = sf; delete s.capture; }
+  if (val('statusType') === 'auto') { s.status = { type: 'auto', rule: val('stRule') || (s.status && s.status.rule) || autoRuleFor(s) }; const sf = val('stField'); if (sf) s.status.field = sf; delete s.capture; }
   else { delete s.status; const cf = val('capField'); if (cf) s.capture = { field: cf }; else delete s.capture; }
+}
+// "Finishes by itself": pick the rule that fits the step name; never start on a rule that still needs a field
+function autoRuleFor(st) {
+  const n = String((st && st.name) || '').toLowerCase();
+  if (/job ?card|\bjc\b/.test(n)) return 'job_card_created';
+  if (/material|grn|inward/.test(n)) return 'material_received';
+  if (/dispatch/.test(n)) return 'order_dispatched';
+  return (FMS_RULES.find(r => !r.param) || FMS_RULES[0]).id;
 }
 ACTIONS['dr-add'] = () => { bldCollect(); const s = curStep(); s.doer.rules = (s.doer.rules || []).concat([{ when: { field: (bldFields(['select'])[0] || {}).key, in: [] }, name: '' }]); if (!bldMarkDirty()) { bldEditor(); bldSide(); } };
 ACTIONS['dr-del'] = el => { bldCollect(); const s = curStep(); s.doer.rules.splice(+el.dataset.i, 1); if (!bldMarkDirty()) { bldEditor(); bldSide(); } };

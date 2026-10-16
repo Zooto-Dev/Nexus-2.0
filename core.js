@@ -591,7 +591,7 @@ function validateSpec(spec) {
     }
     if (s.doer && s.doer.type === 'field' && !fieldKeys.has(s.doer.field)) errors.push(at + ': doer field "' + s.doer.field + '" is not a field');
     if (s.capture && !fieldKeys.has(s.capture.field)) errors.push(at + ': asks for field "' + s.capture.field + '" which is not a field');
-    if (s.status && s.status.type === 'auto') { const r = FMS_RULES.find(x => x.id === s.status.rule); if (!r) errors.push(at + ': auto-close rule missing'); else if (r.param && !fieldKeys.has(s.status.field)) errors.push(at + ': auto-close field missing'); }
+    if (s.status && s.status.type === 'auto') { const r = FMS_RULES.find(x => x.id === s.status.rule); if (!r) errors.push(at + ': auto-close rule missing'); else if (r.param && !fieldKeys.has(s.status.field)) errors.push(at + ': "Finishes by itself" — choose which order field (rule: ' + r.label + ')'); }
     const trig = Array.isArray(s.trigger) ? s.trigger : [s.trigger];
     if (!trig[0]) errors.push(at + ': trigger missing');
     trig.forEach((t, j) => {
