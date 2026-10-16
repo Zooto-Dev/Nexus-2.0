@@ -211,14 +211,52 @@ function retryNow() {
 }
 setInterval(retryNow, 20000);
 window.addEventListener('beforeunload', ev => { if (CLOUD && (pendingWrites > 0 || RETRY_Q.size)) { ev.preventDefault(); ev.returnValue = ''; } });
+// what this browser holds from the cloud: collection|id -> updated_at
+const CL_VER = new Map();
+function cloudApply(col, id, data, ver, del) {
+  const k = col + '|' + id;
+  if (RETRY_Q.has(k)) return false;                 // my own unsaved change wins until it is saved
+  if (del) { CL_VER.delete(k); if (col === 'settings') return false; const list = DB[col]; if (!list) return false; const i = list.findIndex(d => d.id === id); if (i < 0) return false; list.splice(i, 1); SNAP.delete(k); return true; }
+  if (ver) CL_VER.set(k, ver);
+  if (col === 'settings') { DB.settings = data; SNAP.set('settings|main', JSON.stringify(data)); return true; }
+  const list = DB[col]; if (!list) return false;
+  const i = list.findIndex(d => d.id === id); if (i >= 0) list[i] = data; else list.push(data);
+  SNAP.set(k, JSON.stringify(data)); return true;
+}
+function cloudRefreshView() { RES_CACHE.clear(); const a = document.activeElement; if (!a || !/INPUT|TEXTAREA|SELECT/.test(a.tagName)) { renderNav(); route(); } }
+// safety net besides the live channel: every 90 s (and when the tab comes back) compare with the cloud and pull what changed
+let SYNC_BUSY = false;
+async function cloudSync() {
+  if (!CLOUD || !SB || !CLOUD_OK || SANDBOX || SYNC_BUSY || !ME || pendingWrites) return; SYNC_BUSY = true;
+  try {
+    const seen = new Set(); const changed = {}; let from = 0; const page = 1000;
+    for (;;) {
+      const { data, error } = await SB.from('nx_docs').select('collection,id,updated_at').order('collection').order('id').range(from, from + page - 1);
+      if (error) throw error;
+      data.forEach(r => { const k = r.collection + '|' + r.id; seen.add(k); if ((r.collection === 'settings' || COLS.includes(r.collection)) && CL_VER.get(k) !== r.updated_at) (changed[r.collection] = changed[r.collection] || []).push(r.id); });
+      if (data.length < page) break; from += page;
+    }
+    let n = 0;
+    for (const [col, ids] of Object.entries(changed)) for (let i = 0; i < ids.length; i += 150) {
+      const { data, error } = await SB.from('nx_docs').select('collection,id,data,updated_at').eq('collection', col).in('id', ids.slice(i, i + 150));
+      if (error) throw error; data.forEach(r => { if (cloudApply(r.collection, r.id, r.data, r.updated_at)) n++; });
+    }
+    Array.from(CL_VER.keys()).forEach(k => { if (!seen.has(k)) { const j = k.indexOf('|'); if (cloudApply(k.slice(0, j), k.slice(j + 1), null, null, true)) n++; } });
+    if (n) cloudRefreshView();
+  } catch (e) { console.warn('sync', e); }
+  SYNC_BUSY = false;
+}
+setInterval(cloudSync, 90000);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') cloudSync(); });
 async function cloudLoad() {
-  CLOUD_OK = false;
+  CLOUD_OK = false; CL_VER.clear();
   const out = { settings: null }; COLS.forEach(c => out[c] = []);
   let from = 0; const page = 1000;
   for (;;) {
-    const { data, error } = await SB.from('nx_docs').select('collection,id,data').range(from, from + page - 1);
+    // a fixed order, so pages never skip or repeat rows while others are saving
+    const { data, error } = await SB.from('nx_docs').select('collection,id,data,updated_at').order('collection').order('id').range(from, from + page - 1);
     if (error) throw error;
-    data.forEach(r => { if (r.collection === 'settings') out.settings = r.data; else if (out[r.collection]) out[r.collection].push(r.data); });
+    data.forEach(r => { CL_VER.set(r.collection + '|' + r.id, r.updated_at); if (r.collection === 'settings') out.settings = r.data; else if (out[r.collection]) out[r.collection].push(r.data); });
     if (data.length < page) break; from += page;
   }
   if (!out.settings) {                      // empty project → seed masters (no demo orders) and push
@@ -233,12 +271,7 @@ async function cloudLoad() {
   snapAll();
   SB.channel('nx_docs').on('postgres_changes', { event: '*', schema: 'public', table: 'nx_docs' }, p => {
     const r = p.new && p.new.collection ? p.new : p.old; if (!r || !r.collection) return;
-    if (r.collection === 'settings') { DB.settings = p.new.data; SNAP.set('settings|main', JSON.stringify(p.new.data)); }
-    else if (DB[r.collection]) {
-      const list = DB[r.collection]; const i = list.findIndex(d => d.id === r.id);
-      if (p.eventType === 'DELETE') { if (i >= 0) list.splice(i, 1); SNAP.delete(r.collection + '|' + r.id); }
-      else { if (i >= 0) list[i] = p.new.data; else list.push(p.new.data); SNAP.set(r.collection + '|' + r.id, JSON.stringify(p.new.data)); }
-    }
+    cloudApply(r.collection, r.id, p.new && p.new.data, p.new && p.new.updated_at, p.eventType === 'DELETE');
     RES_CACHE.clear();
     const a = document.activeElement;
     if (!a || !/INPUT|TEXTAREA|SELECT/.test(a.tagName)) { renderNav(); route(); }
