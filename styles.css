@@ -865,3 +865,15 @@ td, th { vertical-align: middle; }
 .ac-t select { width: 270px; max-width: 270px; }
 #sbxBar { height: 30px; max-width: 260px; border-color: #f0b429; background: #fff8e1; font-weight: 600; }
 .demo-pick { width: 100%; height: 38px; margin-top: 4px; }
+/* change history */
+.aud-d { white-space: pre-line; }
+.hx-dlg { width: min(980px, 96vw); }
+.hx-wrap { max-height: 60vh; overflow: auto; margin: 6px 0; }
+.hx-t td { white-space: normal; vertical-align: top; font-size: 12px; }
+.hx-t td.mono { font-family: ui-monospace, Menlo, monospace; font-size: 11px; }
+.hx-old { background: #fdecec; color: #8a1c1c; }
+.hx-new { background: #e8f6ee; color: #11603a; }
+.hx-warn { margin: 6px 0; padding-left: 18px; }
+.hx-list tr.clk { cursor: pointer; }
+.hx-list tr.clk:hover td { background: #f3f7fb; }
+.hx-sum { max-width: 520px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

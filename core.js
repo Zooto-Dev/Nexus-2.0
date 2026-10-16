@@ -107,6 +107,11 @@ function changeLog(col, doc, isDelete) {
   if (prevS === nowS) return;
   if (!prevS) { writeLog(col + '.create', docRef(col, doc), 'created'); return; }
   let prev = {}; try { prev = JSON.parse(prevS); } catch (e) { }
+  if (col === 'processes' && typeof specDiff === 'function') {   // an FMS: every step change in full, by step name
+    const rows = specDiff(prev.spec, doc.spec); const other = ['name', 'active', 'version'].filter(k => JSON.stringify(prev[k]) !== JSON.stringify(doc[k])).map(k => k + ': ' + shortVal(k, prev[k]) + ' → ' + shortVal(k, doc[k]));
+    if (rows.length || other.length) writeLog(col + '.edit', docRef(col, doc), other.concat(rows.length ? [specDiffText(rows)] : []).join('\n'));
+    return;
+  }
   const diffs = [];
   new Set(Object.keys(prev).concat(Object.keys(doc))).forEach(k => {
     if (SKIP_KEYS.has(k)) return;
@@ -128,7 +133,7 @@ function changeLog(col, doc, isDelete) {
 }
 function writeLog(action, ref, detail) {
   if (!ME) return;
-  const a = { id: uid(), at: nowIso(), user: ME ? ME.name : 'System', user_email: ME ? ME.email : '', action, ref: String(ref || ''), detail: String(detail || '').slice(0, 2000), auto: true };
+  const a = { id: uid(), at: nowIso(), user: ME ? ME.name : 'System', user_email: ME ? ME.email : '', action, ref: String(ref || ''), detail: String(detail || '').slice(0, 8000), auto: true };
   (DB.audit || (DB.audit = [])).push(a); Store.persist('audit', a);
 }
 const Store = {
@@ -670,6 +675,7 @@ const NAV = [
     { v: 'roles', l: 'Access', mod: 'roles' },
     { v: 'settings', l: 'Settings', mod: 'settings' },
     { v: 'audit', l: 'Audit Log', mod: 'audit' },
+    { v: 'history', l: 'Change History', mod: 'audit', sa: true },
     { v: 'wainbox', l: 'WhatsApp', mod: 'audit' },
     { v: 'maillog', l: 'Mail Log', mod: 'audit' }] },
   { menu: 'Dispatch', cnt: 'dispatch', items: [
