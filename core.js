@@ -793,7 +793,7 @@ function startApp(u) {
 async function boot() {
   Store.loadLocal();
   if (CLOUD) { SB = window.supabase.createClient(CFG.SUPABASE_URL, CFG.SUPABASE_ANON_KEY); $('#pinLabel').textContent = 'Password'; }
-  $('#loginMsg').innerHTML = CLOUD ? '' : 'Local mode — demo login: <b>admin@nexus.local</b> / PIN <b>1234</b>';
+  $('#loginMsg').innerHTML = CLOUD ? '' : 'Super Admin: <b>superadmin@demo.com</b> · User: <b>user@demo.com</b> · PIN <b>1234</b>';
   const saved = localStorage.getItem(ME_KEY);
   if (saved) {
     if (CLOUD) { const { data } = await SB.auth.getSession(); if (data && data.session) { try { await cloudLoad(); } catch (e) { loadFailed(e); return; } } else localStorage.removeItem(ME_KEY); }

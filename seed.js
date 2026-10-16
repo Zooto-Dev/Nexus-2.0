@@ -32,7 +32,7 @@ function seedData(cloud) {
   const now = new Date();
   const base = {
     settings: {
-      id: 'main', company: 'My Company', gstin: '', address: '',
+      id: 'main', company: 'Demo Company Pvt Ltd', gstin: '', address: '',
       options: { category: ['Shoes', 'Slider', 'Clogs', 'V Shape', 'Eva Slider'], channel: ['Online', 'Offline', 'Export'], gender: ['Gents', 'Ladies', 'Kids', 'Unisex'], packing: ['Assortment', 'Solid'] },
       calendar: { open: '09:30', close: '18:30', lunchStart: '13:30', lunchEnd: '14:00', weeklyOff: [0], halfDays: 'exact' },
       holidays: [{ date: now.getFullYear() + '-10-02', name: 'Gandhi Jayanti' }]
@@ -46,33 +46,36 @@ function seedData(cloud) {
   };
   const U = (name, email, role_id, doer, department, designation) => ({ id: 'u_' + doer.toLowerCase(), name, email, role_id, doer, department: department || '', designation: designation || '', active: true, pin_seed: '1234', seed: !!cloud });
   base.users = cloud ? [U('Super Admin', 'admin@nexus.local', 'r_admin', 'ADMIN')] : [
-    U('Admin', 'admin@nexus.local', 'r_admin', 'ADMIN'),
-    U('Pankaj (Operations)', 'ops@nexus.local', 'r_user', 'OPS', 'OPERATIONS', 'HEAD OF OPERATIONS'),
-    U('Ashish (Purchase)', 'purchase@nexus.local', 'r_user', 'PURCHASE', 'PURCHASE', 'EXECUTIVE'),
-    U('Pooja (Merchant)', 'merchant@nexus.local', 'r_user', 'MERCHANT', 'MERCHANDISING', 'SR MERCHANT'),
-    U('Suresh (Store)', 'store@nexus.local', 'r_user', 'STORE', 'STORE', 'EXECUTIVE'),
-    U('Manoj (Development)', 'development@nexus.local', 'r_user', 'DEVELOPMENT', 'DEVELOPMENT', 'EXECUTIVE'),
-    U('Vikas (Production)', 'production@nexus.local', 'r_user', 'PRODUCTION', 'PRODUCTION', 'SUPERVISOR'),
-    U('Neha (Accounts)', 'accounts@nexus.local', 'r_user', 'ACCOUNTS', 'ACCOUNTS AND FINANCE', 'EXECUTIVE'),
-    U('Kavita (QC)', 'qc@nexus.local', 'r_user', 'QC', 'QUALITY', 'EXECUTIVE'),
-    U('Pintu (Dispatch)', 'dispatch@nexus.local', 'r_user', 'DISPATCH', 'DISPATCH', 'EXECUTIVE')
+    U('Super Admin (Demo)', 'superadmin@demo.com', 'r_admin', 'ADMIN'),
+    U('Operations Head', 'ops@demo.com', 'r_user', 'OPS', 'OPERATIONS', 'HEAD OF OPERATIONS'),
+    U('Planning Coordinator', 'pc@demo.com', 'r_user', 'PC', 'OPERATIONS', 'PC'),
+    U('Purchase Executive', 'purchase@demo.com', 'r_user', 'PURCHASE', 'PURCHASE', 'EXECUTIVE'),
+    U('Demo User (Merchant)', 'user@demo.com', 'r_user', 'MERCHANT', 'MERCHANDISING', 'SR MERCHANT'),
+    U('Merchant Two', 'merchant2@demo.com', 'r_user', 'MERCHANT2', 'MERCHANDISING', 'MERCHANT'),
+    U('Merchant Three', 'merchant3@demo.com', 'r_user', 'MERCHANT3', 'MERCHANDISING', 'MERCHANT'),
+    U('Store Executive', 'store@demo.com', 'r_user', 'STORE', 'STORE', 'EXECUTIVE'),
+    U('Development Executive', 'development@demo.com', 'r_user', 'DEVELOPMENT', 'DEVELOPMENT', 'EXECUTIVE'),
+    U('Production Supervisor', 'production@demo.com', 'r_user', 'PRODUCTION', 'PRODUCTION', 'SUPERVISOR'),
+    U('Accounts Executive', 'accounts@demo.com', 'r_user', 'ACCOUNTS', 'ACCOUNTS AND FINANCE', 'EXECUTIVE'),
+    U('QC Executive', 'qc@demo.com', 'r_user', 'QC', 'QUALITY', 'EXECUTIVE'),
+    U('Dispatch Executive', 'dispatch@demo.com', 'r_user', 'DISPATCH', 'DISPATCH', 'EXECUTIVE')
   ];
   base.processes = [{ id: 'p_o2d_v1', code: 'o2d', version: 1, name: DEFAULT_O2D_SPEC.process.name, spec: clone(DEFAULT_O2D_SPEC), active: true, created_at: now.toISOString(), created_by: 'system', note: 'Built from Nexus O2D flow chart' },
     { id: 'p_sdev_v1', code: 'sdev', version: 1, name: DEFAULT_SDEV_SPEC.process.name, spec: clone(DEFAULT_SDEV_SPEC), active: true, created_at: now.toISOString(), created_by: 'system', note: 'From Sample Development Tracker FMS (Shoes_slider_fms)' }];
   if (cloud) return base;
 
   base.customers = [
-    { id: 'c1', code: 'B001', name: 'Max', contact_person: 'Rohit Mehra', merchandiser: 'POOJA', phone: '9820000001' },
-    { id: 'c2', code: 'B002', name: 'Kappa', contact_person: 'Sanya Arora', merchandiser: 'POOJA', phone: '9810000002' },
-    { id: 'c3', code: 'B003', name: 'Pepe Jeans', contact_person: 'Vipul Jain', merchandiser: 'TANUJ', phone: '9829000003' },
-    { id: 'c4', code: 'B004', name: 'Campus', contact_person: 'Neeraj Gupta', merchandiser: 'RASHMI', phone: '9839000004' },
-    { id: 'c5', code: 'B005', name: 'Gas', contact_person: 'Anita Rao', merchandiser: 'RASHMI', phone: '9890000005' }
+    { id: 'c1', code: 'B001', name: 'Brand Alpha', contact_person: 'Customer Contact 1', merchandiser: 'MERCHANT', phone: '9000000001' },
+    { id: 'c2', code: 'B002', name: 'Brand Beta', contact_person: 'Customer Contact 2', merchandiser: 'MERCHANT', phone: '9000000002' },
+    { id: 'c3', code: 'B003', name: 'Brand Gamma', contact_person: 'Customer Contact 3', merchandiser: 'MERCHANT2', phone: '9000000003' },
+    { id: 'c4', code: 'B004', name: 'Brand Delta', contact_person: 'Customer Contact 4', merchandiser: 'MERCHANT3', phone: '9000000004' },
+    { id: 'c5', code: 'B005', name: 'Brand Omega', contact_person: 'Customer Contact 5', merchandiser: 'MERCHANT3', phone: '9000000005' }
   ];
   base.items = [
-    ['ZT-101', 'Ranger Runner', 'Shoes', 'Gents'], ['ZT-102', 'City Walk', 'Shoes', 'Ladies'],
-    ['ZT-201', 'Cloud Slide', 'Slider', 'Gents'], ['ZT-202', 'Bliss Slide', 'Slider', 'Ladies'],
-    ['ZT-301', 'Bubble Clog', 'Clogs', 'Kids'], ['ZT-302', 'Garden Clog', 'Clogs', 'Unisex'],
-    ['ZT-401', 'Wave V', 'V Shape', 'Gents'], ['ZT-501', 'Feather Eva', 'Eva Slider', 'Ladies']
+    ['DM-101', 'Demo Runner', 'Shoes', 'Gents'], ['DM-102', 'Demo Walker', 'Shoes', 'Ladies'],
+    ['DM-201', 'Demo Slide One', 'Slider', 'Gents'], ['DM-202', 'Demo Slide Two', 'Slider', 'Ladies'],
+    ['DM-301', 'Demo Clog One', 'Clogs', 'Kids'], ['DM-302', 'Demo Clog Two', 'Clogs', 'Unisex'],
+    ['DM-401', 'Demo V Style', 'V Shape', 'Gents'], ['DM-501', 'Demo Eva Slide', 'Eva Slider', 'Ladies']
   ].map((r, i) => ({ id: 'i' + (i + 1), code: r[0], name: r[1], group: r[2], gender: r[3] }));
 
   // Demo orders at different stages, built with the real engine so planned/actual are consistent.
@@ -80,13 +83,13 @@ function seedData(cloud) {
   const hoursAgo = h => new Date(now.getTime() - h * 3600000);
   const L = (art, colour, size, qty, pack, pq) => { const it = base.items.find(i => i.code === art); return { article: art, style: it.name, colour, gender: it.gender, size, qty, pack, pack_qty: pq }; };
   const plan = [
-    { c: 'c1', cat: 'Shoes', ch: 'Offline', ago: 190, done: 5, lines: [L('ZT-101', 'Black', '6X10', 600, 'Assortment', 50), L('ZT-102', 'White', '4X8', 400, 'Assortment', 40)], dd: 8 },
-    { c: 'c2', cat: 'Slider', ch: 'Online', ago: 30, done: 4, lines: [L('ZT-201', 'Navy', '6X10', 300, 'Solid', 300)], dd: 4, dispatched: true },
-    { c: 'c3', cat: 'Shoes', ch: 'Export', ago: 96, done: 2, lines: [L('ZT-101', 'Grey', '7X11', 250, 'Assortment', 25), L('ZT-501', 'Pink', '4X8', 500, 'Solid', 500)], dd: 12, late: 1 },
-    { c: 'c4', cat: 'Clogs', ch: 'Online', ago: 20, done: 1, lines: [L('ZT-301', 'Blue', '10X13', 200, 'Assortment', 20), L('ZT-302', 'Yellow', '6X9', 200, 'Assortment', 20)], dd: 6 },
-    { c: 'c5', cat: 'Slider', ch: 'Offline', ago: 50, done: 1, lines: [L('ZT-202', 'Black', '4X8', 800, 'Solid', 800)], dd: 15, pri: 'Urgent' },
-    { c: 'c1', cat: 'Shoes', ch: 'Online', ago: 3, done: 0, lines: [L('ZT-102', 'Beige', '4X8', 120, 'Solid', 120)], dd: 10 },
-    { c: 'c3', cat: 'Eva Slider', ch: 'Online', ago: 40, done: 4, lines: [L('ZT-501', 'Lilac', '4X8', 1000, 'Assortment', 100)], dd: 5 }
+    { c: 'c1', cat: 'Shoes', ch: 'Offline', ago: 190, done: 5, lines: [L('DM-101', 'Black', '6X10', 600, 'Assortment', 50), L('DM-102', 'White', '4X8', 400, 'Assortment', 40)], dd: 8 },
+    { c: 'c2', cat: 'Slider', ch: 'Online', ago: 30, done: 4, lines: [L('DM-201', 'Navy', '6X10', 300, 'Solid', 300)], dd: 4, dispatched: true },
+    { c: 'c3', cat: 'Shoes', ch: 'Export', ago: 96, done: 2, lines: [L('DM-101', 'Grey', '7X11', 250, 'Assortment', 25), L('DM-501', 'Pink', '4X8', 500, 'Solid', 500)], dd: 12, late: 1 },
+    { c: 'c4', cat: 'Clogs', ch: 'Online', ago: 20, done: 1, lines: [L('DM-301', 'Blue', '10X13', 200, 'Assortment', 20), L('DM-302', 'Yellow', '6X9', 200, 'Assortment', 20)], dd: 6 },
+    { c: 'c5', cat: 'Slider', ch: 'Offline', ago: 50, done: 1, lines: [L('DM-202', 'Black', '4X8', 800, 'Solid', 800)], dd: 15, pri: 'Urgent' },
+    { c: 'c1', cat: 'Shoes', ch: 'Online', ago: 3, done: 0, lines: [L('DM-102', 'Beige', '4X8', 120, 'Solid', 120)], dd: 10 },
+    { c: 'c3', cat: 'Eva Slider', ch: 'Online', ago: 40, done: 4, lines: [L('DM-501', 'Lilac', '4X8', 1000, 'Assortment', 100)], dd: 5 }
   ];
   let jcSeed = 2;   // continue after job cards ZF-0001/0002
   plan.forEach((p, n) => {
@@ -97,7 +100,7 @@ function seedData(cloud) {
       customer_id: cu.id, customer_name: cu.name, brand: cu.name, buyer_po: 'PO/' + (4400 + n), tooling_no: 'TM-' + (110 + n),
       po_expiry_date: ymdOf(new Date(now.getTime() + p.dd * 86400000)), channel: p.ch, category: p.cat,
       priority: p.pri || '', remarks: '', lines: p.lines,
-      process_id: 'p_o2d_v1', actuals: {}, done_by: {}, created_at: created.toISOString(), created_by: 'Rahul (Sales)', updated_at: created.toISOString()
+      process_id: 'p_o2d_v1', actuals: {}, done_by: {}, created_at: created.toISOString(), created_by: 'Sales Executive', updated_at: created.toISOString()
     };
     o.lines.forEach((l, li) => {
       if (n === 0 && li === 0) l.jc_no = 'ZF-0001';
@@ -119,48 +122,48 @@ function seedData(cloud) {
     if (p.dispatched) {
       ['packing', 'invoice'].forEach((id, j) => { if (!o.actuals[id]) o.actuals[id] = hoursAgo(4 - j).toISOString(); });
       o.actuals.dispatch = hoursAgo(1).toISOString();
-      DB.dispatches.push({ id: 'd1', no: 'DSP-' + now.getFullYear() + '-0001', order_id: o.id, date: todayYmd(), lines: o.lines.map((l, idx) => ({ idx, qty: l.qty })), invoice_no: 'INV/1021', vehicle: 'DL01AB1234', transporter: 'VRL Logistics', lr_no: 'LR5521', by: 'Pintu (Dispatch)', at: hoursAgo(1).toISOString() });
+      DB.dispatches.push({ id: 'd1', no: 'DSP-' + now.getFullYear() + '-0001', order_id: o.id, date: todayYmd(), lines: o.lines.map((l, idx) => ({ idx, qty: l.qty })), invoice_no: 'INV/1021', vehicle: 'DL01AB1234', transporter: 'Demo Transport', lr_no: 'LR5521', by: 'Dispatch Executive', at: hoursAgo(1).toISOString() });
     }
     o.updated_at = created.toISOString();
   });
   // --- department demo data ---
   base.materials = [
-    ['EVA-10', 'EVA Sheet 10mm', 'Compound', 'SHEET'], ['EVA-06', 'EVA Sheet 6mm', 'Compound', 'SHEET'],
-    ['STRAP-P', 'PVC Strap Printed', 'Grinderies', 'PAIR'], ['SOLE-TPR', 'TPR Outsole', 'Sole', 'PAIR'],
-    ['BOX-K3', 'Kraft Box No.3', 'Packaging', 'PCS'], ['LBL-BAR', 'Barcode Label Roll', 'Packaging', 'ROLL']
+    ['EVA-10', 'Dummy Item Sheet 10mm', 'Compound', 'SHEET'], ['EVA-06', 'Dummy Item Sheet 6mm', 'Compound', 'SHEET'],
+    ['STRAP-P', 'Dummy Item Strap', 'Grinderies', 'PAIR'], ['SOLE-TPR', 'Dummy Item Outsole', 'Sole', 'PAIR'],
+    ['BOX-K3', 'Dummy Item Box', 'Packaging', 'PCS'], ['LBL-BAR', 'Dummy Item Label Roll', 'Packaging', 'ROLL']
   ].map((r, i) => ({ id: 'm' + (i + 1), code: r[0], name: r[1], group: r[2], uom: r[3], min_level: [20, 20, 200, 300, 100, 5][i], rack: ['R1', 'R1', 'R2', 'R3', 'R4', 'R4'][i], price: [420, 310, 22, 38, 12, 180][i], gst: [18, 18, 12, 18, 12, 18][i], hsn: ['3921', '3921', '3926', '6406', '4819', '4821'][i] }));
   base.vendors = [
-    { id: 'v1', name: 'Shree Polymers', gstin: '08AABCS1111A1Z5', address: 'Jaipur, RJ', mobile: '9829011111', email: 'sales@shreepolymers.in' },
-    { id: 'v2', name: 'Jain Traders', gstin: '08AAFPJ2222B1Z2', address: 'Jaipur, RJ', mobile: '9829022222', email: 'jaintraders@gmail.com' },
-    { id: 'v3', name: 'Balaji Soles', gstin: '09AACCB3333C1Z8', address: 'Agra, UP', mobile: '9839033333', email: 'balajisoles@gmail.com' }
+    { id: 'v1', name: 'Demo Vendor Alpha', gstin: '', address: 'Demo City', mobile: '9000000011', email: 'vendor.alpha@example.com' },
+    { id: 'v2', name: 'Demo Vendor Beta', gstin: '', address: 'Demo City', mobile: '9000000022', email: 'vendor.beta@example.com' },
+    { id: 'v3', name: 'Demo Vendor Gamma', gstin: '', address: 'Demo City', mobile: '9000000033', email: 'vendor.gamma@example.com' }
   ];
   base.sourcing = [
-    { id: 'src1', material: 'EVA-10', vendor: 'Shree Polymers', rate: 420, moq: 50, lead_days: 7, remark: '' },
-    { id: 'src2', material: 'EVA-10', vendor: 'Jain Traders', rate: 445, moq: 20, lead_days: 4, remark: 'costly, fast' },
-    { id: 'src3', material: 'SOLE-TPR', vendor: 'Balaji Soles', rate: 38, moq: 500, lead_days: 10, remark: '' }
+    { id: 'src1', material: 'EVA-10', vendor: 'Demo Vendor Alpha', rate: 420, moq: 50, lead_days: 7, remark: '' },
+    { id: 'src2', material: 'EVA-10', vendor: 'Demo Vendor Beta', rate: 445, moq: 20, lead_days: 4, remark: 'costly, fast' },
+    { id: 'src3', material: 'SOLE-TPR', vendor: 'Demo Vendor Gamma', rate: 38, moq: 500, lead_days: 10, remark: '' }
   ];
   base.purchase_orders = [
-    { id: 'po1', no: 'ZF/PO/FY/001'.replace('FY', fyTag()), approval: 'Approved', approved_by: 'Pankaj (Manager)', date: ymdOf(hoursAgo(120)), vendor: 'Shree Polymers', expected: ymdOf(new Date(now.getTime() - 86400000)), remarks: '', created_by: 'Ashish (Purchase)', at: hoursAgo(120).toISOString(),
-      lines: [{ material: 'EVA-10', uom: 'SHEET', qty: 31, rate: 420, received: 25, rejected: 1, jc_no: 'ZF-0001' }], followups: [{ at: ymdOf(hoursAgo(24)), by: 'Ashish (Purchase)', note: 'Vendor promised delivery by tomorrow', next: todayYmd() }] },
-    { id: 'po2', no: 'ZF/PO/FY/002'.replace('FY', fyTag()), approval: 'Approved', approved_by: 'Pankaj (Manager)', date: ymdOf(hoursAgo(48)), vendor: 'Balaji Soles', expected: ymdOf(new Date(now.getTime() + 5 * 86400000)), remarks: '', created_by: 'Ashish (Purchase)', at: hoursAgo(48).toISOString(),
+    { id: 'po1', no: 'ZF/PO/FY/001'.replace('FY', fyTag()), approval: 'Approved', approved_by: 'Operations Head', date: ymdOf(hoursAgo(120)), vendor: 'Demo Vendor Alpha', expected: ymdOf(new Date(now.getTime() - 86400000)), remarks: '', created_by: 'Purchase Executive', at: hoursAgo(120).toISOString(),
+      lines: [{ material: 'EVA-10', uom: 'SHEET', qty: 31, rate: 420, received: 25, rejected: 1, jc_no: 'ZF-0001' }], followups: [{ at: ymdOf(hoursAgo(24)), by: 'Purchase Executive', note: 'Vendor promised delivery by tomorrow', next: todayYmd() }] },
+    { id: 'po2', no: 'ZF/PO/FY/002'.replace('FY', fyTag()), approval: 'Approved', approved_by: 'Operations Head', date: ymdOf(hoursAgo(48)), vendor: 'Demo Vendor Gamma', expected: ymdOf(new Date(now.getTime() + 5 * 86400000)), remarks: '', created_by: 'Purchase Executive', at: hoursAgo(48).toISOString(),
       lines: [{ material: 'SOLE-TPR', uom: 'PAIR', qty: 1000, rate: 38, received: 0, rejected: 0 }, { material: 'BOX-K3', uom: 'PCS', qty: 500, rate: 12, received: 0, rejected: 0 }], followups: [] }
   ];
-  base.grns = [{ id: 'g1', no: 'ZF/GRN/FY/0001'.replace('FY', fyTag()), inv_qty: 120, date: ymdOf(hoursAgo(30)), po_id: 'po1', po_no: base.purchase_orders[0].no, vendor: 'Shree Polymers', invoice: 'SP/221', lines: [{ material: 'EVA-10', inv_qty: 26, accepted: 25, rejected: 1, short: 0, excess: 0 }], by: 'Suresh (Store)' }];
-  base.inwards = [{ id: 'in1', no: 'INW-' + now.getFullYear() + '-0001', date: ymdOf(hoursAgo(30)), vendor: 'Shree Polymers', po_no: base.purchase_orders[0].no, material: 'EVA-10', uom: 'SHEET', qty: 26, remark: '', status: 'GRN Done', by: 'Suresh (Store)' }];
-  base.issues = [{ id: 'is1', no: 'ISS-' + now.getFullYear() + '-0001', date: todayYmd(), material: 'EVA-10', qty: 10, source: 'AUTO', to_jc: 'ZF-0001', to_dept: 'Production', status: 'Approved', by: 'Suresh (Store)', approved_by: 'Pankaj (Manager)', at: hoursAgo(5).toISOString() }];
-  base.rsjw = [{ id: 'rs1', jc_no: 'ZF-0001', material: 'EVA-10', qty: 5, by: 'Suresh (Store)', at: hoursAgo(4).toISOString() }];
-  base.boms = [{ id: 'b1', brand: 'Max', article: 'ZT-101', style: 'Ranger Runner', colour: '', version: 1, lines: [{ material: 'EVA-10', uom: 'SHEET', qty: 0.05, supplier: 'Shree Polymers' }, { material: 'SOLE-TPR', uom: 'PAIR', qty: 1, supplier: 'Balaji Soles' }, { material: 'BOX-K3', uom: 'PCS', qty: 0.5, supplier: 'Jain Traders' }], status: 'Final', by: 'Manoj (Development)', at: hoursAgo(80).toISOString() },
-    { id: 'b2', brand: 'Gas', article: 'ZT-201', style: 'Cloud Slide', colour: '', version: 1, lines: [{ material: 'EVA-06', uom: 'SHEET', qty: 0.04, supplier: 'Shree Polymers' }, { material: 'STRAP-P', uom: 'PAIR', qty: 1, supplier: 'Jain Traders' }], status: 'Final', by: 'Manoj (Development)', at: hoursAgo(60).toISOString() }];
+  base.grns = [{ id: 'g1', no: 'ZF/GRN/FY/0001'.replace('FY', fyTag()), inv_qty: 120, date: ymdOf(hoursAgo(30)), po_id: 'po1', po_no: base.purchase_orders[0].no, vendor: 'Demo Vendor Alpha', invoice: 'DV/221', lines: [{ material: 'EVA-10', inv_qty: 26, accepted: 25, rejected: 1, short: 0, excess: 0 }], by: 'Store Executive' }];
+  base.inwards = [{ id: 'in1', no: 'INW-' + now.getFullYear() + '-0001', date: ymdOf(hoursAgo(30)), vendor: 'Demo Vendor Alpha', po_no: base.purchase_orders[0].no, material: 'EVA-10', uom: 'SHEET', qty: 26, remark: '', status: 'GRN Done', by: 'Store Executive' }];
+  base.issues = [{ id: 'is1', no: 'ISS-' + now.getFullYear() + '-0001', date: todayYmd(), material: 'EVA-10', qty: 10, source: 'AUTO', to_jc: 'ZF-0001', to_dept: 'Production', status: 'Approved', by: 'Store Executive', approved_by: 'Operations Head', at: hoursAgo(5).toISOString() }];
+  base.rsjw = [{ id: 'rs1', jc_no: 'ZF-0001', material: 'EVA-10', qty: 5, by: 'Store Executive', at: hoursAgo(4).toISOString() }];
+  base.boms = [{ id: 'b1', brand: 'Brand Alpha', article: 'DM-101', style: 'Demo Runner', colour: '', version: 1, lines: [{ material: 'EVA-10', uom: 'SHEET', qty: 0.05, supplier: 'Demo Vendor Alpha' }, { material: 'SOLE-TPR', uom: 'PAIR', qty: 1, supplier: 'Demo Vendor Gamma' }, { material: 'BOX-K3', uom: 'PCS', qty: 0.5, supplier: 'Demo Vendor Beta' }], status: 'Final', by: 'Development Executive', at: hoursAgo(80).toISOString() },
+    { id: 'b2', brand: 'Brand Omega', article: 'DM-201', style: 'Demo Slide One', colour: '', version: 1, lines: [{ material: 'EVA-06', uom: 'SHEET', qty: 0.04, supplier: 'Demo Vendor Alpha' }, { material: 'STRAP-P', uom: 'PAIR', qty: 1, supplier: 'Demo Vendor Beta' }], status: 'Final', by: 'Development Executive', at: hoursAgo(60).toISOString() }];
   const jcL = (art, qty) => { const b = base.boms.find(x => x.article === art); return b.lines.map(l => ({ material: l.material, uom: l.uom, norms: l.qty, supplier: l.supplier, required: Math.ceil(l.qty * qty * 1.02 * 1000) / 1000, po_raised: 0 })); };
   base.job_cards = [
-    { id: 'jc1', no: 'ZF-0001', order_no: 'ZF-0001', brand: 'Max', article: 'ZT-101', colour: 'Black', qty: 600, lines: jcL('ZT-101', 600), swatch_status: 'Approved', swatch_note: '', status: 'Open', corrections: [], by: 'Pooja (Merchant)', at: hoursAgo(100).toISOString() },
-    { id: 'jc2', no: 'ZF-0002', order_no: 'ZF-0002', brand: 'Campus', article: 'ZT-301', colour: 'Blue', qty: 200, swatch_status: 'Pending', status: 'Open', corrections: [{ at: hoursAgo(6).toISOString(), by: 'Vikas (Production)', note: 'Colour shade should be darker', resolved: false }], by: 'Pooja (Merchant)', at: hoursAgo(18).toISOString() }
+    { id: 'jc1', no: 'ZF-0001', order_no: 'ZF-0001', brand: 'Brand Alpha', article: 'DM-101', colour: 'Black', qty: 600, lines: jcL('DM-101', 600), swatch_status: 'Approved', swatch_note: '', status: 'Open', corrections: [], by: 'Demo User (Merchant)', at: hoursAgo(100).toISOString() },
+    { id: 'jc2', no: 'ZF-0002', order_no: 'ZF-0002', brand: 'Brand Delta', article: 'DM-301', colour: 'Blue', qty: 200, swatch_status: 'Pending', status: 'Open', corrections: [{ at: hoursAgo(6).toISOString(), by: 'Production Supervisor', note: 'Colour shade should be darker', resolved: false }], by: 'Demo User (Merchant)', at: hoursAgo(18).toISOString() }
   ];
   base.job_cards[0].lines[0].po_raised = 31; // EVA-10 from approved PO-001
-  base.requisitions = [{ id: 'rq1', no: 'REQ-0001', date: todayYmd(), jc_no: base.job_cards[0].no, dept: 'Production', lines: [{ material: 'SOLE-TPR', qty: 300 }], status: 'Pending', by: 'Vikas (Production)' }];
+  base.requisitions = [{ id: 'rq1', no: 'REQ-0001', date: todayYmd(), jc_no: base.job_cards[0].no, dept: 'Production', lines: [{ material: 'SOLE-TPR', qty: 300 }], status: 'Pending', by: 'Production Supervisor' }];
   base.tickets = [
-    { id: 't1', no: 'TKT-' + now.getFullYear() + '-0001', at: hoursAgo(60).toISOString(), by: 'Vikas (Production)', dept: 'Store', priority: 'Critical', subject: 'EVA sheet shortage on line 2', detail: 'Production will stop if the material is not issued today', status: 'Open', comments: [{ at: hoursAgo(3).toISOString(), by: 'Suresh (Store)', note: 'GRN done, issuing today' }] },
-    { id: 't2', no: 'TKT-' + now.getFullYear() + '-0002', at: hoursAgo(8).toISOString(), by: 'Pooja (Merchant)', dept: 'IT', priority: 'Normal', subject: 'Printer not working', detail: '', status: 'In Progress', comments: [] }
+    { id: 't1', no: 'TKT-' + now.getFullYear() + '-0001', at: hoursAgo(60).toISOString(), by: 'Production Supervisor', dept: 'Store', priority: 'Critical', subject: 'EVA sheet shortage on line 2', detail: 'Production will stop if the material is not issued today', status: 'Open', comments: [{ at: hoursAgo(3).toISOString(), by: 'Store Executive', note: 'GRN done, issuing today' }] },
+    { id: 't2', no: 'TKT-' + now.getFullYear() + '-0002', at: hoursAgo(8).toISOString(), by: 'Demo User (Merchant)', dept: 'IT', priority: 'Normal', subject: 'Printer not working', detail: '', status: 'In Progress', comments: [] }
   ];
   base.checklist = [
     { id: 'ck1', title: 'Update stock register', doer: 'STORE', freq: 'Daily', done: {}, active: true, by: 'Admin' },
@@ -169,5 +172,16 @@ function seedData(cloud) {
   ];
   RES_CACHE.clear();
   base.audit.push({ id: uid(), at: now.toISOString(), user: 'system', action: 'seed', ref: '', detail: 'Demo data loaded' });
+  // demo: no real person in the sample flows
+  const PEOPLE = { ASHISH: 'PURCHASE', MANOJ: 'DEVELOPMENT', PINTU: 'DISPATCH', VIKASH: 'PRODUCTION', VISHNU: 'STORE', SANTOSH: 'OPS', ARYAN: 'MERCHANT2', HADMAT: 'PRODUCTION', JITESH: 'ACCOUNTS', PRIYANKA: 'OPS', POOJA: 'MERCHANT', TANUJ: 'MERCHANT2', RASHMI: 'MERCHANT3', ANAMIKA: 'PC', AJEET: 'MERCHANT', AJIT: 'MERCHANT', SACHIN: 'DEVELOPMENT' };
+  const BRANDS = { Max: 'Brand Alpha', Kappa: 'Brand Beta', 'Pepe Jeans': 'Brand Gamma', Campus: 'Brand Delta', Gas: 'Brand Omega' };
+  const DT = { 'Brand Alpha': 'MERCHANT', 'Brand Beta': 'MERCHANT', 'Brand Gamma': 'MERCHANT2', 'Brand Delta': 'MERCHANT3', 'Brand Omega': 'MERCHANT3' };
+  base.processes.forEach(p => { const t = p.spec && p.spec.doerTables; if (t) Object.keys(t).forEach(k => { t[k] = clone(DT); }); });
+  let js = JSON.stringify(base.processes);
+  Object.entries(PEOPLE).forEach(([k, v]) => { js = js.replace(new RegExp('\\b' + k + '\\b', 'g'), v); });
+  Object.entries(BRANDS).forEach(([k, v]) => { js = js.split('"' + k + '"').join('"' + v + '"'); });
+  const OK = new Set(base.users.map(u => u.doer).concat(['SYSTEM']));
+  js = js.replace(/"(name|default)":"([A-Z][A-Z .]{2,})"/g, (m, k, n) => OK.has(n) ? m : '"' + k + '":"OPS"');   // any other person in a step → OPS
+  base.processes = JSON.parse(js);
   return base;
 }
