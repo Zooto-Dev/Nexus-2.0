@@ -533,6 +533,9 @@ const FMS_RULES = [
     check: (o, f) => { const v = (o.extra || {})[f] || orderFields(o)[f]; return v ? nowIso() : null; } },
   { id: 'job_card_created', label: 'Job cards made for every order line',
     check: o => { const js = (o.lines || []).map(l => l.jc_no && jcBy(l.jc_no)); return js.length && js.every(Boolean) ? js.map(j => j.at || '').sort().pop() || nowIso() : null; } },
+  { id: 'bom_created', label: 'BOM made for every order line',
+    check: o => { if (typeof jcBomFor !== 'function') return null; const bs = (o.lines || []).map(l => jcBomFor(l.article, l.colour, o.customer_name || o.brand || '', l.style || ''));
+      if (!bs.length || !bs.every(Boolean)) return null; return bs.map(b => b.at || b.created_at || '').sort().pop() || nowIso(); } },
   { id: 'material_received', label: 'All job card material received (PO qty fully received)',
     check: o => {
       const js = (o.lines || []).map(l => l.jc_no && jcBy(l.jc_no)).filter(Boolean); if (!js.length) return null;

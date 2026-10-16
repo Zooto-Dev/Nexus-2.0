@@ -422,6 +422,7 @@ function bldCollect() {
 // "Finishes by itself": pick the rule that fits the step name; never start on a rule that still needs a field
 function autoRuleFor(st) {
   const n = String((st && st.name) || '').toLowerCase();
+  if (/\bbom\b|bill of material/.test(n)) return 'bom_created';
   if (/job ?card|\bjc\b/.test(n)) return 'job_card_created';
   if (/material|grn|inward/.test(n)) return 'material_received';
   if (/dispatch/.test(n)) return 'order_dispatched';
