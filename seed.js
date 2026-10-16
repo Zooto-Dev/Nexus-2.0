@@ -58,8 +58,16 @@ function seedData(cloud) {
     U('Production Supervisor', 'production@demo.com', 'r_user', 'PRODUCTION', 'PRODUCTION', 'SUPERVISOR'),
     U('Accounts Executive', 'accounts@demo.com', 'r_user', 'ACCOUNTS', 'ACCOUNTS AND FINANCE', 'EXECUTIVE'),
     U('QC Executive', 'qc@demo.com', 'r_user', 'QC', 'QUALITY', 'EXECUTIVE'),
-    U('Dispatch Executive', 'dispatch@demo.com', 'r_user', 'DISPATCH', 'DISPATCH', 'EXECUTIVE')
+    U('Dispatch Executive', 'dispatch@demo.com', 'r_user', 'DISPATCH', 'DISPATCH', 'EXECUTIVE'),
+    U('Department Head (Admin)', 'admin@demo.com', 'r_adm', 'DEPTHEAD', 'OPERATIONS', 'MANAGER')
   ];
+  // demo: one login for every department of the organisation, so each department can be seen through its own eyes
+  if (!cloud) DEF_ORG.forEach(o => {
+    if (base.users.some(u => u.department === o.dept)) return;
+    const slug = o.dept.toLowerCase().replace(/[^a-z0-9]+/g, '');
+    const title = o.dept.length <= 4 ? o.dept : o.dept.toLowerCase().replace(/\b[a-z]/g, c => c.toUpperCase());
+    base.users.push(U(title + ' User', slug + '@demo.com', 'r_user', slug.toUpperCase().slice(0, 12), o.dept, (o.desigs || []).find(g => !/HEAD|MANAGER/.test(g)) || (o.desigs || [])[0] || ''));
+  });
   base.processes = [{ id: 'p_o2d_v1', code: 'o2d', version: 1, name: DEFAULT_O2D_SPEC.process.name, spec: clone(DEFAULT_O2D_SPEC), active: true, created_at: now.toISOString(), created_by: 'system', note: 'Built from Nexus O2D flow chart' },
     { id: 'p_sdev_v1', code: 'sdev', version: 1, name: DEFAULT_SDEV_SPEC.process.name, spec: clone(DEFAULT_SDEV_SPEC), active: true, created_at: now.toISOString(), created_by: 'system', note: 'From Sample Development Tracker FMS (Shoes_slider_fms)' }];
   if (cloud) return base;

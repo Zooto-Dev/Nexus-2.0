@@ -48,8 +48,10 @@ function flash(msg, type) {
 /* ================= store ================= */
 // ?demo — a demo copy with sample data that lives only in this browser; it never connects to the cloud
 const DEMO = /[?&]demo\b/.test(location.search);
+// ?sandbox — Super Admin only: the real cloud data is read once into this browser tab; every change stays in the tab and nothing is ever written back
+const SANDBOX = !DEMO && /[?&]sandbox\b/.test(location.search);
 const DB_KEY = DEMO ? 'nexus2_demo_db' : 'nexus2_db_v8';
-const ME_KEY = DEMO ? 'nexus2_demo_me' : 'nexus2_me';
+const ME_KEY = DEMO ? 'nexus2_demo_me' : SANDBOX ? 'nexus2_sbx_me' : 'nexus2_me';
 // browser copy of the data: local mode only. In cloud mode the data always loads fresh from Supabase,
 // so no copy is kept in the browser (it can be too big for browser storage, and data stays off the device)
 function saveLocal() {
@@ -151,6 +153,7 @@ const Store = {
   persist(col, doc, isDelete) {
     saveLocal();
     // cloud: write only after the full cloud data has loaded in this session — never push the built-in demo data
+    if (SANDBOX) return;   // sandbox: changes stay in this tab only
     if (CLOUD && SB) { if (CLOUD_OK) cloudWrite(col, doc, isDelete); else console.warn('Cloud write blocked (data not loaded):', col, doc.id); }
   },
   loadLocal() {
@@ -182,7 +185,7 @@ async function reauth() {
   $('#reGo', d).onclick = go; $('#rePw', d).addEventListener('keydown', ev => { if (ev.key === 'Enter') go(); });
 }
 const RETRY_Q = new Map();   // failed writes: key col|id -> {col, id, isDelete}
-function syncBadge() { const s = $('#syncState'); if (s) s.textContent = CLOUD ? (pendingWrites ? 'Saving…' : RETRY_Q.size ? RETRY_Q.size + ' change(s) retrying…' : 'Synced') : DEMO ? 'DEMO' : 'Local mode'; }
+function syncBadge() { const s = $('#syncState'); if (s) s.textContent = SANDBOX ? 'SANDBOX · nothing is saved' : CLOUD ? (pendingWrites ? 'Saving…' : RETRY_Q.size ? RETRY_Q.size + ' change(s) retrying…' : 'Synced') : DEMO ? 'DEMO' : 'Local mode'; }
 async function cloudWrite(col, doc, isDelete) {
   pendingWrites++; syncBadge();
   try {
@@ -775,25 +778,53 @@ function migrateDb() {
   if (typeof seedItemMasters === 'function') seedItemMasters();
 }
 // cloud data did not load: stop here (never run on the built-in demo data) and offer Retry
-function loadFailed(e) {
+function loadFailed(e, plain) {
   const l = $('#login'); l.classList.remove('hidden');
-  $('#loginMsg').innerHTML = '<span class="lg-err">Data did not load from the cloud (' + esc((e && e.message) || e) + '). Check the internet.</span> <button type="button" class="btn sm primary" onclick="location.reload()">Retry</button>';
+  $('#loginMsg').innerHTML = plain ? '<span class="lg-err">' + esc(plain) + '</span>' : '<span class="lg-err">Data did not load from the cloud (' + esc((e && e.message) || e) + '). Check the internet.</span> <button type="button" class="btn sm primary" onclick="location.reload()">Retry</button>';
   $('#loginForm').style.display = 'none';
 }
 function startApp(u) {
   if (CLOUD && !CLOUD_OK) { loadFailed(new Error('not loaded')); return; }
+  if (SANDBOX && !(Store.get('roles', u.role_id) || {}).system) { loadFailed(null, 'Sandbox is for the Super Admin only.'); return; }
+  if (SANDBOX && !SBX_REAL) SBX_REAL = u;
   ME = u; localStorage.setItem(ME_KEY, u.id);
   $('#login').classList.add('hidden'); $('#app').classList.remove('hidden');
   const r = myRole();
   $('#who').innerHTML = esc(u.name) + ' <span class="muted">· ' + esc(r ? r.name : '') + (u.doer ? ' · ' + esc(u.doer) : '') + '</span>';
   migrateDb();
-  syncBadge(); if (!location.hash) go(can('tasks', 'view') && !can('dashboard', 'view') ? 'tasks' : 'home'); route();
+  syncBadge(); sbxBar(); if (!location.hash) go(can('tasks', 'view') && !can('dashboard', 'view') ? 'tasks' : 'home'); route();
   setInterval(() => { RES_CACHE.clear(); const a = document.activeElement; if (!a || !/INPUT|TEXTAREA|SELECT/.test(a.tagName)) { renderNav(); if (['home', 'tasks', 'tracker'].includes(curView().v)) route(); } }, 60000);
+}
+// Sandbox: reads only. Every write, mail, WhatsApp or live channel is cut off at the client.
+let SBX_REAL = null;
+function sandboxGuard(sb) {
+  const from0 = sb.from.bind(sb);
+  const blocked = () => { const f = { eq: () => f, in: () => f, select: () => f, single: () => f, order: () => f, limit: () => f, then: (r, j) => Promise.resolve({ data: null, error: { message: 'Sandbox — not saved' } }).then(r, j) }; return f; };
+  sb.from = t => { const q = from0(t); ['insert', 'upsert', 'update', 'delete'].forEach(m => { q[m] = blocked; }); return q; };
+  Object.defineProperty(sb, 'functions', { value: { invoke: async () => ({ data: null, error: { message: 'Sandbox — nothing is sent' } }) } });
+  sb.channel = () => ({ on() { return this; }, subscribe() { return this; } }); sb.removeChannel = () => {};
+}
+// Sandbox: look at the app as any user (Super Admin only)
+function sbxViewAs(id) {
+  const u = id ? Store.get('users', id) : SBX_REAL; if (!u) return;
+  ME = u; const r = myRole();
+  $('#who').innerHTML = esc(u.name) + ' <span class="muted">· ' + esc(r ? r.name : '') + (u.doer ? ' · ' + esc(u.doer) : '') + '</span>';
+  RES_CACHE.clear(); if (typeof HT_UI !== 'undefined') HT_UI.who = ''; go('home'); route(); sbxBar();
+}
+function sbxBar() {
+  if (!SANDBOX || !SBX_REAL) return; let b = $('#sbxBar');
+  if (!b) { b = document.createElement('select'); b.id = 'sbxBar'; b.addEventListener('change', () => sbxViewAs(b.value)); $('#syncState').after(b); }
+  const by = {}; Store.all('users').filter(u => u.active !== false && u.id !== SBX_REAL.id).forEach(u => { (by[u.department || 'No department'] = by[u.department || 'No department'] || []).push(u); });
+  b.innerHTML = '<option value="">View as: ' + esc(SBX_REAL.name) + ' (me)</option>' + Object.keys(by).sort().map(d => '<optgroup label="' + esc(d) + '">' + by[d].sort((x, y) => x.name.localeCompare(y.name)).map(u => '<option value="' + esc(u.id) + '"' + (ME && ME.id === u.id ? ' selected' : '') + '>' + esc(u.name) + (u.designation ? ' · ' + esc(u.designation) : '') + '</option>').join('') + '</optgroup>').join('');
 }
 async function boot() {
   Store.loadLocal();
-  if (CLOUD) { SB = window.supabase.createClient(CFG.SUPABASE_URL, CFG.SUPABASE_ANON_KEY); $('#pinLabel').textContent = 'Password'; }
-  $('#loginMsg').innerHTML = CLOUD ? '' : 'Super Admin: <b>superadmin@demo.com</b> · User: <b>user@demo.com</b> · PIN <b>1234</b>';
+  if (CLOUD) { SB = window.supabase.createClient(CFG.SUPABASE_URL, CFG.SUPABASE_ANON_KEY); $('#pinLabel').textContent = 'Password'; if (SANDBOX) sandboxGuard(SB); }
+  if (!CLOUD) {   // demo / local: pick any demo user to see the app through their eyes (PIN 1234)
+    const us = Store.all('users').filter(u => u.active !== false && u.pin_seed).sort((x, y) => (x.department || '').localeCompare(y.department || '') || x.name.localeCompare(y.name));
+    $('#loginMsg').innerHTML = '<select id="demoPick" class="demo-pick"><option value="">Login as… (PIN 1234)</option>' + us.map(u => '<option value="' + esc(u.email) + '">' + esc(u.name) + ' — ' + esc(u.department || (Store.get('roles', u.role_id) || {}).name || '') + '</option>').join('') + '</select>';
+    $('#demoPick').addEventListener('change', e => { const f = $('#loginForm'); if (!e.target.value) return; f.email.value = e.target.value; f.pin.value = '1234'; f.requestSubmit(); });
+  }
   const saved = localStorage.getItem(ME_KEY);
   if (saved) {
     if (CLOUD) { const { data } = await SB.auth.getSession(); if (data && data.session) { try { await cloudLoad(); } catch (e) { loadFailed(e); return; } } else localStorage.removeItem(ME_KEY); }
