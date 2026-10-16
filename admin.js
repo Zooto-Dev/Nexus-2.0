@@ -378,7 +378,7 @@ VIEWS.settings = {
       OPT_KEYS.map(([k, l]) => '<label style="margin-bottom:8px">' + l + '<input data-opt="' + k + '" value="' + esc(optList(k).join(', ')) + '"' + (edit ? '' : ' disabled') + '></label>').join('') + '</div>';
     h += '<div class="panel" style="margin-top:12px"><h2 style="margin-top:0">Data</h2><div class="toolbar"><button class="btn" data-act="backup">Download full backup (JSON)</button>' +
       (edit ? '<label class="btn" style="flex-direction:row;color:var(--text)">Restore backup<input type="file" id="restoreFile" accept=".json,application/json" class="hidden"></label>' : '') +
-      (edit && !CLOUD ? '<button class="btn danger" data-act="reset-demo" data-confirm="Erase all & reload demo?">Reset to demo data</button>' : '') + '</div>' +
+      (edit && (!CLOUD || DEMO) ? '<button class="btn danger" data-act="reset-demo" data-confirm="Erase all & reload demo?">Reset to demo data</button>' : '') + '</div>' +
       '<div class="muted small">Mode: <b>' + (CLOUD ? 'Cloud (Supabase) — data shared by all users' : 'Local — data is saved in this browser only. Fill config.js to go multi-user.') + '</b> · Build ' + NEXUS_BUILD + '</div></div>';
     // rows per page for every table
     const pgs = s.page_size || {}; const PG_OPTS = [['', 'Default'], ['10', '10'], ['15', '15'], ['20', '20'], ['25', '25'], ['50', '50'], ['100', '100'], ['0', 'All']];
@@ -421,7 +421,7 @@ ACTIONS['hol-add'] = () => {
 };
 ACTIONS['hol-del'] = el => { const st = settings(); st.holidays = st.holidays.filter(x => x.date !== el.dataset.d); Store.setSettings(st); audit('holiday.delete', el.dataset.d, ''); VIEWS.settings.render(); };
 ACTIONS['backup'] = () => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(DB, null, 1)], { type: 'application/json' })); a.download = 'nexus-backup-' + todayYmd() + '.json'; a.click(); audit('backup', '', 'downloaded'); };
-ACTIONS['reset-demo'] = () => { localStorage.removeItem(DB_KEY); localStorage.removeItem(ME_KEY); location.reload(); };
+ACTIONS['reset-demo'] = async () => { if (DEMO_SHARED) await SB.from('nx_demo').delete().gte('collection', ''); localStorage.removeItem(DB_KEY); localStorage.removeItem(ME_KEY); location.reload(); };
 function restoreBackup(file) {
   if (!file) return; const rd = new FileReader();
   rd.onload = () => {

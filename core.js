@@ -63,7 +63,10 @@ function saveLocal() {
 const COLS = ['users', 'roles', 'customers', 'items', 'materials', 'processes', 'orders', 'samples', 'dispatches', 'purchase_orders', 'sourcing', 'grns', 'inwards', 'vendors', 'issues', 'rsjw', 'rtvs', 'boms', 'job_cards', 'requisitions', 'tickets', 'checklist', 'checklist_log', 'escalations', 'attributes', 'item_types', 'mail_queue', 'requirements', 'prod_reports', 'prod_plans', 'wa_log', 'audit'];
 let DB = null;
 const CFG = window.NEXUS_CONFIG || {};
-const CLOUD = !DEMO && !!(CFG.SUPABASE_URL && CFG.SUPABASE_ANON_KEY && window.supabase);
+// demo shares one demo table (nx_demo) between all demo users; it can never reach the real table
+const DEMO_SHARED = DEMO && !!(CFG.SUPABASE_URL && CFG.SUPABASE_ANON_KEY && window.supabase);
+const CLOUD = (!DEMO && !!(CFG.SUPABASE_URL && CFG.SUPABASE_ANON_KEY && window.supabase)) || DEMO_SHARED;
+const TBL = DEMO ? 'nx_demo' : 'nx_docs';
 let SB = null;
 
 /* ---- small dialogs used by approvals: a reason box, and an edit box for sending corrections back ---- */
@@ -185,12 +188,12 @@ async function reauth() {
   $('#reGo', d).onclick = go; $('#rePw', d).addEventListener('keydown', ev => { if (ev.key === 'Enter') go(); });
 }
 const RETRY_Q = new Map();   // failed writes: key col|id -> {col, id, isDelete}
-function syncBadge() { const s = $('#syncState'); if (s) s.textContent = SANDBOX ? 'SANDBOX · nothing is saved' : CLOUD ? (pendingWrites ? 'Saving…' : RETRY_Q.size ? RETRY_Q.size + ' change(s) retrying…' : 'Synced') : DEMO ? 'DEMO' : 'Local mode'; }
+function syncBadge() { const s = $('#syncState'); if (s) s.textContent = SANDBOX ? 'SANDBOX · nothing is saved' : DEMO_SHARED ? 'DEMO' : CLOUD ? (pendingWrites ? 'Saving…' : RETRY_Q.size ? RETRY_Q.size + ' change(s) retrying…' : 'Synced') : DEMO ? 'DEMO' : 'Local mode'; }
 async function cloudWrite(col, doc, isDelete) {
   pendingWrites++; syncBadge();
   try {
-    const q = isDelete ? SB.from('nx_docs').delete().eq('collection', col).eq('id', doc.id)
-      : SB.from('nx_docs').upsert({ collection: col, id: doc.id, data: doc, updated_at: nowIso() });
+    const q = isDelete ? SB.from(TBL).delete().eq('collection', col).eq('id', doc.id)
+      : SB.from(TBL).upsert({ collection: col, id: doc.id, data: doc, updated_at: nowIso() });
     const { error } = await q; if (error) throw error;
     RETRY_Q.delete(col + '|' + doc.id);
   } catch (e) {
@@ -231,14 +234,14 @@ async function cloudSync() {
   try {
     const seen = new Set(); const changed = {}; let from = 0; const page = 1000;
     for (;;) {
-      const { data, error } = await SB.from('nx_docs').select('collection,id,updated_at').order('collection').order('id').range(from, from + page - 1);
+      const { data, error } = await SB.from(TBL).select('collection,id,updated_at').order('collection').order('id').range(from, from + page - 1);
       if (error) throw error;
       data.forEach(r => { const k = r.collection + '|' + r.id; seen.add(k); if ((r.collection === 'settings' || COLS.includes(r.collection)) && CL_VER.get(k) !== r.updated_at) (changed[r.collection] = changed[r.collection] || []).push(r.id); });
       if (data.length < page) break; from += page;
     }
     let n = 0;
     for (const [col, ids] of Object.entries(changed)) for (let i = 0; i < ids.length; i += 150) {
-      const { data, error } = await SB.from('nx_docs').select('collection,id,data,updated_at').eq('collection', col).in('id', ids.slice(i, i + 150));
+      const { data, error } = await SB.from(TBL).select('collection,id,data,updated_at').eq('collection', col).in('id', ids.slice(i, i + 150));
       if (error) throw error; data.forEach(r => { if (cloudApply(r.collection, r.id, r.data, r.updated_at)) n++; });
     }
     Array.from(CL_VER.keys()).forEach(k => { if (!seen.has(k)) { const j = k.indexOf('|'); if (cloudApply(k.slice(0, j), k.slice(j + 1), null, null, true)) n++; } });
@@ -254,22 +257,22 @@ async function cloudLoad() {
   let from = 0; const page = 1000;
   for (;;) {
     // a fixed order, so pages never skip or repeat rows while others are saving
-    const { data, error } = await SB.from('nx_docs').select('collection,id,data,updated_at').order('collection').order('id').range(from, from + page - 1);
+    const { data, error } = await SB.from(TBL).select('collection,id,data,updated_at').order('collection').order('id').range(from, from + page - 1);
     if (error) throw error;
     data.forEach(r => { CL_VER.set(r.collection + '|' + r.id, r.updated_at); if (r.collection === 'settings') out.settings = r.data; else if (out[r.collection]) out[r.collection].push(r.data); });
     if (data.length < page) break; from += page;
   }
   if (!out.settings) {                      // empty project → seed masters (no demo orders) and push
-    const seed = seedData(true);
+    const seed = seedData(!DEMO);                // demo: the full sample company
     DB = seed; saveLocal(); CLOUD_OK = true;
-    await SB.from('nx_docs').upsert([{ collection: 'settings', id: 'main', data: seed.settings }]
-      .concat(COLS.flatMap(c => seed[c].map(d => ({ collection: c, id: d.id, data: d })))));
+    const rows = [{ collection: 'settings', id: 'main', data: seed.settings }].concat(COLS.flatMap(c => (seed[c] || []).map(d => ({ collection: c, id: d.id, data: d }))));
+    for (let i = 0; i < rows.length; i += 400) await SB.from(TBL).upsert(rows.slice(i, i + 400));
   } else {
     if (!out.users.length) throw new Error('No users came back from the cloud. Check the internet and try again.');
     DB = out; saveLocal(); CLOUD_OK = true;
   }
   snapAll();
-  SB.channel('nx_docs').on('postgres_changes', { event: '*', schema: 'public', table: 'nx_docs' }, p => {
+  SB.channel(TBL).on('postgres_changes', { event: '*', schema: 'public', table: TBL }, p => {
     const r = p.new && p.new.collection ? p.new : p.old; if (!r || !r.collection) return;
     cloudApply(r.collection, r.id, p.new && p.new.data, p.new && p.new.updated_at, p.eventType === 'DELETE');
     RES_CACHE.clear();
@@ -755,7 +758,7 @@ ACTIONS['menu'] = el => { const m = el.parentElement; const was = m.classList.co
 document.addEventListener('click', ev => { if (!ev.target.closest('.menu')) $$('#nav .menu.open').forEach(x => x.classList.remove('open')); }, true);
 ACTIONS['go'] = el => go(el.dataset.v, el.dataset.p);
 ACTIONS['undo-step'] = el => undoStep(el.dataset.o, el.dataset.s);
-ACTIONS['logout'] = async () => { localStorage.removeItem(ME_KEY); if (SB) await SB.auth.signOut({ scope: 'local' }); location.reload(); };   // this device only, other devices stay signed in
+ACTIONS['logout'] = async () => { localStorage.removeItem(ME_KEY); if (SB && !DEMO) await SB.auth.signOut({ scope: 'local' }); location.reload(); };   // this device only, other devices stay signed in
 document.addEventListener('keydown', ev => {
   const typing = /INPUT|TEXTAREA|SELECT/.test((document.activeElement || {}).tagName || '');
   if (ev.key === '/' && !typing) { ev.preventDefault(); $('#gsearch').focus(); }
@@ -767,19 +770,21 @@ window.addEventListener('hashchange', route);
 /* ================= login ================= */
 async function doLogin(email, pin) {
   email = norm(email);
-  if (CLOUD) {
+  if (CLOUD && !DEMO) {
     const { error } = await SB.auth.signInWithPassword({ email, password: pin });
     if (error) throw new Error(error.message);
     await cloudLoad();
   }
+  if (DEMO_SHARED && !CLOUD_OK) await cloudLoad();
   let u = Store.all('users').find(x => norm(x.email) === email);
   if (CLOUD && !CLOUD_OK) throw new Error('Data did not load from the cloud. Check the internet and try again.');
-  if (CLOUD && !u && Store.all('users').length && Store.all('users').every(x => x.seed)) {           // first cloud login becomes the admin
+  if (CLOUD && !DEMO && !u && Store.all('users').length && Store.all('users').every(x => x.seed)) {           // first cloud login becomes the admin
     u = Store.all('users').find(x => x.seed && x.role_id === 'r_admin');
     u.email = email; u.seed = false; Store.put('users', u);
   }
   if (!u) throw new Error('This email is not registered in Nexus. Ask an admin.');
   if (u.active === false) throw new Error('This user is deactivated.');
+  if (DEMO) { if (String(pin) !== String(u.pin_seed || '1234')) throw new Error('Wrong PIN.'); return u; }
   if (!CLOUD) {
     if (u.pin_hash) { if (u.pin_hash !== await hashPin(email, pin)) throw new Error('Wrong PIN.'); }
     else if (u.pin_seed && u.pin_seed === pin) { u.pin_hash = await hashPin(email, pin); delete u.pin_seed; Store.put('users', u); }
@@ -828,6 +833,13 @@ function startApp(u) {
   syncBadge(); sbxBar(); if (!location.hash) go(can('tasks', 'view') && !can('dashboard', 'view') ? 'tasks' : 'home'); route();
   setInterval(() => { RES_CACHE.clear(); const a = document.activeElement; if (!a || !/INPUT|TEXTAREA|SELECT/.test(a.tagName)) { renderNav(); if (['home', 'tasks', 'tracker'].includes(curView().v)) route(); } }, 60000);
 }
+// Demo: only the demo table; no mail, WhatsApp or any other table
+function demoGuard(sb) {
+  const from0 = sb.from.bind(sb);
+  const none = () => { const f = { select: () => f, eq: () => f, neq: () => f, in: () => f, order: () => f, limit: () => f, single: () => f, insert: () => f, upsert: () => f, update: () => f, delete: () => f, then: (r, j) => Promise.resolve({ data: [], error: { message: 'Demo' } }).then(r, j) }; return f; };
+  sb.from = t => t === 'nx_demo' ? from0(t) : none();
+  Object.defineProperty(sb, 'functions', { value: { invoke: async () => ({ data: null, error: { message: 'Demo — nothing is sent' } }) } });
+}
 // Sandbox: reads only. Every write, mail, WhatsApp or live channel is cut off at the client.
 let SBX_REAL = null;
 function sandboxGuard(sb) {
@@ -852,15 +864,16 @@ function sbxBar() {
 }
 async function boot() {
   Store.loadLocal();
-  if (CLOUD) { SB = window.supabase.createClient(CFG.SUPABASE_URL, CFG.SUPABASE_ANON_KEY); $('#pinLabel').textContent = 'Password'; if (SANDBOX) sandboxGuard(SB); }
-  if (!CLOUD) {   // demo / local: pick any demo user to see the app through their eyes (PIN 1234)
-    const us = Store.all('users').filter(u => u.active !== false && u.pin_seed).sort((x, y) => (x.department || '').localeCompare(y.department || '') || x.name.localeCompare(y.name));
+  if (CLOUD) { SB = window.supabase.createClient(CFG.SUPABASE_URL, CFG.SUPABASE_ANON_KEY); if (!DEMO) $('#pinLabel').textContent = 'Password'; if (SANDBOX) sandboxGuard(SB); if (DEMO) demoGuard(SB); }
+  if (DEMO_SHARED) { try { await cloudLoad(); } catch (e) { loadFailed(e); return; } }
+  if (!CLOUD || DEMO) {   // demo / local: pick any demo user to see the app through their eyes (PIN 1234)
+    const us = Store.all('users').filter(u => u.active !== false && (u.pin_seed || DEMO)).sort((x, y) => (x.department || '').localeCompare(y.department || '') || x.name.localeCompare(y.name));
     $('#loginMsg').innerHTML = '<select id="demoPick" class="demo-pick"><option value="">Login as… (PIN 1234)</option>' + us.map(u => '<option value="' + esc(u.email) + '">' + esc(u.name) + ' — ' + esc(u.department || (Store.get('roles', u.role_id) || {}).name || '') + '</option>').join('') + '</select>';
     $('#demoPick').addEventListener('change', e => { const f = $('#loginForm'); if (!e.target.value) return; f.email.value = e.target.value; f.pin.value = '1234'; f.requestSubmit(); });
   }
   const saved = localStorage.getItem(ME_KEY);
   if (saved) {
-    if (CLOUD) { const { data } = await SB.auth.getSession(); if (data && data.session) { try { await cloudLoad(); } catch (e) { loadFailed(e); return; } } else localStorage.removeItem(ME_KEY); }
+    if (CLOUD && !DEMO) { const { data } = await SB.auth.getSession(); if (data && data.session) { try { await cloudLoad(); } catch (e) { loadFailed(e); return; } } else localStorage.removeItem(ME_KEY); }
     const u = (!CLOUD || CLOUD_OK) && Store.get('users', localStorage.getItem(ME_KEY));
     if (u && u.active !== false) return startApp(u);
   }
