@@ -267,6 +267,26 @@ function parseSizeRun(str) {
   if (t.includes(',')) return t.split(',').map(x => x.trim().toUpperCase()).filter(Boolean);
   return [t.toUpperCase()];
 }
+async function jcFresh() {
+  if (!(CLOUD && !SANDBOX && CLOUD_OK && SB)) return;
+  for (let i = 0; i < 50 && pendingWrites; i++) await new Promise(r => setTimeout(r, 100));   // let my own saves finish first
+  SYNC_BUSY = false; try { await cloudSync(); } catch (e) { console.warn(e); }
+}
+// after saving: if the cloud already has another order with one of these JC numbers, take new numbers
+async function jcUniqueCheck(o) {
+  if (!CLOUD || SANDBOX || !SB) return;
+  for (let tries = 0; tries < 3; tries++) {
+    const { data, error } = await SB.from('nx_docs').select('id,data').eq('collection', 'orders').neq('id', o.id);
+    if (error) return;
+    const taken = new Set(); (data || []).forEach(r => ((r.data || {}).lines || []).forEach(x => x.jc_no && taken.add(norm(x.jc_no))));
+    Store.all('job_cards').forEach(j => { if (norm(j.order_no || '') !== norm(o.no)) taken.add(norm(j.no)); });
+    const clash = o.lines.some(l => taken.has(norm(l.jc_no)));
+    if (!clash) return;
+    await jcFresh(); let seq = jcNoBase();
+    o.lines.forEach(l => { seq += 1; l.jc_no = 'ZF-' + String(seq).padStart(4, '0'); }); o.no = o.lines[0].jc_no;
+    Store.put('orders', o); flash('Another order took that Job Card number — this order is now ' + esc(o.no) + '.', 'err');
+  }
+}
 function jcNoBase() {
   let max = 0;
   const scan = no => { if (no && String(no).startsWith('ZF-')) max = Math.max(max, parseInt(String(no).slice(3), 10) || 0); };
@@ -416,7 +436,7 @@ ACTIONS['punch-size-add'] = el => { punchCollect(); const l = PUNCH.lines[+el.da
 ACTIONS['punch-del'] = el => { punchCollect(); PUNCH.lines.splice(+el.dataset.i, 1); if (!PUNCH.lines.length) PUNCH.lines.push(blankLine()); VIEWS.punch.render(PUNCH.id); };
 ACTIONS['punch-clear'] = () => { newPunch(); VIEWS.punch.render(); };
 ACTIONS['punch-cancel'] = el => { PUNCH = null; go('order', el.getAttribute('href').split('/').pop()); };
-ACTIONS['punch-save'] = () => {
+ACTIONS['punch-save'] = async () => {
   if (!requirePerm('orders', 'edit')) return;
   punchCollect(); const P = PUNCH; const errs = [];
   const lines = P.lines.filter(l => l.article || lineQty(l) > 0);
@@ -449,11 +469,14 @@ ACTIONS['punch-save'] = () => {
   lines.forEach(l => { if (l.article && !Store.all('items').some(x => norm(x.code) === norm(l.article))) Store.put('items', { id: uid(), code: l.article, name: l.style, group: P.category, gender: l.gender }); });
   const o = P.id ? Store.get('orders', P.id) : { id: uid(), no: '', process_id: activeProcess().id, actuals: {}, done_by: {}, created_at: nowIso(), created_by: ME.name };
   Object.assign(o, { order_date: P.order_date, customer_id: cu.id, customer_name: cu.name, brand: cu.name, buyer_po: P.buyer_po, po_expiry_date: P.po_expiry_date, tooling_no: P.tooling_no, channel: P.channel, category: P.category, priority: P.priority, remarks: P.remarks, extra: P.extra, lines: lines.map(l => ({ article: l.article, style: l.style, colour: l.colour, gender: l.gender, size_run: l.size_run, size: l.size_run, sizes: (l.sizes || []).filter(x => num(x.qty) > 0).map(x => ({ size: x.size, qty: num(x.qty) })), qty: lineQty(l), pack: l.pack, jc_no: l.jc_no || '' })) });
-  // Auto-assign a Job Card No (ZF-xxxx) to each article line that lacks one
+  // Auto-assign a Job Card No (ZF-xxxx) to each article line that lacks one.
+  // Cloud: first pull what others saved, so two people never get the same number.
+  if (o.lines.some(l => !l.jc_no)) await jcFresh();
   let jcSeq = jcNoBase();
   o.lines.forEach(l => { if (!l.jc_no) { jcSeq += 1; l.jc_no = 'ZF-' + String(jcSeq).padStart(4, '0'); } });
   o.no = o.lines[0].jc_no;   // the Job Card No is the order number
   Store.put('orders', o);
+  if (!P.id) await jcUniqueCheck(o);
   audit(P.id ? 'order.edit' : 'order.create', o.no, cu.name + ' · PO ' + P.buyer_po + ' · ' + qtyFmt(orderTotals(o).qty) + ' qty');
   if (P.id) { PUNCH = null; flash('Saved ' + esc(o.no) + '.'); go('order', o.id); return; }
   if (mergedNote) flash('Rows with the same article/colour/packing were merged.');
