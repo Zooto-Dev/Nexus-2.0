@@ -43,6 +43,8 @@ function prDecide(x, ok) {
   x.status = ok ? 'Approved' : 'Rejected'; x.approved_by = ME.name; x.approved_at = nowIso(); Store.put('price_requests', x);
   audit('price.' + (ok ? 'approve' : 'reject'), x.no, x.material + ' ₹' + money(x.old_price) + ' → ₹' + money(x.new_price));
 }
+// New = the item had no price yet; Update = it had one
+const prType = x => num(x.old_price) ? '<span class="pend-txt">Update</span>' : '<span class="ok-txt">New</span>';
 const PRICE_UI = { st: 'Pending' };
 VIEWS.priceapproval = {
   mod: 'purchase', render() {
@@ -51,11 +53,11 @@ VIEWS.priceapproval = {
     const pend = prAll().filter(x => x.status === 'Pending');
     setMain('<div class="toolbar">' + seg('prst', [{ v: 'Pending', l: 'Pending (' + pend.length + ')' }, { v: 'Approved', l: 'Approved' }, { v: 'Rejected', l: 'Rejected' }, { v: '', l: 'All' }], PRICE_UI.st) + '<span class="grow"></span>' +
       (sa && pend.length && PRICE_UI.st === 'Pending' ? '<button class="btn primary" data-act="pr-all" data-confirm="Approve all ' + pend.length + '?">Approve all (' + pend.length + ')</button>' : '') + '</div>' +
-      '<div class="tbl-wrap"><table><tr><th>No</th><th>Date &amp; Time</th><th>Item Code</th><th>Item Name</th><th>UOM</th><th class="num">Current ₹</th><th class="num">New ₹</th><th class="num">Change</th><th>From</th><th>Asked by</th><th>Status</th><th>Approved by</th><th></th></tr>' +
+      '<div class="tbl-wrap"><table><tr><th>No</th><th>Date &amp; Time</th><th>Photo</th><th>Item Code</th><th>Item Name</th><th>UOM</th><th class="num">Current ₹</th><th class="num">New ₹</th><th class="num">Change</th><th>Type</th><th>Asked by</th><th>Status</th><th>Approved by</th><th></th></tr>' +
       list.map(x => { const m = matBy(x.material) || {}; const pct = num(x.old_price) ? (num(x.new_price) - num(x.old_price)) / num(x.old_price) * 100 : null;
-        return '<tr><td class="nowrap">' + esc(x.no) + '</td><td class="nowrap">' + fmtDT(x.at) + '</td><td><b>' + esc(x.material) + '</b></td><td>' + esc(m.name || '') + '</td><td>' + esc(x.uom || m.uom || '') + '</td>' +
+        return '<tr><td class="nowrap">' + esc(x.no) + '</td><td class="nowrap">' + fmtDT(x.at) + '</td><td>' + photoThumb(m.photo) + '</td><td><b>' + esc(x.material) + '</b></td><td>' + esc(m.name || '') + '</td><td>' + esc(x.uom || m.uom || '') + '</td>' +
           '<td class="num">' + (num(x.old_price) ? money(x.old_price) : '—') + '</td><td class="num"><b>' + money(x.new_price) + '</b></td><td class="num">' + (pct == null ? 'New' : '<span class="' + (pct > 0 ? 'late-txt' : 'ok-txt') + '">' + (pct > 0 ? '+' : '') + pct.toFixed(1) + '%</span>') + '</td>' +
-          '<td>' + esc(x.source) + (x.ref ? '<div class="small muted">' + esc(x.ref) + '</div>' : '') + '</td><td>' + esc(x.by) + '</td>' +
+          '<td>' + prType(x) + '</td><td>' + esc(x.by) + '</td>' +
           '<td>' + (x.status === 'Approved' ? '<span class="ok-txt">Approved</span>' : x.status === 'Rejected' ? '<span class="late-txt">Rejected</span>' : '<span class="pend-txt">Pending</span>') + '</td><td>' + esc(x.approved_by || '') + (x.approved_at ? '<div class="small muted">' + fmtDT(x.approved_at) + '</div>' : '') + '</td>' +
           '<td class="nowrap">' + (sa && x.status === 'Pending' ? '<button class="btn sm primary" data-act="pr-ok" data-id="' + esc(x.id) + '">Approve</button><button class="btn sm" data-act="pr-no" data-id="' + esc(x.id) + '" data-confirm="Reject ' + esc(x.no) + '?">Reject</button>' : '') + '</td></tr>'; }).join('') + '</table></div>');
     onSeg(e => { if (e.target.dataset.seg === 'prst') { PRICE_UI.st = e.detail; VIEWS.priceapproval.render(); } });
