@@ -471,7 +471,21 @@ function poManualRecalc() {
 document.addEventListener('input', e => { if (e.target.closest && e.target.closest('tr[data-mline]')) poManualRecalc(); });
 ACTIONS['po-new'] = () => { PO_UI.form = !PO_UI.form; PO_UI.editId = null; VIEWS.po.render(); if (PO_UI.form) $('#npVen').focus(); };
 ACTIONS['po-edit'] = el => { PO_UI.form = true; PO_UI.editId = el.dataset.id; VIEWS.po.render(); poManualRecalc(); window.scrollTo(0, 0); };
-document.addEventListener('change', e => { if (e.target.id === 'npVen' && (PO_UI.mode || 'jc') === 'jc') { const v = vendorBy(e.target.value); PO_UI.moqOpen = null; if (v) poFillJc(v.name); } });
+document.addEventListener('change', e => { if (e.target.id === 'npVen' && (PO_UI.mode || 'jc') === 'jc') { const v = vendorBy(e.target.value); PO_UI.moqOpen = null; if (v) { poFillJc(v.name); poPriceAfterVendor(v.name); } } });
+// on vendor select: every item of this vendor with no approved price (and none asked yet) → price popup straight away
+// the vendor-details popup (if any) comes first; the price popup follows once it is closed
+function poPriceAfterVendor(vendor) {
+  clearInterval(PO_UI.prT);
+  PO_UI.prT = setInterval(() => {
+    if ($('#venDlg')) return;
+    clearInterval(PO_UI.prT); const sel = $('#npVen');
+    if (sel && norm(sel.value) === norm(vendor)) poPriceCheck(vendor);
+  }, 150);
+}
+function poPriceCheck(vendor) {
+  const all = poJcLines().map(L => L.r.material).filter(c => !matPrice(c));
+  if (all.some(c => !prPending(c))) prDialog(all, 'PO', vendor, 'Price missing · ' + vendor);
+}
 ACTIONS['po-line'] = () => { $('#npLines').insertAdjacentHTML('beforeend', poLineRow()); };
 ACTIONS['po-line-del'] = el => el.closest('tr').remove();
 document.addEventListener('change', e => {
