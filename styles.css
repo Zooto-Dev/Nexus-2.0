@@ -823,7 +823,7 @@ td, th { vertical-align: middle; }
 .dlg .jckv tr:last-child td { border-bottom: 0 !important; }
 .icgrid td .muted.small, .icgrid td label { display: block; margin-top: 4px; }
 /* Super Admin Home: equal tiles; cards in one row share one height, nothing left hanging */
-.dk.sa-k { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+.dk.sa-k { grid-template-columns: repeat(7, minmax(0, 1fr)); }
 .sa-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; align-items: stretch; margin-bottom: 14px; }
 .sa-row > .dcard, .sa-row > div > .dcard { margin: 0; height: 100%; }
 .sa-row > div { display: flex; flex-direction: column; }

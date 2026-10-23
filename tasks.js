@@ -312,13 +312,14 @@ function saHomeHtml() {
   const pa = paRows(); const tasks = allTasks(); const now = new Date();
   const exc = pa.filter(r => r.k === 'excess' && !r.actual).sort((a, b) => b.delay - a.delay);
   const poa = pa.filter(r => r.k === 'po_approval' && !r.actual).sort((a, b) => b.delay - a.delay);
+  const prq = Store.all('price_requests').filter(x => x.status === 'Pending').sort((a, b) => a.at < b.at ? -1 : 1);
   const escs = Store.all('escalations').filter(e => e.status === 'Open');
   const l2 = escs.filter(e => e.level === 2).sort((a, b) => a.planned < b.planned ? -1 : 1); const l1n = escs.length - l2.length;
   const delayed = tasks.filter(t => !t.done && !t.demo && t.status === 'Delayed' && t.doer !== 'SYSTEM');
   const score = scoreRows(SA_UI.from, SA_UI.to);
   const avg = score.length ? score.reduce((a, r) => a + r.score, 0) / score.length : null;
   const card = (href, v, l, cls) => '<a class="dk-c" href="' + href + '"><span class="l">' + l + '</span><span class="v ' + (cls || '') + '">' + v + '</span></a>';
-  let h = '<div class="dk sa-k">' + card('#/excessapproval', exc.length, 'Excess approvals', exc.length ? 'late-txt' : '') + card('#/poapproval', poa.length, 'PO approvals', poa.length ? 'pend-txt' : '') +
+  let h = '<div class="dk sa-k">' + card('#/excessapproval', exc.length, 'Excess approvals', exc.length ? 'late-txt' : '') + card('#/poapproval', poa.length, 'PO approvals', poa.length ? 'pend-txt' : '') + card('#/priceapproval', prq.length, 'Price approvals', prq.length ? 'pend-txt' : '') +
     card('#/escalations', l2.length, '2nd escalations', l2.length ? 'late-txt' : '') + card('#/escalations', l1n, '1st escalations', l1n ? 'pend-txt' : '') +
     card('#/alltasks', delayed.length, 'Delayed tasks', delayed.length ? 'late-txt' : '') + card('#/home', avg == null ? '—' : avg.toFixed(2), 'Team score', scoreCls(avg)).replace('href="#/home"', 'data-act="sx-tab" data-v="score"') + '</div>';
   const tbl = (pg, head, rows, cols) => '<div class="tbl-wrap"><table data-pg="' + pg + '"><tr>' + head.map(x => '<th' + (/^#|Delay|Total|Done|Late|Open|Avg|Score|On|Overdue|Level|%/.test(x) ? ' class="num"' : '') + '>' + x + '</th>').join('') + '</tr>' + (rows.length ? rows.join('') : '<tr><td colspan="' + cols + '" class="empty">Nothing pending</td></tr>') + '</table></div>';
@@ -330,6 +331,8 @@ function saHomeHtml() {
   h += '<div class="dcard"><div class="dh3">PO approvals<span class="n">' + poa.length + '</span><span class="grow"></span><a class="small" href="#/poapproval">Open</a></div>' +
     tbl('sa_po', ['PO', 'Vendor', 'Since', 'Planned', 'Delay'], poa.map(r => '<tr class="click" data-act="go" data-v="poapproval"><td><b>' + esc(r.ref) + '</b></td><td>' + esc(r.party) + '</td><td class="nowrap">' + fmtDT(r.start) + '</td><td class="nowrap">' + fmtDT(r.planned) + '</td><td class="num">' + dl(r.delay) + '</td></tr>'), 5) + '</div>';
   h += '</div>';
+  if (prq.length) h += '<div class="dcard"><div class="dh3">Price approvals<span class="n">' + prq.length + '</span><span class="grow"></span><a class="small" href="#/priceapproval">Open</a></div>' +
+    tbl('sa_price', ['Item', 'Current ₹', 'New ₹', 'From', 'Asked by', 'Since', ''], prq.map(x => '<tr><td><b>' + esc(x.material) + '</b> <span class="muted">' + esc((matBy(x.material) || {}).name || '') + '</span></td><td class="num">' + (num(x.old_price) ? money(x.old_price) : '—') + '</td><td class="num"><b>' + money(x.new_price) + '</b></td><td>' + esc(x.source) + (x.ref ? ' · ' + esc(x.ref) : '') + '</td><td>' + esc(x.by) + '</td><td class="nowrap">' + fmtDT(x.at) + '</td><td class="nowrap"><button class="btn sm primary" data-act="pr-ok" data-id="' + esc(x.id) + '">Approve</button><button class="btn sm" data-act="pr-no" data-id="' + esc(x.id) + '" data-confirm="Reject?">Reject</button></td></tr>'), 7) + '</div>';
   h += '<div class="dcard"><div class="dh3">2nd escalations<span class="n' + (l2.length ? ' red' : '') + '">' + l2.length + '</span><span class="grow"></span><a class="small" href="#/escalations">All</a></div>' +
     tbl('sa_esc2', ['Ticket', 'Task', 'Reference', 'Doer', 'Planned', 'New date', ''], l2.map(e => '<tr><td><b>' + esc(e.no) + '</b></td><td>' + esc(e.task) + '<div class="muted small">' + esc(e.src) + '</div></td><td>' + (e.link ? '<a href="' + esc(e.link) + '">' + esc(e.ref) + '</a>' : esc(e.ref)) + '</td><td>' + esc(e.doer) + '</td><td class="nowrap">' + fmtDT(e.planned) + '</td><td class="nowrap">' + (e.commit_at ? fmtDT(e.commit_at) : '') + '</td><td><button class="btn sm primary" data-act="esc-resolve" data-id="' + esc(e.id) + '">Resolve</button></td></tr>'), 7) + '</div>';
 

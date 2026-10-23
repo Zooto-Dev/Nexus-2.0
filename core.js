@@ -60,7 +60,7 @@ function saveLocal() {
     localStorage.setItem(DB_KEY, JSON.stringify(DB));
   } catch (e) { flash('Browser storage full — export a backup from Settings.', 'err'); }
 }
-const COLS = ['users', 'roles', 'customers', 'items', 'materials', 'processes', 'orders', 'samples', 'dispatches', 'purchase_orders', 'sourcing', 'grns', 'inwards', 'vendors', 'issues', 'rsjw', 'rtvs', 'boms', 'job_cards', 'requisitions', 'tickets', 'checklist', 'checklist_log', 'escalations', 'attributes', 'item_types', 'mail_queue', 'requirements', 'prod_reports', 'prod_plans', 'wa_log', 'opening_stock', 'audit'];
+const COLS = ['users', 'roles', 'customers', 'items', 'materials', 'processes', 'orders', 'samples', 'dispatches', 'purchase_orders', 'sourcing', 'grns', 'inwards', 'vendors', 'issues', 'rsjw', 'rtvs', 'boms', 'job_cards', 'requisitions', 'tickets', 'checklist', 'checklist_log', 'escalations', 'attributes', 'item_types', 'mail_queue', 'requirements', 'prod_reports', 'prod_plans', 'wa_log', 'opening_stock', 'price_requests', 'audit'];
 let DB = null;
 const CFG = window.NEXUS_CONFIG || {};
 // demo shares one demo table (nx_demo) between all demo users; it can never reach the real table
@@ -631,6 +631,7 @@ const NAV = [
     { v: 'requirements', l: 'Requirements', mod: 'purchase' },
     { v: 'po', l: 'Purchase Order', mod: 'purchase' },
     { v: 'poapproval', l: 'PO Approval', mod: 'purchase' },
+    { v: 'priceapproval', l: 'Price Approval', mod: 'purchase' },
     { v: 'invapproval', l: 'Invoice Approval', mod: 'purchase' },
     { v: 'vendors', l: 'Vendors', mod: 'purchase' }] },
   { menu: 'Merchant', items: [

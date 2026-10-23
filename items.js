@@ -214,7 +214,7 @@ function icCreateHtml(edit) {
     const inp = (k, label, def, type) => '<tr><td class="k">' + label + '</td><td><input data-icx="' + k + '"' + (type ? ' type="' + type + '" min="0" step="any"' : '') + ' value="' + esc(X[k] != null ? X[k] : def) + '"></td></tr>';
     rows += '<tr><td class="k">Photo</td><td>' + attachBox('id="icPhoto" accept="image/*"', IC_UI.photo, 'Attach photo') + (IC_UI.photo ? ' <a class="small" data-act="ic-photo-clear">Remove</a>' : '') + '</td></tr>' +
       '<tr><td class="k">UOM</td><td><select data-icx="uom">' + UOMS.map(u => '<option' + (u === (X.uom || t.uom || 'PCS') ? ' selected' : '') + '>' + u + '</option>').join('') + '</select></td></tr>' +
-      inp('price', 'Price ₹', '', 'number') + inp('gst', 'GST %', t.gst || '', 'number') + inp('hsn', 'HSN', t.hsn || '') + inp('rack', 'Rack No.', '') + inp('min', 'Min Level', '', 'number');
+      inp('gst', 'GST %', t.gst || '', 'number') + inp('hsn', 'HSN', t.hsn || '') + inp('rack', 'Rack No.', '') + inp('min', 'Min Level', '', 'number');
   }
   const missing = attrs.filter(a => !IC_UI.vals[a.name]);
   const dup = t && !missing.length ? itemDuplicate(IC_UI.cat, t, IC_UI.vals) : null;
@@ -272,7 +272,7 @@ ACTIONS['ic-create'] = () => {
   const m = Store.put('materials', {
     id: uid(), code: itemCodeAuto(IC_UI.cat), name: itemNameOf(t, vals), group: IC_UI.cat, item_type: t.name,
     attrs: vals, attr_key: itemKeyOf(IC_UI.cat, t.name, vals), uom: X.uom || t.uom || 'PCS',
-    price: num(X.price) || 0, gst: num(X.gst != null ? X.gst : t.gst) || 0, hsn: String(X.hsn != null ? X.hsn : t.hsn || '').trim(),
+    price: 0, gst: num(X.gst != null ? X.gst : t.gst) || 0, hsn: String(X.hsn != null ? X.hsn : t.hsn || '').trim(),
     rack: String(X.rack || '').trim().toUpperCase(), min_level: num(X.min) || 0, photo: IC_UI.photo || '', colours: itemColours(t, vals), colour_photo: colourSwatchImg(itemColours(t, vals)), created_at: nowIso(), created_by: ME.name
   });
   audit('item.create', m.code, m.name);

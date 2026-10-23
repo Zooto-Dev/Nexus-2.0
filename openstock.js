@@ -10,7 +10,6 @@ function osNo() { return nextNo('opening_stock', 'OPS'); }
 function osCheck(r, seen) {
   const m = osMat(r.material); if (!m) return 'Item code ' + (r.material || '—') + ' is not in Items';
   if (!(num(r.qty) > 0)) return 'Qty must be more than 0';
-  if (r.rate !== '' && r.rate != null && num(r.rate) < 0) return 'Rate cannot be negative';
   if (!/^\d{4}-\d{2}-\d{2}$/.test(r.date || '')) return 'Date must be YYYY-MM-DD';
   const live = osLive(m.code); if (live) return m.code + ' already has opening stock (' + live.no + ', ' + live.status + ')';
   if (seen && seen.has(norm(m.code))) return m.code + ' is twice in this file';
@@ -19,7 +18,7 @@ function osCheck(r, seen) {
 function osSave(rows) {
   rows.forEach(r => {
     const m = osMat(r.material);
-    const d = Store.put('opening_stock', { id: uid(), no: osNo(), date: r.date, material: m.code, uom: m.uom, qty: num(r.qty), rate: r.rate === '' || r.rate == null ? num(m.price) : num(r.rate), rack: r.rack || m.rack || '', status: 'Pending', by: ME.name, at: nowIso() });
+    const d = Store.put('opening_stock', { id: uid(), no: osNo(), date: r.date, material: m.code, uom: m.uom, qty: num(r.qty), rate: num(m.price), rack: r.rack || m.rack || '', status: 'Pending', by: ME.name, at: nowIso() });
     audit('opening_stock.add', d.no, m.code + ' × ' + qtyFmt(d.qty) + ' ' + (m.uom || '') + ' @ ' + money(d.rate) + ' · ' + d.date);
   });
 }
@@ -37,7 +36,7 @@ VIEWS.openstock = {
       '<button class="btn" data-act="os-csv">Export CSV</button></div>';
     if (edit) h += '<div class="panel os-add"><table class="nopage nofilter"><tr><th>Item</th><th>UOM</th><th class="num">Qty</th><th class="num">Rate</th><th>Rack</th><th>Date</th><th></th></tr><tr>' +
       '<td><select id="osMat"><option value=""></option>' + mats.map(m => '<option value="' + esc(m.code) + '">' + esc(m.code + ' — ' + m.name) + '</option>').join('') + '</select></td>' +
-      '<td id="osUom"></td><td><input id="osQty" type="number" min="0" step="any" class="num"></td><td><input id="osRate" type="number" min="0" step="any" class="num"></td>' +
+      '<td id="osUom"></td><td><input id="osQty" type="number" min="0" step="any" class="num"></td><td id="osRate" class="num"></td>' +
       '<td><input id="osRack"></td><td><input id="osDate" type="date" value="' + todayYmd() + '"></td><td><button class="btn primary" data-act="os-add">Add</button></td></tr></table>' +
       (msg ? '<div class="late-txt small">' + esc(msg) + '</div>' : '') + '</div>';
     h += '<div class="tbl-wrap"><table><tr><th>No</th><th>Date</th><th>Item Code</th><th>Item Name</th><th>UOM</th><th class="num">Qty</th><th class="num">Rate</th><th class="num">Value</th><th>Rack</th><th>Entered by</th><th>Status</th><th>Approved by</th><th></th></tr>' +
@@ -48,13 +47,13 @@ VIEWS.openstock = {
         (x.status === 'Pending' && edit && x.by === ME.name ? '<button class="btn sm ghost danger" data-act="os-del" data-id="' + esc(x.id) + '" data-confirm="Delete ' + esc(x.no) + '?">Delete</button>' : '') + '</td></tr>').join('') + '</table></div>';
     setMain(h);
     $('#osQ').addEventListener('input', e => { OS_UI.q = e.target.value; clearTimeout(OS_UI.t); OS_UI.t = setTimeout(() => { VIEWS.openstock.render(); const i = $('#osQ'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }, 250); });
-    const sel = $('#osMat'); if (sel) sel.addEventListener('change', () => { const m = osMat(sel.value) || {}; $('#osUom').textContent = m.uom || ''; $('#osRate').value = m.price ? m.price : ''; $('#osRack').value = m.rack || ''; });
+    const sel = $('#osMat'); if (sel) sel.addEventListener('change', () => { const m = osMat(sel.value) || {}; $('#osUom').textContent = m.uom || ''; $('#osRate').innerHTML = m.code ? poRateCell(m.code) : ''; $('#osRack').value = m.rack || ''; });
     const f = $('#osFile'); if (f) f.addEventListener('change', e => { const file = e.target.files[0]; if (file) osUpload(file); e.target.value = ''; });
   }
 };
 ACTIONS['os-add'] = () => {
   if (!requirePerm('store', 'edit')) return;
-  const r = { material: $('#osMat').value, qty: $('#osQty').value, rate: $('#osRate').value, rack: $('#osRack').value.trim(), date: $('#osDate').value };
+  const r = { material: $('#osMat').value, qty: $('#osQty').value, rack: $('#osRack').value.trim(), date: $('#osDate').value };
   const err = osCheck(r); if (err) { OS_UI.msg = err; VIEWS.openstock.render(); return; }
   OS_UI.msg = ''; osSave([r]); flash('Opening stock added — waiting for approval.'); VIEWS.openstock.render();
 };
@@ -66,9 +65,9 @@ ACTIONS['os-approve'] = el => { if (!osCanApprove()) return; const x = Store.get
 ACTIONS['os-reject'] = el => { if (!osCanApprove()) return; const x = Store.get('opening_stock', el.dataset.id); if (!x || x.status !== 'Pending') return; osSetStatus(x, 'Rejected'); VIEWS.openstock.render(); };
 ACTIONS['os-approve-all'] = () => { if (!osCanApprove()) return; const p = osAll().filter(x => x.status === 'Pending'); p.forEach(x => osSetStatus(x, 'Approved')); flash(p.length + ' approved — added to stock.'); VIEWS.openstock.render(); };
 ACTIONS['os-del'] = el => { const x = Store.get('opening_stock', el.dataset.id); if (!x || x.status !== 'Pending' || x.by !== ME.name) return; Store.del('opening_stock', x.id); audit('opening_stock.delete', x.no, x.material); VIEWS.openstock.render(); };
-ACTIONS['os-template'] = () => downloadCsv('opening-stock-template.csv', [['Item Code', 'Qty', 'Rate', 'Rack', 'Date (YYYY-MM-DD)']].concat(Store.all('materials').filter(m => !osLive(m.code)).sort((a, b) => a.code.localeCompare(b.code)).map(m => [m.code, '', m.price || '', m.rack || '', todayYmd()])));
+ACTIONS['os-template'] = () => downloadCsv('opening-stock-template.csv', [['Item Code', 'Qty', 'Rack', 'Date (YYYY-MM-DD)']].concat(Store.all('materials').filter(m => !osLive(m.code)).sort((a, b) => a.code.localeCompare(b.code)).map(m => [m.code, '', m.rack || '', todayYmd()])));
 ACTIONS['os-csv'] = () => downloadCsv('opening-stock-' + todayYmd() + '.csv', [['No', 'Date', 'Item Code', 'Item Name', 'UOM', 'Qty', 'Rate', 'Value', 'Rack', 'Entered by', 'Status', 'Approved by']].concat(osAll().map(x => { const m = osMat(x.material) || {}; return [x.no, x.date, x.material, m.name || '', x.uom || m.uom || '', x.qty, x.rate, num(x.qty) * num(x.rate), x.rack || '', x.by, x.status, x.approved_by || '']; })));
-// CSV: Item Code, Qty, Rate, Rack, Date — rows with no Qty are skipped (the template lists every item)
+// CSV: Item Code, Qty, Rack, Date (rate is always the approved item price) — rows with no Qty are skipped (the template lists every item)
 function osParseCsv(text) {
   const rows = []; let row = [], cell = '', q = false;
   for (let i = 0; i < text.length; i++) {
@@ -88,15 +87,16 @@ function osUpload(file) {
     const seen = new Set(); const good = [], bad = [];
     all.forEach((c, i) => {
       if (!c[1]) return;   // no qty → not counted
-      const d = (c[4] || '').trim(); const dm = d.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/);
-      const r = { line: i + 2, material: c[0], qty: c[1], rate: c[2] || '', rack: c[3] || '', date: dm ? dm[3] + '-' + dm[2].padStart(2, '0') + '-' + dm[1].padStart(2, '0') : (d || todayYmd()) };
+      const old = c.length >= 5;   // an older file with a Rate column: the rate is ignored
+      const d = (c[old ? 4 : 3] || '').trim(); const dm = d.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/);
+      const r = { line: i + 2, material: c[0], qty: c[1], rack: c[old ? 3 : 2] || '', date: dm ? dm[3] + '-' + dm[2].padStart(2, '0') + '-' + dm[1].padStart(2, '0') : (d || todayYmd()) };
       const err = osCheck(r, seen); if (err) bad.push({ r, err }); else { good.push(r); seen.add(norm(r.material)); }
     });
     const old = $('#osDlg'); if (old) old.remove();
     const dlg = document.createElement('div'); dlg.id = 'osDlg'; dlg.className = 'dlg-back';
     dlg.innerHTML = '<div class="dlg hx-dlg"><div class="dlg-h">' + esc(file.name) + ' · ' + good.length + ' OK · ' + bad.length + ' with errors</div>' +
       (bad.length ? '<div class="tbl-wrap hx-wrap"><table class="nopage nofilter"><tr><th class="num">Line</th><th>Item Code</th><th class="num">Qty</th><th>Error</th></tr>' + bad.map(b => '<tr><td class="num">' + b.r.line + '</td><td>' + esc(b.r.material) + '</td><td class="num">' + esc(b.r.qty) + '</td><td class="late-txt">' + esc(b.err) + '</td></tr>').join('') + '</table></div>' : '') +
-      (good.length ? '<div class="tbl-wrap hx-wrap"><table class="nopage nofilter"><tr><th>Item Code</th><th>Item Name</th><th>UOM</th><th class="num">Qty</th><th class="num">Rate</th><th>Rack</th><th>Date</th></tr>' + good.map(r => { const m = osMat(r.material); return '<tr><td>' + esc(m.code) + '</td><td>' + esc(m.name) + '</td><td>' + esc(m.uom || '') + '</td><td class="num">' + qtyFmt(r.qty) + '</td><td class="num">' + (r.rate === '' ? money(m.price) : money(r.rate)) + '</td><td>' + esc(r.rack || m.rack || '') + '</td><td>' + fmtD(r.date) + '</td></tr>'; }).join('') + '</table></div>' : '') +
+      (good.length ? '<div class="tbl-wrap hx-wrap"><table class="nopage nofilter"><tr><th>Item Code</th><th>Item Name</th><th>UOM</th><th class="num">Qty</th><th class="num">Rate</th><th>Rack</th><th>Date</th></tr>' + good.map(r => { const m = osMat(r.material); return '<tr><td>' + esc(m.code) + '</td><td>' + esc(m.name) + '</td><td>' + esc(m.uom || '') + '</td><td class="num">' + qtyFmt(r.qty) + '</td><td class="num">' + poRateCell(m.code) + '</td><td>' + esc(r.rack || m.rack || '') + '</td><td>' + fmtD(r.date) + '</td></tr>'; }).join('') + '</table></div>' : '') +
       '<div class="dlg-f"><span class="grow"></span><button class="btn" data-os-x>Cancel</button>' + (good.length ? '<button class="btn primary" data-os-ok>Save ' + good.length + ' row(s)</button>' : '') + '</div></div>';
     document.body.appendChild(dlg);
     dlg.addEventListener('click', ev => {

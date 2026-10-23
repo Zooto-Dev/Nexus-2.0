@@ -99,7 +99,7 @@ function netReqRows(vendor, excludePo) {
     r.stock = Math.max(0, stockOf(r.material)); r.openPo = openPo(r.material);
     r.net = Math.max(0, r.demand + r.min - r.stock - r.openPo);
     const sc = vendor ? src.find(x => norm(x.material) === norm(r.material) && norm(x.vendor) === norm(vendor)) : null;
-    r.rate = sc ? sc.rate : (m.price || ''); r.moq = sc ? num(sc.moq) : 0;
+    r.rate = num(m.price) || ''; r.moq = sc ? num(sc.moq) : 0;   // price only from the item (set via price approval)
     r.jcs.sort((a, b) => String(a.jc).localeCompare(String(b.jc)));
     return r;
   }).filter(r => (r.demand > 0 || r.net > 0) && (!vendor || Array.from(r.suppliers).some(v => norm(v) === norm(vendor))))
@@ -341,7 +341,6 @@ VIEWS.po = {
       (rows.length ? rows.map(p => {
         const st = poStatus(p);
         const act = (st === 'Amend' && edit && (p.amend_by ? p.amend_by === ME.name : (poOwn(p) || isSuperAdmin())) ? '<button class="btn sm primary" data-act="po-edit" data-id="' + esc(p.id) + '">Edit</button>' : '') +
-          (edit && poRevisable(p) ? ' <button class="btn sm" data-act="po-revise" data-id="' + esc(p.id) + '">Revise price</button>' : '') +
           (edit && (st === 'Open' || st === 'Pending Approval' || st === 'Amend') ? ' <button class="btn ghost sm danger" data-act="po-cancel" data-id="' + esc(p.id) + '" data-confirm="Cancel PO?">Cancel</button>' : '');
         let row = p.lines.map((l, i) => '<tr class="click' + (i === 0 ? ' bomfirst' : '') + '" data-act="po-toggle" data-id="' + esc(p.id) + '"><td><b>' + esc(p.no) + '</b></td><td>' + fmtD(p.date) + '</td><td>' + esc(p.vendor) + '</td><td class="num">' + (i + 1) + '</td><td>' + esc((matBy(l.material) || {}).name || '') + '</td><td>' + esc(l.material) + '</td><td>' + esc(l.brand || '') + '</td><td>' + esc(l.uom || '') + '</td><td class="num">' + qtyFmt(l.qty) + '</td><td class="num">' + qtyFmt(num(l.received)) + '</td><td class="num">' + qtyFmt(Math.max(0, num(l.qty) - num(l.received))) + '</td><td>' + fmtD(p.expected) + '</td><td><span class="st ' + poStCls(st) + '">' + st + '</span></td><td>' + esc(p.created_by || '') + '</td><td>' + esc(p.approved_by || '') + '</td><td class="right">' + (i === 0 ? act : '') + '</td></tr>').join('');
         if (PO_UI.open === p.id) row += '<tr class="inline-form"><td colspan="16">' + poDetail(p) + '</td></tr>';
@@ -409,14 +408,14 @@ function poJcDraw() {
   let q = 0, amt = 0, tot = 0;
   const html = lines.map(L => {
     const e = PO_UI.ed[L.key] || {};
-    const rate = e.rate != null ? e.rate : ((src.find(x => norm(x.material) === norm(L.r.material) && norm(x.vendor) === norm(vendor)) || {}).rate || L.m.price || '');
+    const rate = num(L.m.price);   // never typed on a PO: the approved item price
     const gst = e.gst != null ? e.gst : (L.m.gst != null ? L.m.gst : '');
     const rem = e.rem != null ? e.rem : (L.moq ? 'MOQ: net ' + qtyFmt(L.r.net) + ' → ' + qtyFmt(L.qty) : !L.r.demand && L.r.min ? 'Min level' : '');
     const a2 = num(L.qty) * num(rate); const g2 = a2 * (1 + num(gst) / 100); q += num(L.qty); amt += a2; tot += g2;
     return '<tr data-jrow data-key="' + esc(L.key) + '"' + (L.moq ? ' class="moqrow"' : '') + '><td>' + photoThumb(L.photo) + '</td>' +
       '<td><b>' + esc(L.m.name || L.r.material) + '</b></td><td>' + esc(L.m.group || '') + '</td><td>' + esc(L.r.material) + '</td><td>' + esc(L.m.hsn || '') + '</td><td>' + esc(L.m.uom || '') + '</td>' +
       '<td>' + (L.brand ? esc(L.brand) : '<input data-jbrand list="dlBrandPo" style="width:120px" value="' + esc((PO_UI.ed[L.key] || {}).brand || '') + '">') + '</td>' +
-      '<td><input class="qty" type="number" min="0" step="any" data-jrate value="' + esc(rate) + '"></td><td><input class="qty" type="number" min="0" step="any" data-jgst value="' + esc(gst) + '"></td>' +
+      '<td class="num">' + poRateCell(L.r.material) + '</td><td><input class="qty" type="number" min="0" step="any" data-jgst value="' + esc(gst) + '"></td>' +
       '<td><input data-jrem value="' + esc(rem) + '"></td>' +
       '<td class="num"><b>' + qtyFmt(L.qty) + '</b>' + '<div><a class="small" data-act="po-moq" data-m="' + esc(L.r.material) + '">' + (L.moq ? 'MOQ ✎' : 'MOQ') + '</a></div>' + '</td>' +
       '<td class="num">' + money(a2) + '</td><td class="num">' + money(g2) + '</td></tr>' +
@@ -455,13 +454,18 @@ function poLineRow(l) {
   const a2 = num(l.qty) * num(l.rate), g2 = a2 * (1 + num(l.gst) / 100);
   return '<tr data-mline><td><input data-np="mat" list="dlMatPo" placeholder="Item Name" value="' + esc(m.name || '') + '"></td><td class="muted small" data-np-cat>' + esc(m.group || '') + '</td><td class="muted" data-np-code>' + esc(m.code || '') + '</td><td class="muted small" data-np-hsn>' + esc(m.hsn || '') + '</td><td class="muted" data-uom>' + esc(m.uom || '') + '</td>' +
     '<td><input data-np="brand" list="dlBrandPo" style="width:120px" value="' + esc(l.brand || '') + '"></td>' +
-    '<td><input data-np="rate" type="number" min="0" step="any" class="right" style="width:80px" value="' + esc(l.rate != null ? l.rate : '') + '"></td><td><input data-np="gst" type="number" min="0" step="any" class="right" style="width:60px" value="' + esc(l.gst != null ? l.gst : '') + '"></td>' +
+    '<td class="num" data-np-rate>' + (m.code ? poRateCell(m.code) : '') + '</td><td><input data-np="gst" type="number" min="0" step="any" class="right" style="width:60px" value="' + esc(l.gst != null ? l.gst : '') + '"></td>' +
     '<td><input data-np="rem" style="width:120px" value="' + esc(l.remark || '') + '"></td>' +
     '<td><input data-np="qty" type="number" min="0" step="any" class="right" style="width:80px" value="' + esc(l.qty || '') + '"></td><td class="num muted" data-np-amt>' + (a2 ? money(a2) : '0') + '</td><td class="num muted" data-np-tot>' + (a2 ? money(g2) : '0') + '</td><td><button class="btn ghost sm" data-act="po-line-del">\u00d7</button></td></tr>';
 }
+function poRateCell(code) {
+  const p = num((matBy(code) || {}).price); const q = typeof prPending === 'function' && prPending(code);
+  return (p ? money(p) : '<span class="late-txt">No price</span>') + (q ? '<div class="small pend-txt">₹' + money(q.new_price) + ' pending</div>' : '');
+}
+function npRate(tr) { const v = $('[data-np="mat"]', tr).value; const m = Store.all('materials').find(x => norm(x.name) === norm(v) || norm(x.code) === norm(v)); return m ? num(m.price) : 0; }
 function poManualRecalc() {
   let q = 0, amt = 0, net = 0;
-  $$('#npLines tr[data-mline]').forEach(tr => { const a2 = num($('[data-np="qty"]', tr).value) * num($('[data-np="rate"]', tr).value); const g = a2 * (1 + num($('[data-np="gst"]', tr).value) / 100); $('[data-np-amt]', tr).textContent = a2 ? money(a2) : '0'; $('[data-np-tot]', tr).textContent = a2 ? money(g) : '0'; q += num($('[data-np="qty"]', tr).value); amt += a2; net += g; });
+  $$('#npLines tr[data-mline]').forEach(tr => { const a2 = num($('[data-np="qty"]', tr).value) * npRate(tr); const g = a2 * (1 + num($('[data-np="gst"]', tr).value) / 100); $('[data-np-amt]', tr).textContent = a2 ? money(a2) : '0'; $('[data-np-tot]', tr).textContent = a2 ? money(g) : '0'; q += num($('[data-np="qty"]', tr).value); amt += a2; net += g; });
   const f = $('#npFoot'); if (f) f.innerHTML = '<td><b>Total:</b></td><td colspan="8"></td><td class="num"><b>' + qtyFmt(q) + '</b></td><td class="num"><b>' + money(amt) + '</b></td><td class="num"><b>' + money(net) + '</b></td><td></td>';
 }
 document.addEventListener('input', e => { if (e.target.closest && e.target.closest('tr[data-mline]')) poManualRecalc(); });
@@ -476,7 +480,7 @@ document.addEventListener('change', e => {
   const tr = e.target.closest('tr'); if (!m) return;
   e.target.value = m.name;
   $('[data-np-cat]', tr).textContent = m.group || ''; $('[data-np-code]', tr).textContent = m.code; $('[data-np-hsn]', tr).textContent = m.hsn || ''; $('[data-uom]', tr).textContent = m.uom;
-  const r = $('[data-np="rate"]', tr); if (!r.value) r.value = m.price || '';
+  $('[data-np-rate]', tr).innerHTML = poRateCell(m.code);
   const g = $('[data-np="gst"]', tr); if (!g.value && m.gst != null) g.value = m.gst;
   const q = $('[data-np="qty"]', tr); if (!q.value) { const nr = netReqRows(null, PO_UI.editId).find(x => norm(x.material) === norm(m.code)); q.value = nr && nr.net > 0 ? +nr.net.toFixed(3) : ''; }
   poManualRecalc();
@@ -487,8 +491,11 @@ ACTIONS['po-save'] = () => {
   { const vv = vendorBy(ven); if (vv && vendorMissing(vv).length) { vendorDialog(vv); return; } }
   const mode = PO_UI.editId ? 'manual' : 'jc';
   const lines = mode === 'manual'
-    ? $$('#npLines tr[data-mline]').map(tr => { const m = Store.all('materials').find(x => norm(x.name) === norm($('[data-np="mat"]', tr).value) || norm(x.code) === norm($('[data-np="mat"]', tr).value)); return m ? { material: m.code, uom: m.uom, qty: num($('[data-np="qty"]', tr).value), rate: num($('[data-np="rate"]', tr).value), gst: num($('[data-np="gst"]', tr).value), remark: $('[data-np="rem"]', tr).value.trim(), brand: $('[data-np="brand"]', tr).value.trim(), jc_no: '', received: 0, rejected: 0 } : null; }).filter(l => l && l.qty > 0)
-    : poJcLines().map(L => { const tr = $('#npLines tr[data-key="' + L.key + '"]'); return { material: L.r.material, uom: L.m.uom || '', qty: L.qty, rate: num($('[data-jrate]', tr).value), gst: num($('[data-jgst]', tr).value), remark: $('[data-jrem]', tr).value.trim(), jc_no: '', brand: L.brand || ($('[data-jbrand]', tr) || { value: '' }).value.trim(), moq: L.moq, net: L.r.net, received: 0, rejected: 0 }; });
+    ? $$('#npLines tr[data-mline]').map(tr => { const m = Store.all('materials').find(x => norm(x.name) === norm($('[data-np="mat"]', tr).value) || norm(x.code) === norm($('[data-np="mat"]', tr).value)); return m ? { material: m.code, uom: m.uom, qty: num($('[data-np="qty"]', tr).value), rate: matPrice(m.code), gst: num($('[data-np="gst"]', tr).value), remark: $('[data-np="rem"]', tr).value.trim(), brand: $('[data-np="brand"]', tr).value.trim(), jc_no: '', received: 0, rejected: 0 } : null; }).filter(l => l && l.qty > 0)
+    : poJcLines().map(L => { const tr = $('#npLines tr[data-key="' + L.key + '"]'); return { material: L.r.material, uom: L.m.uom || '', qty: L.qty, rate: matPrice(L.r.material), gst: num($('[data-jgst]', tr).value), remark: $('[data-jrem]', tr).value.trim(), jc_no: '', brand: L.brand || ($('[data-jbrand]', tr) || { value: '' }).value.trim(), moq: L.moq, net: L.r.net, received: 0, rejected: 0 }; });
+  // an item with no approved price: ask for it now (Super Admin approves), the PO waits
+  const noPrice = Array.from(new Set(lines.filter(l => !(num(l.rate) > 0)).map(l => l.material)));
+  if (noPrice.length) { prDialog(noPrice, 'PO', ven, 'Price missing'); $('#npMsg').innerHTML = '<span class="late-txt">' + esc(noPrice.join(', ')) + ': no approved price — the PO can be saved once the Super Admin approves it.</span>'; return; }
   const brandNames = Store.all('customers').map(c => norm(c.name));
   const noBrand = lines.find(l => !l.brand || l.brand.split(',').some(b => !brandNames.includes(norm(b))));
   if (noBrand) { $('#npMsg').innerHTML = '<span class="late-txt">' + esc(noBrand.material) + ': select a Brand from the CDB list.</span>'; return; }
@@ -592,7 +599,7 @@ VIEWS.sourcing = {
   mod: 'purchase', render() {
     masterView({
       col: 'sourcing', mod: 'purchase', title: 'Sourcing', view: VIEWS.sourcing, sort: 'material', paste: true,
-      cols: [{ k: 'material', l: 'Material', w: 140, upper: true }, { k: 'vendor', l: 'Vendor' }, { k: 'rate', l: 'Rate ₹', type: 'number', w: 90 }, { k: 'moq', l: 'MOQ', type: 'number', w: 80 }, { k: 'lead_days', l: 'Lead days', type: 'number', w: 80 }, { k: 'remark', l: 'Remark' }],
+      cols: [{ k: 'material', l: 'Material', w: 140, upper: true }, { k: 'vendor', l: 'Vendor' }, { k: 'moq', l: 'MOQ', type: 'number', w: 80 }, { k: 'lead_days', l: 'Lead days', type: 'number', w: 80 }, { k: 'remark', l: 'Remark' }],
       validate: d => !String(d.material || '').trim() ? 'Material is required.' : !String(d.vendor || '').trim() ? 'Vendor is required.' : (Store.all('sourcing').some(x => x.id !== d.id && norm(x.material) === norm(d.material) && norm(x.vendor) === norm(d.vendor)) ? 'This material+vendor already exists.' : '')
     });
     $('#main').insertAdjacentHTML('beforeend', '');
@@ -1143,8 +1150,8 @@ VIEWS.stock = {
     const rows = Store.all('materials').map(m => ({ m, q: stk[norm(m.code)] || 0 })).sort((a, b) => a.m.code.localeCompare(b.m.code));
     const low = rows.filter(x => num(x.m.min_level) > 0 && x.q < num(x.m.min_level));
     setMain('<div class="toolbar">' + (low.length ? '<span class="late-txt small"><b>' + low.length + ' item(s) below min level</b></span>' : '') + '<span class="grow"></span><button class="btn" data-act="stock-csv">Export CSV</button></div>' +
-      '<div class="tbl-wrap"><table><tr><th>Item Code</th><th>Item Name</th><th>Category</th><th>UOM</th><th>Rack</th><th class="num">Min Level</th><th class="num">Stock</th><th>Status</th></tr>' +
-      rows.map(x => { const lowRow = num(x.m.min_level) > 0 && x.q < num(x.m.min_level); return '<tr' + (lowRow ? ' style="background:#fdf3f3"' : x.q <= 0 ? ' class="muted"' : '') + '><td><b>' + esc(x.m.code) + '</b></td><td>' + esc(x.m.name) + '</td><td>' + esc(x.m.group || '') + '</td><td>' + esc(x.m.uom) + '</td><td>' + esc(x.m.rack || '') + '</td><td class="num">' + (num(x.m.min_level) ? qtyFmt(x.m.min_level) : '') + '</td><td class="num"><b>' + qtyFmt(x.q) + '</b></td><td>' + (lowRow ? '<span class="late-txt">Below min</span>' : '') + '</td></tr>'; }).join('') + '</table></div>');
+      '<div class="tbl-wrap"><table><tr><th>Item Code</th><th>Item Name</th><th>Category</th><th>UOM</th><th>Rack</th><th class="num">Min Level</th><th class="num">Stock</th><th class="num">Price ₹</th><th>Status</th><th></th></tr>' +
+      rows.map(x => { const lowRow = num(x.m.min_level) > 0 && x.q < num(x.m.min_level); return '<tr' + (lowRow ? ' style="background:#fdf3f3"' : x.q <= 0 ? ' class="muted"' : '') + '><td><b>' + esc(x.m.code) + '</b></td><td>' + esc(x.m.name) + '</td><td>' + esc(x.m.group || '') + '</td><td>' + esc(x.m.uom) + '</td><td>' + esc(x.m.rack || '') + '</td><td class="num">' + (num(x.m.min_level) ? qtyFmt(x.m.min_level) : '') + '</td><td class="num"><b>' + qtyFmt(x.q) + '</b></td><td class="num">' + poRateCell(x.m.code) + '</td><td>' + (lowRow ? '<span class="late-txt">Below min</span>' : '') + '</td><td>' + (prCanAsk() && !prPending(x.m.code) ? '<button class="btn sm" data-act="pr-ask" data-c="' + esc(x.m.code) + '">Price</button>' : '') + '</td></tr>'; }).join('') + '</table></div>');
     VIEWS.stock.rows = rows;
   }
 };
@@ -1257,7 +1264,7 @@ VIEWS.materials = {
       cols: [{ k: 'code', l: 'Item Code', w: 100, upper: true, ph: 'auto' }, { k: 'name', l: 'Item Name', ph: 'Item name' },
         { k: 'group', l: 'Category', opts: () => [''].concat(itemCats()).map(v => ({ v, l: v || '—' })) },
         { k: 'uom', l: 'UOM', opts: () => UOMS.map(v => ({ v, l: v })) },
-        { k: 'price', l: 'Price ₹', type: 'number', w: 90 }, { k: 'rack', l: 'Rack No.', w: 80, upper: true },
+        { k: 'rack', l: 'Rack No.', w: 80, upper: true },
         { k: 'gst', l: 'GST %', type: 'number', w: 70 }, { k: 'hsn', l: 'HSN', w: 90 },
         { k: 'min_level', l: 'Min level', type: 'number', w: 80 }],
       defaults: { uom: 'PCS' },
@@ -1312,7 +1319,7 @@ VIEWS.bom = {
     const m = $('#main'); window.NBF = { photo: '' };
     m.addEventListener('input', e => { if (e.target.closest('#nbTable')) bomRecalc(); });
     m.addEventListener('change', e => {
-      if (e.target.dataset.nb === 'mat') { const mt = Store.all('materials').find(x => norm(x.name) === norm(e.target.value) || norm(x.code) === norm(e.target.value)); const tr = e.target.closest('tr'); if (mt) { e.target.value = mt.name; $('[data-nb-code]', tr).textContent = mt.code; $('[data-nb-uom]', tr).textContent = mt.uom; const pr = $('[data-nb="price"]', tr); if (!pr.value) pr.value = mt.price || ''; const c = $('[data-nb="cat"]', tr); if (!c.value) c.value = mt.group || ''; } bomRecalc(); }
+      if (e.target.dataset.nb === 'mat') { const mt = Store.all('materials').find(x => norm(x.name) === norm(e.target.value) || norm(x.code) === norm(e.target.value)); const tr = e.target.closest('tr'); if (mt) { e.target.value = mt.name; $('[data-nb-code]', tr).textContent = mt.code; $('[data-nb-uom]', tr).textContent = mt.uom; const pr = $('[data-nb="price"]', tr); pr.value = mt.price || ''; const c = $('[data-nb="cat"]', tr); if (!c.value) c.value = mt.group || ''; } bomRecalc(); }
       if (e.target.id === 'nbPhoto') readImg(e.target.files[0], src => { NBF.photo = src; $('#nbPhotoTag').innerHTML = '<img src="' + src + '">'; });
       if (e.target.id === 'nbCopy' && e.target.value) { const src = Store.get('boms', e.target.value); $$('#nbTable tr[data-bline]').forEach(tr => tr.remove()); src.lines.forEach(l => $('#nbTable').insertAdjacentHTML('beforeend', bomRow(l))); bomRecalc(); }
       if (e.target.id === 'nbBrand') {
@@ -1336,7 +1343,7 @@ VIEWS.bom = {
 function bomRow(l) {
   l = l || {}; const m = matBy(l.material) || {};
   return '<tr data-bline><td class="c" data-sr></td><td><input data-nb="process" value="' + esc(l.process || '') + '"></td><td><input data-nb="section" value="' + esc(l.section || '') + '"></td><td><input data-nb="cat" list="dlCatJc2" value="' + esc(l.category || m.group || '') + '"></td><td><input data-nb="mat" list="dlMatB" value="' + esc(m.name || '') + '"></td><td class="c muted" data-nb-code>' + esc(l.material || '') + '</td><td class="c muted" data-nb-uom>' + esc(l.uom || '') + '</td>' +
-    '<td><input data-nb="qty" type="number" min="0" step="any" class="right" value="' + esc(l.qty || '') + '"></td><td><input data-nb="price" type="number" min="0" step="any" class="right" value="' + esc(l.price || '') + '"></td><td class="c muted" data-nb-cost>0</td><td>' + vendorSel('data-nb="sup"', l.supplier || '') + '</td><td><input data-nb="rem" value="' + esc(l.remark || '') + '"></td><td class="c"><a data-act="bom-line-del" title="Remove">×</a></td></tr>';
+    '<td><input data-nb="qty" type="number" min="0" step="any" class="right" value="' + esc(l.qty || '') + '"></td><td><input data-nb="price" type="number" class="right" readonly tabindex="-1" value="' + esc(l.material && matBy(l.material) ? (matBy(l.material).price || '') : (l.price || '')) + '"></td><td class="c muted" data-nb-cost>0</td><td>' + vendorSel('data-nb="sup"', l.supplier || '') + '</td><td><input data-nb="rem" value="' + esc(l.remark || '') + '"></td><td class="c"><a data-act="bom-line-del" title="Remove">×</a></td></tr>';
 }
 function bomRecalc() {
   let rmc = 0;
@@ -1365,7 +1372,7 @@ function bomImportText(text) {
       process: before.length >= 3 ? before[before.length - 3] : '',
       section: before.length >= 2 ? before[before.length - 2] : '',
       category: before.length >= 1 ? before[before.length - 1] : (m.group || ''),
-      material: m.code, uom: m.uom, qty: nums[0] || '', price: nums[1] || m.price || '',
+      material: m.code, uom: m.uom, qty: nums[0] || '', price: m.price || '',
       supplier: supplierOf(txts[0] || ''), remark: txts[1] || ''
     })); ok++;
   });
@@ -1381,7 +1388,7 @@ ACTIONS['bom-save'] = () => {
   const style = $('#nbStyle').value.trim(), col = $('#nbCol').value.trim(), gen = $('#nbGen').value, cat = $('#nbCat').value.trim();
   const lines = $$('#nbTable tr[data-bline]').map(tr => {
     const m = Store.all('materials').find(x => norm(x.name) === norm($('[data-nb="mat"]', tr).value) || norm(x.code) === norm($('[data-nb="mat"]', tr).value));
-    return m ? { process: $('[data-nb="process"]', tr).value.trim(), section: $('[data-nb="section"]', tr).value.trim(), category: $('[data-nb="cat"]', tr).value.trim() || m.group || '', material: m.code, uom: m.uom, qty: num($('[data-nb="qty"]', tr).value), price: num($('[data-nb="price"]', tr).value), supplier: $('[data-nb="sup"]', tr).value.trim(), remark: $('[data-nb="rem"]', tr).value.trim() } : null;
+    return m ? { process: $('[data-nb="process"]', tr).value.trim(), section: $('[data-nb="section"]', tr).value.trim(), category: $('[data-nb="cat"]', tr).value.trim() || m.group || '', material: m.code, uom: m.uom, qty: num($('[data-nb="qty"]', tr).value), price: num(m.price), supplier: $('[data-nb="sup"]', tr).value.trim(), remark: $('[data-nb="rem"]', tr).value.trim() } : null;
   }).filter(l => l && l.qty > 0);
   if (!brand || !art || !lines.length) { $('#nbMsg').innerHTML = '<span class="late-txt">Brand, Article and at least one item line (Norms > 0) are required.</span>'; return; }
   const badSup = badSuppliers(lines); if (badSup.length) { $('#nbMsg').innerHTML = '<span class="late-txt">Supplier not in Vendors master: ' + esc(badSup.join(', ')) + ' — select a vendor from the list.</span>'; return; }
