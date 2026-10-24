@@ -202,12 +202,24 @@ async function cloudWrite(col, doc, isDelete) {
     const { error } = await q; if (error) throw error;
     RETRY_Q.delete(col + '|' + doc.id);
   } catch (e) {
+    // "NX: …" = the database refused the change on purpose (a business rule): do not retry, take the cloud copy back
+    if (/^NX:/.test(String(e.message || ''))) { RETRY_Q.delete(col + '|' + doc.id); flash('Not saved — ' + esc(String(e.message).replace(/^NX:\s*/, '')), 'err'); cloudReload(col, doc.id); pendingWrites--; syncBadge(); return; }
     RETRY_Q.set(col + '|' + doc.id, { col, id: doc.id, isDelete: !!isDelete });
     // "permission denied" = the login has ended (signed out elsewhere / expired): renew it or ask for the password
     if (/permission denied|JWT|not authenticated/i.test(String(e.message || e)) || e.code === '42501' || e.code === 'PGRST301') reauth();
     else flash('Cloud save failed: ' + esc(e.message || e) + ' — will retry automatically; keep this page open.', 'err');
   }
   pendingWrites--; syncBadge();
+}
+// after a refused write: put the cloud's copy of that record back locally (or drop it if the cloud never had it)
+async function cloudReload(col, id) {
+  try {
+    const { data, error } = await SB.from(TBL).select('collection,id,data,updated_at').eq('collection', col).eq('id', id).maybeSingle();
+    if (error) return;
+    if (data) cloudApply(col, id, data.data, data.updated_at, false);
+    else { const list = DB[col]; if (list) { const i = list.findIndex(d => d.id === id); if (i >= 0) list.splice(i, 1); } SNAP.delete(col + '|' + id); }
+    RES_CACHE.clear(); if (typeof route === 'function') route();
+  } catch (e) { console.warn(e); }
 }
 // retry failed writes every 20s (sends the latest local copy)
 function retryNow() {
