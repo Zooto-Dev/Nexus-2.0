@@ -10,14 +10,19 @@ function canRaiseReq() { return can('purchase', 'edit') || can('store', 'edit');
 // status: Open (no vendor yet) → Vendor Assigned → PO Raised → Received; or Cancelled
 function reqPo(r) {
   const p = r.po_id ? Store.get('purchase_orders', r.po_id) : null;
-  return p && !p.cancelled && p.approval !== 'Rejected' ? p : null;
+  if (!p || p.cancelled || p.approval === 'Rejected') return null;
+  // the line for this item was removed at amendment or short-closed without the goods: the requirement is open again
+  const ls = (p.lines || []).map((l, k) => ({ l, k })).filter(x => norm(x.l.material) === norm(r.material));
+  if (!ls.length || ls.every(x => x.l.closed && grnAcceptedOf(p, x.l, x.k) < num(x.l.qty) - 1e-9)) return null;
+  return p;
 }
 function reqStatus(r) {
   if (r.cancelled) return 'Cancelled';
   const p = reqPo(r);
   if (p) {
-    const ls = (p.lines || []).filter(l => norm(l.material) === norm(r.material));
-    return ls.length && ls.every(l => num(l.received) >= num(l.qty) - 1e-9) ? 'Received' : 'PO Raised';
+    // received = good (accepted) qty only; a fully rejected delivery keeps the requirement open so it is ordered again
+    const ls = (p.lines || []).map((l, k) => ({ l, k })).filter(x => norm(x.l.material) === norm(r.material));
+    return ls.every(x => grnAcceptedOf(p, x.l, x.k) >= num(x.l.qty) - 1e-9) ? 'Received' : 'PO Raised';
   }
   return r.vendor ? 'Vendor Assigned' : 'Open';
 }
@@ -27,7 +32,8 @@ function activeReqs() { return Store.all('requirements').filter(reqActive); }
 // after a PO is saved: link the active requirements of that vendor for the items on it
 function reqLinkPo(po) {
   const mats = new Set((po.lines || []).map(l => norm(l.material)));
-  Store.all('requirements').filter(r => reqActive(r) && !reqPo(r) && r.vendor && norm(r.vendor) === norm(po.vendor) && mats.has(norm(r.material))).forEach(r => {
+  // any PO for the item covers it, whichever vendor Purchase finally chose
+  Store.all('requirements').filter(r => reqActive(r) && !reqPo(r) && mats.has(norm(r.material))).forEach(r => {
     r.po_id = po.id; r.po_no = po.no; Store.put('requirements', r); audit('requirement.po', r.no, po.no);
   });
 }

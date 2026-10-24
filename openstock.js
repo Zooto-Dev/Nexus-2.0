@@ -16,11 +16,14 @@ function osCheck(r, seen) {
   return '';
 }
 function osSave(rows) {
+  const seen = new Set(); let n = 0;
   rows.forEach(r => {
-    const m = osMat(r.material);
+    const m = osMat(r.material); if (!m || osLive(m.code) || seen.has(norm(m.code))) return;   // checked again here: never two live entries for one item
+    seen.add(norm(m.code)); n++;
     const d = Store.put('opening_stock', { id: uid(), no: osNo(), date: r.date, material: m.code, uom: m.uom, qty: num(r.qty), rate: num(m.price), rack: r.rack || m.rack || '', status: 'Pending', by: ME.name, at: nowIso() });
     audit('opening_stock.add', d.no, m.code + ' × ' + qtyFmt(d.qty) + ' ' + (m.uom || '') + ' @ ' + money(d.rate) + ' · ' + d.date);
   });
+  return n;
 }
 VIEWS.openstock = {
   mod: 'store', render() {
@@ -61,9 +64,9 @@ function osSetStatus(x, st) {
   x.status = st; x.approved_by = ME.name; x.approved_at = nowIso(); Store.put('opening_stock', x);
   audit('opening_stock.' + (st === 'Approved' ? 'approve' : 'reject'), x.no, x.material + ' × ' + qtyFmt(x.qty));
 }
-ACTIONS['os-approve'] = el => { if (!osCanApprove()) return; const x = Store.get('opening_stock', el.dataset.id); if (!x || x.status !== 'Pending') return; osSetStatus(x, 'Approved'); flash(esc(x.no) + ' approved — added to stock.'); VIEWS.openstock.render(); };
+ACTIONS['os-approve'] = el => { if (!osCanApprove()) return; const x = Store.get('opening_stock', el.dataset.id); if (!x || x.status !== 'Pending') return; if (x.by === ME.name && !isSuperAdmin()) { flash('You entered ' + esc(x.no) + ' — someone else must approve it.', 'err'); return; } osSetStatus(x, 'Approved'); flash(esc(x.no) + ' approved — added to stock.'); VIEWS.openstock.render(); };
 ACTIONS['os-reject'] = el => { if (!osCanApprove()) return; const x = Store.get('opening_stock', el.dataset.id); if (!x || x.status !== 'Pending') return; osSetStatus(x, 'Rejected'); VIEWS.openstock.render(); };
-ACTIONS['os-approve-all'] = () => { if (!osCanApprove()) return; const p = osAll().filter(x => x.status === 'Pending'); p.forEach(x => osSetStatus(x, 'Approved')); flash(p.length + ' approved — added to stock.'); VIEWS.openstock.render(); };
+ACTIONS['os-approve-all'] = () => { if (!osCanApprove()) return; const p = osAll().filter(x => x.status === 'Pending' && (x.by !== ME.name || isSuperAdmin())); p.forEach(x => osSetStatus(x, 'Approved')); flash(p.length + ' approved — added to stock.' + (osAll().some(x => x.status === 'Pending') ? ' Your own entries wait for someone else.' : '')); VIEWS.openstock.render(); };
 ACTIONS['os-del'] = el => { const x = Store.get('opening_stock', el.dataset.id); if (!x || x.status !== 'Pending' || x.by !== ME.name) return; Store.del('opening_stock', x.id); audit('opening_stock.delete', x.no, x.material); VIEWS.openstock.render(); };
 ACTIONS['os-template'] = () => downloadCsv('opening-stock-template.csv', [['Item Code', 'Qty', 'Rack', 'Date (YYYY-MM-DD)']].concat(Store.all('materials').filter(m => !osLive(m.code)).sort((a, b) => a.code.localeCompare(b.code)).map(m => [m.code, '', m.rack || '', todayYmd()])));
 ACTIONS['os-csv'] = () => downloadCsv('opening-stock-' + todayYmd() + '.csv', [['No', 'Date', 'Item Code', 'Item Name', 'UOM', 'Qty', 'Rate', 'Value', 'Rack', 'Entered by', 'Status', 'Approved by']].concat(osAll().map(x => { const m = osMat(x.material) || {}; return [x.no, x.date, x.material, m.name || '', x.uom || m.uom || '', x.qty, x.rate, num(x.qty) * num(x.rate), x.rack || '', x.by, x.status, x.approved_by || '']; })));

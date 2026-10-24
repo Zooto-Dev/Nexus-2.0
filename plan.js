@@ -51,7 +51,7 @@ function planStatus(p) {
   L.forEach(l => {
     const rq = num(l.required), is = Math.max(0, issuedToJc(j.no, l.material)); const bal = Math.max(0, rq - is);
     const stock = Math.max(0, stockOf(l.material)); const transit = transitOf(l.material);
-    const pos = openPOs().filter(x => x.lines.some(y => norm(y.material) === norm(l.material) && num(y.qty) > num(y.received))).sort((a, b) => (a.expected || '9') < (b.expected || '9') ? -1 : 1);
+    const pos = openPOs().filter(x => x.lines.some((y, k) => norm(y.material) === norm(l.material) && poLinePending(x, y, k) > 0)).sort((a, b) => (a.expected || '9') < (b.expected || '9') ? -1 : 1);
     req += rq; iss += Math.min(rq, is);
     items.push({ l, m: matBy(l.material) || {}, rq, is, bal, stock, transit, po: pos[0] || null, state: bal <= 1e-9 ? 'Issued' : stock + 1e-9 >= bal ? 'In stock' : transit > 0 ? 'PO raised' : 'No PO' });
   });

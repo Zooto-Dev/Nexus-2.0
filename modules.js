@@ -56,7 +56,7 @@ function stockMaps() {
   Store.all('grns').forEach(g => (g.lines || []).forEach(l => { add(stk, l.material, num(l.accepted) + (l.excess_status === 'Approved' ? num(l.excess) : 0)); add(rej, l.material, num(l.rejected)); if (l.excess_status === 'Rejected') add(rtvx, l.material, num(l.excess)); }));
   // only APPROVED issues deduct stock (a pending request does not); returns add back
   Store.all('issues').forEach(i => {
-    if (i.status !== 'Approved' && i.status) return;
+    if (i.status !== 'Approved') return;
     if (i.type === 'line_reject') { add(i.returnable ? rejLine : rejScrap, i.material, num(i.qty)); return; }
     if (i.type === 'scrap') { add(rejScrap, i.material, -num(i.qty)); return; }
     add(stk, i.material, i.type === 'return' ? num(i.qty) : -num(i.qty));
@@ -69,7 +69,7 @@ function stockOf(code) { return stockMaps().stk[norm(code)] || 0; }
 function reservedOf(code, jc) { return Store.all('rsjw').filter(r => norm(r.material) === norm(code) && (!jc || norm(r.jc_no) === norm(jc))).reduce((s2, r) => s2 + num(r.qty), 0); }
 function openStockOf(code) { return Math.max(0, stockOf(code) - reservedOf(code)); }
 // Transit = ordered on approved POs but not yet received
-function transitOf(code) { return openPOs().reduce((s2, p) => s2 + p.lines.filter(l => norm(l.material) === norm(code)).reduce((a, l) => a + Math.max(0, num(l.qty) - num(l.received)), 0), 0); }
+function transitOf(code) { return openPOs().reduce((s2, p) => s2 + p.lines.reduce((a, l, k) => a + (norm(l.material) === norm(code) ? poLinePending(p, l, k) : 0), 0), 0); }
 function jcBy(no) { return Store.all('job_cards').find(j => norm(j.no) === norm(no)); }
 // net issued to a JC: returns and line rejections come off, so a replacement for rejected material
 // re-opens within the JC balance instead of counting as excess
@@ -79,7 +79,8 @@ function issuedToJc(jc, code) { return Store.all('issues').filter(i => i.status 
 function netReqRows(vendor, excludePo) {
   const by = {};
   const row = code => { const k = norm(code); return by[k] || (by[k] = { material: (matBy(code) || {}).code || code, jcs: [], demand: 0, suppliers: new Set() }); };
-  Store.all('job_cards').filter(j => j.status !== 'Closed').forEach(j => (j.lines || []).forEach(l => {
+  const frozen = new Set(Store.all('orders').filter(o => o.priority === 'Cancelled' || o.priority === 'On Hold').map(o => norm(o.no)));
+  Store.all('job_cards').filter(j => j.status !== 'Closed' && !frozen.has(norm(j.order_no || ''))).forEach(j => (j.lines || []).forEach(l => {
     const bal = Math.max(0, num(l.required) - issuedToJc(j.no, l.material));
     if (bal <= 0.0001) return;
     const r = row(l.material); r.demand += bal; r.jcs.push({ jc: j.no, bal, supplier: l.supplier || '', brand: j.brand || '', article: j.article || '', colour: j.colour || '' }); if (l.supplier) r.suppliers.add(l.supplier);
@@ -91,13 +92,13 @@ function netReqRows(vendor, excludePo) {
   Store.all('materials').filter(m => num(m.min_level) > 0).forEach(m => row(m.code));
   const src = Store.all('sourcing');
   const openPo = code => Store.all('purchase_orders').filter(p => !p.cancelled && p.approval !== 'Rejected' && p.id !== excludePo)
-    .reduce((s2, p) => s2 + (p.lines || []).filter(l => norm(l.material) === norm(code)).reduce((a, l) => a + Math.max(0, num(l.qty) - num(l.received)), 0), 0);
+    .reduce((s2, p) => s2 + (p.lines || []).reduce((a, l, k) => a + (norm(l.material) === norm(code) ? poLinePending(p, l, k) : 0), 0), 0);
   return Object.values(by).map(r => {
     const m = matBy(r.material) || {};
     src.filter(x => norm(x.material) === norm(r.material)).forEach(x => { if (!r.suppliers.size) r.suppliers.add(x.vendor); });
     r.name = m.name || r.material; r.uom = m.uom || ''; r.min = num(m.min_level);
     r.stock = Math.max(0, stockOf(r.material)); r.openPo = openPo(r.material);
-    r.net = Math.max(0, r.demand + r.min - r.stock - r.openPo);
+    r.net = r3(Math.max(0, r.demand + r.min - r.stock - r.openPo));
     const sc = vendor ? src.find(x => norm(x.material) === norm(r.material) && norm(x.vendor) === norm(vendor)) : null;
     r.rate = num(m.price) || ''; r.moq = sc ? num(sc.moq) : 0;   // price only from the item (set via price approval)
     r.jcs.sort((a, b) => String(a.jc).localeCompare(String(b.jc)));
@@ -105,16 +106,28 @@ function netReqRows(vendor, excludePo) {
   }).filter(r => (r.demand > 0 || r.net > 0) && (!vendor || Array.from(r.suppliers).some(v => norm(v) === norm(vendor))))
     .sort((a, b) => (b.net > 0) - (a.net > 0) || a.material.localeCompare(b.material));
 }
-function poPending(po) { return (po.lines || []).reduce((s, l) => s + Math.max(0, num(l.qty) - num(l.received)), 0); }
+const r3 = v => Math.round(num(v) * 1000) / 1000;
+// whole units for counted UOMs, 3 decimals for measured ones (always rounded UP so the need is covered)
+const UOM_WHOLE = ['PCS', 'PC', 'PIECE', 'PIECES', 'PAIR', 'PAIRS', 'PRS', 'NOS', 'NO', 'SET', 'SETS', 'BOX', 'BOXES', 'ROLL', 'ROLLS', 'SHEET', 'SHEETS', 'PKT', 'PACKET', 'BAG', 'BAGS', 'CTN', 'CARTON', 'DOZEN', 'DOZ', 'CONE', 'CONES'];
+function roundUom(uom, q) { q = num(q); if (q <= 0) return 0; return UOM_WHOLE.includes(String(uom || '').trim().toUpperCase()) ? Math.ceil(q - 1e-9) : Math.ceil(q * 1000 - 1e-6) / 1000; }
+// received on a PO line = what its GRNs record (accepted + rejected). The copy on the line is only a cache,
+// so a stale save of the PO can never lose a receipt.
+function grnLinesOf(p, l, k) { return Store.all('grns').filter(g => g.po_id === p.id || (!g.po_id && norm(g.po_no) === norm(p.no))).flatMap(g => (g.lines || []).filter(x => x.po_line != null && k != null ? x.po_line === k : norm(x.material) === norm(l.material))); }
+function grnRecvOf(p, l, k) { return r3(grnLinesOf(p, l, k).reduce((a, x) => a + num(x.accepted) + num(x.rejected), 0)); }
+function grnAcceptedOf(p, l, k) { return r3(grnLinesOf(p, l, k).reduce((a, x) => a + num(x.accepted), 0)); }
+function recvOf(p, l, k) { return Math.max(r3(l.received), grnRecvOf(p, l, k)); }
+// pending on a line: nothing once it is short-closed; tiny decimal leftovers count as 0
+function poLinePending(p, l, k) { if (!l || l.closed) return 0; const v = r3(num(l.qty) - recvOf(p, l, k)); return v > 1e-6 ? v : 0; }
+function poPending(po) { return (po.lines || []).reduce((s, l, k) => s + poLinePending(po, l, k), 0); }
 function poStatus(po) {
   if (po.cancelled) return 'Cancelled';
   if (po.approval === 'Rejected') return 'Rejected';
   if (po.approval === 'Amend') return 'Amend';
   if (po.approval !== 'Approved') return 'Pending Approval';
-  const p = poPending(po); const got = (po.lines || []).some(l => num(l.received) > 0);
-  return p <= 0 ? 'Received' : got ? 'Partial' : 'Open';
+  const p = poPending(po); const got = (po.lines || []).some((l, k) => recvOf(po, l, k) > 0);
+  return p <= 0 ? ((po.lines || []).some(l => l.closed) ? 'Short Closed' : 'Received') : got ? 'Partial' : 'Open';
 }
-function poStCls(st) { return st === 'Received' ? 'Done' : st === 'Partial' ? 'Pending' : st === 'Cancelled' || st === 'Rejected' ? 'Cancelled' : st === 'Pending Approval' || st === 'Amend' ? 'Late' : 'Waiting'; }
+function poStCls(st) { return st === 'Received' || st === 'Short Closed' ? 'Done' : st === 'Partial' ? 'Pending' : st === 'Cancelled' || st === 'Rejected' ? 'Cancelled' : st === 'Pending Approval' || st === 'Amend' ? 'Late' : 'Waiting'; }
 // GRN, followup and inwarding run only against APPROVED POs.
 function openPOs() { return Store.all('purchase_orders').filter(p => !p.cancelled && p.approval === 'Approved' && poPending(p) > 0); }
 function autoTask(title, doer, dueDays, extra) {
@@ -340,9 +353,10 @@ VIEWS.po = {
     else h += '<div class="tbl-wrap"><table class="bomflat"><tr><th>PO No</th><th>PO Date</th><th>Vendor</th><th class="num">Sr</th><th>Item Name</th><th>Item Code</th><th>Brand</th><th>UOM</th><th class="num">Qty</th><th class="num">Received</th><th class="num">Pending</th><th>Expected</th><th>Status</th><th>Raised By</th><th>Approved By</th><th></th></tr>' +
       (rows.length ? rows.map(p => {
         const st = poStatus(p);
-        const act = (st === 'Amend' && edit && (p.amend_by ? p.amend_by === ME.name : (poOwn(p) || isSuperAdmin())) ? '<button class="btn sm primary" data-act="po-edit" data-id="' + esc(p.id) + '">Edit</button>' : '') +
-          (edit && (st === 'Open' || st === 'Pending Approval' || st === 'Amend') ? ' <button class="btn ghost sm danger" data-act="po-cancel" data-id="' + esc(p.id) + '" data-confirm="Cancel PO?">Cancel</button>' : '');
-        let row = p.lines.map((l, i) => '<tr class="click' + (i === 0 ? ' bomfirst' : '') + '" data-act="po-toggle" data-id="' + esc(p.id) + '"><td><b>' + esc(p.no) + '</b></td><td>' + fmtD(p.date) + '</td><td>' + esc(p.vendor) + '</td><td class="num">' + (i + 1) + '</td><td>' + esc((matBy(l.material) || {}).name || '') + '</td><td>' + esc(l.material) + '</td><td>' + esc(l.brand || '') + '</td><td>' + esc(l.uom || '') + '</td><td class="num">' + qtyFmt(l.qty) + '</td><td class="num">' + qtyFmt(num(l.received)) + '</td><td class="num">' + qtyFmt(Math.max(0, num(l.qty) - num(l.received))) + '</td><td>' + fmtD(p.expected) + '</td><td><span class="st ' + poStCls(st) + '">' + st + '</span></td><td>' + esc(p.created_by || '') + '</td><td>' + esc(p.approved_by || '') + '</td><td class="right">' + (i === 0 ? act : '') + '</td></tr>').join('');
+        const act = (st === 'Amend' && edit && (p.amend_by ? ((p.amend_by_id ? p.amend_by_id === ME.id : p.amend_by === ME.name) || isSuperAdmin()) : (poOwn(p) || isSuperAdmin())) ? '<button class="btn sm primary" data-act="po-edit" data-id="' + esc(p.id) + '">Edit</button>' : '') +
+          (edit && canApprove() && (st === 'Open' || st === 'Pending Approval' || st === 'Amend') && !pendingInwardOf(p.no) ? ' <button class="btn ghost sm danger" data-act="po-cancel" data-id="' + esc(p.id) + '">Cancel</button>' : '') +
+          (edit && canApprove() && st === 'Partial' && !pendingInwardOf(p.no) ? ' <button class="btn ghost sm" data-act="po-close" data-id="' + esc(p.id) + '">Short close</button>' : '');
+        let row = p.lines.map((l, i) => '<tr class="click' + (i === 0 ? ' bomfirst' : '') + '" data-act="po-toggle" data-id="' + esc(p.id) + '"><td><b>' + esc(p.no) + '</b></td><td>' + fmtD(p.date) + '</td><td>' + esc(p.vendor) + '</td><td class="num">' + (i + 1) + '</td><td>' + esc((matBy(l.material) || {}).name || '') + '</td><td>' + esc(l.material) + '</td><td>' + esc(l.brand || '') + '</td><td>' + esc(l.uom || '') + '</td><td class="num">' + qtyFmt(l.qty) + '</td><td class="num">' + qtyFmt(recvOf(p, l, i)) + '</td><td class="num">' + qtyFmt(poLinePending(p, l, i)) + '</td><td>' + fmtD(p.expected) + '</td><td><span class="st ' + poStCls(st) + '">' + st + '</span></td><td>' + esc(p.created_by || '') + '</td><td>' + esc(p.approved_by || '') + '</td><td class="right">' + (i === 0 ? act : '') + '</td></tr>').join('');
         if (PO_UI.open === p.id) row += '<tr class="inline-form"><td colspan="16">' + poDetail(p) + '</td></tr>';
         return row;
       }).join('') : '<tr><td colspan="16" class="empty">No purchase orders</td></tr>') + '</table></div>';
@@ -354,7 +368,10 @@ VIEWS.po = {
 };
 // the person who raised a PO never approves it; only the Super Admin (system role) is exempt
 function poOwn(p) { return !!ME && ((p.created_by_id && p.created_by_id === ME.id) || (!p.created_by_id && p.created_by === ME.name)); }
-function canApprovePo(p) { return canApprove() && (!poOwn(p) || isSuperAdmin()); }
+function poAmendedByMe(p) { return !!ME && (p.amended_by_id ? p.amended_by_id === ME.id : (!!p.amended_by && p.amended_by === ME.name)); }
+// never the person who raised or amended it; an MOQ over-order only by the Super Admin
+function canApprovePo(p) { if (isSuperAdmin()) return true; if (!canApprove()) return false; if (poOwn(p) || poAmendedByMe(p)) return false; if ((p.moq_log || []).length) return false; return true; }
+function poWhyNot(p) { return poOwn(p) ? 'You raised this PO — someone else must approve it.' : poAmendedByMe(p) ? 'You amended this PO — someone else must approve it.' : (p.moq_log || []).length ? 'This PO orders above the requirement (MOQ) — only the Super Admin can approve it.' : 'Only Admin/Manager can approve POs.'; }
 function poDetail(p) {
   return poDocHtml(p) + '<div class="toolbar noprint" style="margin-top:8px"><button class="btn sm" data-act="po-print" data-id="' + p.id + '">Print</button></div>';
 }
@@ -365,7 +382,7 @@ function poForm() {
   return '<div class="card"><div class="card-b">' + dlMat('dlMatPo') + '<datalist id="dlBrandPo">' + Store.all('customers').map(c => '<option value="' + esc(c.name) + '">').join('') + '</datalist>' +
     (lastAmend ? '<div class="panel" style="border-left:3px solid var(--late);margin-bottom:10px"><b>' + esc(ed.no) + '</b> \u2014 ' + esc(lastAmend.remark) + ' <span class="muted small">(' + esc(lastAmend.by) + ', ' + fmtDT(lastAmend.at) + ')</span></div>' : '') +
     '<div class="row">' + 
-    '<label>Vendor *' + (ed ? '<input id="npVen" value="' + esc(ed.vendor) + '" readonly>' : '<select id="npVen"><option value="">' + (poVendorNeeds().length ? 'Select vendor…' : 'No net requirement') + '</option>' + poVendorNeeds().map(v => '<option value="' + esc(v.name) + '">' + esc(v.name) + ' (' + v.items + ' item' + (v.items > 1 ? 's' : '') + ')</option>').join('') + '</select>') + '</label><label>PO date<input id="npDate" type="date" value="' + esc(ed ? ed.date : todayYmd()) + '"></label><label>Expected delivery *<input id="npExp" type="date" value="' + esc(ed ? ed.expected : '') + '"></label><label style="flex:1">Remarks<input id="npRem" value="' + esc(ed ? ed.remarks || '' : '') + '"></label></div>' +
+    '<label>Vendor *' + (ed ? '<input id="npVen" value="' + esc(ed.vendor) + '" readonly>' : '<select id="npVen"><option value="">' + (poVendorNeeds().length ? 'Select vendor…' : 'No net requirement') + '</option>' + poVendorNeeds().map(v => '<option value="' + esc(v.name) + '">' + esc(v.name) + ' (' + v.items + ' item' + (v.items > 1 ? 's' : '') + ')</option>').join('') + '</select>') + '</label><label>PO date<input id="npDate" type="date" value="' + esc(ed ? ed.date : todayYmd()) + '" readonly></label><label>Expected delivery *<input id="npExp" type="date" value="' + esc(ed ? ed.expected : '') + '"></label><label style="flex:1">Remarks<input id="npRem" value="' + esc(ed ? ed.remarks || '' : '') + '"></label></div>' +
     '<div id="npHint" class="muted small" style="margin:6px 0"></div>' +
     '<table style="margin-top:4px"><tr id="npHead"></tr><tbody id="npLines"></tbody></table><a class="small" data-act="po-line" id="npAdd">+ material</a>' +
     '</div><div class="card-f"><button class="btn primary" data-act="po-save">' + (ed ? 'Save & send for approval' : 'Save PO') + '</button><button class="btn" data-act="po-new">Close</button><span id="npMsg" class="small"></span></div></div>';
@@ -398,7 +415,7 @@ function poFillJc(vendor) {
 function poJcLines() {
   return (PO_UI.net || []).map(r => {
     const m = matBy(r.material) || {}; const o = PO_UI.moq[r.material];
-    return { key: r.material, r, m, qty: o && o.qty > r.net + 1e-9 ? o.qty : r.net, moq: !!(o && o.qty > r.net + 1e-9),
+    return { key: r.material, r, m, qty: o && o.qty > r.net + 1e-9 ? o.qty : roundUom(m.uom, r.net), moq: !!(o && o.qty > r.net + 1e-9),
       brand: Array.from(new Set(r.jcs.map(x => x.req ? x.brand : (jcBy(x.jc) || {}).brand).filter(Boolean))).join(', '), photo: m.photo || '' };
   });
 }
@@ -415,14 +432,14 @@ function poJcDraw() {
     return '<tr data-jrow data-key="' + esc(L.key) + '"' + (L.moq ? ' class="moqrow"' : '') + '><td>' + photoThumb(L.photo) + '</td>' +
       '<td><b>' + esc(L.m.name || L.r.material) + '</b></td><td>' + esc(L.m.group || '') + '</td><td>' + esc(L.r.material) + '</td><td>' + esc(L.m.hsn || '') + '</td><td>' + esc(L.m.uom || '') + '</td>' +
       '<td>' + (L.brand ? esc(L.brand) : '<input data-jbrand list="dlBrandPo" style="width:120px" value="' + esc((PO_UI.ed[L.key] || {}).brand || '') + '">') + '</td>' +
-      '<td class="num">' + poRateCell(L.r.material) + '</td><td><input class="qty" type="number" min="0" step="any" data-jgst value="' + esc(gst) + '"></td>' +
+      '<td class="num">' + poRateCell(L.r.material) + '</td><td class="num">' + esc(gst) + '</td>' +
       '<td><input data-jrem value="' + esc(rem) + '"></td>' +
       '<td class="num"><b>' + qtyFmt(L.qty) + '</b>' + '<div><a class="small" data-act="po-moq" data-m="' + esc(L.r.material) + '">' + (L.moq ? 'MOQ ✎' : 'MOQ') + '</a></div>' + '</td>' +
       '<td class="num">' + money(a2) + '</td><td class="num">' + money(g2) + '</td></tr>' +
       (PO_UI.moqOpen === L.r.material ? '<tr class="inline-form"><td colspan="13"><div class="row">' +
         '<span class="small">Net requirement <b>' + qtyFmt(L.r.net) + ' ' + esc(L.m.uom || '') + '</b></span>' +
         '<label>MOQ (min order qty) *<input id="moqQty" type="number" min="0" step="any" value="' + esc((PO_UI.moq[L.r.material] || {}).qty || L.r.moq || '') + '"></label>' +
-        '<label style="flex:1">Reason *<input id="moqWhy" value="' + esc((PO_UI.moq[L.r.material] || {}).reason || 'Vendor minimum order quantity') + '"></label>' +
+        '<label style="flex:1">Reason *<input id="moqWhy" placeholder="Why more than the net requirement?" value="' + esc((PO_UI.moq[L.r.material] || {}).reason || '') + '"></label>' +
         '<button class="btn primary sm" data-act="po-moq-set" data-m="' + esc(L.r.material) + '">Apply MOQ</button>' +
         (PO_UI.moq[L.r.material] ? '<button class="btn sm" data-act="po-moq-clear" data-m="' + esc(L.r.material) + '">Remove MOQ</button>' : '') + '</div></td></tr>' : '');
   }).join('');
@@ -446,6 +463,8 @@ ACTIONS['po-moq-set'] = el => {
   const q = num($('#moqQty').value); const why = $('#moqWhy').value.trim();
   if (!why) { flash('Reason is required for an MOQ order.', 'err'); return; }
   if (q <= r.net + 1e-9) { flash('MOQ ' + qtyFmt(q) + ' is not above the net requirement ' + qtyFmt(r.net) + ' — no MOQ needed.', 'err'); return; }
+  if (num(r.moq) > 0 && q > num(r.moq) + 1e-9) { flash('Vendor MOQ in Sourcing is ' + qtyFmt(r.moq) + ' — an MOQ order cannot be more than that.', 'err'); return; }
+  if (!(num(r.moq) > 0) && q > Math.max(r.net * 2, r.net + 100) + 1e-9) { flash('Add this vendor\'s MOQ in Purchase › Sourcing first — without it an MOQ order is limited to double the requirement.', 'err'); return; }
   PO_UI.moq[r.material] = { qty: q, reason: why }; PO_UI.moqOpen = null; poJcDraw();
 };
 ACTIONS['po-moq-clear'] = el => { delete PO_UI.moq[el.dataset.m]; PO_UI.moqOpen = null; poJcDraw(); };
@@ -454,7 +473,7 @@ function poLineRow(l) {
   const a2 = num(l.qty) * num(l.rate), g2 = a2 * (1 + num(l.gst) / 100);
   return '<tr data-mline><td><input data-np="mat" list="dlMatPo" placeholder="Item Name" value="' + esc(m.name || '') + '"></td><td class="muted small" data-np-cat>' + esc(m.group || '') + '</td><td class="muted" data-np-code>' + esc(m.code || '') + '</td><td class="muted small" data-np-hsn>' + esc(m.hsn || '') + '</td><td class="muted" data-uom>' + esc(m.uom || '') + '</td>' +
     '<td><input data-np="brand" list="dlBrandPo" style="width:120px" value="' + esc(l.brand || '') + '"></td>' +
-    '<td class="num" data-np-rate>' + (m.code ? poRateCell(m.code) : '') + '</td><td><input data-np="gst" type="number" min="0" step="any" class="right" style="width:60px" value="' + esc(l.gst != null ? l.gst : '') + '"></td>' +
+    '<td class="num" data-np-rate>' + (m.code ? poRateCell(m.code) : '') + '</td><td class="num" data-np-gst>' + esc(m.code ? (m.gst != null ? m.gst : '') : '') + '</td>' +
     '<td><input data-np="rem" style="width:120px" value="' + esc(l.remark || '') + '"></td>' +
     '<td><input data-np="qty" type="number" min="0" step="any" class="right" style="width:80px" value="' + esc(l.qty || '') + '"></td><td class="num muted" data-np-amt>' + (a2 ? money(a2) : '0') + '</td><td class="num muted" data-np-tot>' + (a2 ? money(g2) : '0') + '</td><td><button class="btn ghost sm" data-act="po-line-del">\u00d7</button></td></tr>';
 }
@@ -462,10 +481,11 @@ function poRateCell(code) {
   const p = num((matBy(code) || {}).price); const q = typeof prPending === 'function' && prPending(code);
   return (p ? money(p) : '<span class="late-txt">No price</span>') + (q ? '<div class="small pend-txt">₹' + money(q.new_price) + ' pending</div>' : '');
 }
+function npGst(tr) { const v = $('[data-np="mat"]', tr).value; const m = Store.all('materials').find(x => norm(x.name) === norm(v) || norm(x.code) === norm(v)); return m ? num(m.gst) : 0; }
 function npRate(tr) { const v = $('[data-np="mat"]', tr).value; const m = Store.all('materials').find(x => norm(x.name) === norm(v) || norm(x.code) === norm(v)); return m ? num(m.price) : 0; }
 function poManualRecalc() {
   let q = 0, amt = 0, net = 0;
-  $$('#npLines tr[data-mline]').forEach(tr => { const a2 = num($('[data-np="qty"]', tr).value) * npRate(tr); const g = a2 * (1 + num($('[data-np="gst"]', tr).value) / 100); $('[data-np-amt]', tr).textContent = a2 ? money(a2) : '0'; $('[data-np-tot]', tr).textContent = a2 ? money(g) : '0'; q += num($('[data-np="qty"]', tr).value); amt += a2; net += g; });
+  $$('#npLines tr[data-mline]').forEach(tr => { const a2 = num($('[data-np="qty"]', tr).value) * npRate(tr); const g = a2 * (1 + npGst(tr) / 100); $('[data-np-amt]', tr).textContent = a2 ? money(a2) : '0'; $('[data-np-tot]', tr).textContent = a2 ? money(g) : '0'; q += num($('[data-np="qty"]', tr).value); amt += a2; net += g; });
   const f = $('#npFoot'); if (f) f.innerHTML = '<td><b>Total:</b></td><td colspan="8"></td><td class="num"><b>' + qtyFmt(q) + '</b></td><td class="num"><b>' + money(amt) + '</b></td><td class="num"><b>' + money(net) + '</b></td><td></td>';
 }
 document.addEventListener('input', e => { if (e.target.closest && e.target.closest('tr[data-mline]')) poManualRecalc(); });
@@ -495,18 +515,22 @@ document.addEventListener('change', e => {
   e.target.value = m.name;
   $('[data-np-cat]', tr).textContent = m.group || ''; $('[data-np-code]', tr).textContent = m.code; $('[data-np-hsn]', tr).textContent = m.hsn || ''; $('[data-uom]', tr).textContent = m.uom;
   $('[data-np-rate]', tr).innerHTML = poRateCell(m.code);
-  const g = $('[data-np="gst"]', tr); if (!g.value && m.gst != null) g.value = m.gst;
+  $('[data-np-gst]', tr).textContent = m.gst != null ? m.gst : '';
   const q = $('[data-np="qty"]', tr); if (!q.value) { const nr = netReqRows(null, PO_UI.editId).find(x => norm(x.material) === norm(m.code)); q.value = nr && nr.net > 0 ? +nr.net.toFixed(3) : ''; }
   poManualRecalc();
 });
-ACTIONS['po-save'] = () => {
+ACTIONS['po-save'] = async el => {
   if (!requirePerm('purchase', 'edit')) return;
+  if (el && el.disabled) return; if (el) el.disabled = true;
+  try { await jcFresh(); } catch (e) { }   // latest cloud copy: another user may have ordered the same need seconds ago
+  if (el) el.disabled = false;
+  if (!$('#npVen')) return;
   const ven = $('#npVen').value.trim(); const exp = $('#npExp').value;
   { const vv = vendorBy(ven); if (vv && vendorMissing(vv).length) { vendorDialog(vv); return; } }
   const mode = PO_UI.editId ? 'manual' : 'jc';
   const lines = mode === 'manual'
-    ? $$('#npLines tr[data-mline]').map(tr => { const m = Store.all('materials').find(x => norm(x.name) === norm($('[data-np="mat"]', tr).value) || norm(x.code) === norm($('[data-np="mat"]', tr).value)); return m ? { material: m.code, uom: m.uom, qty: num($('[data-np="qty"]', tr).value), rate: matPrice(m.code), gst: num($('[data-np="gst"]', tr).value), remark: $('[data-np="rem"]', tr).value.trim(), brand: $('[data-np="brand"]', tr).value.trim(), jc_no: '', received: 0, rejected: 0 } : null; }).filter(l => l && l.qty > 0)
-    : poJcLines().map(L => { const tr = $('#npLines tr[data-key="' + L.key + '"]'); return { material: L.r.material, uom: L.m.uom || '', qty: L.qty, rate: matPrice(L.r.material), gst: num($('[data-jgst]', tr).value), remark: $('[data-jrem]', tr).value.trim(), jc_no: '', brand: L.brand || ($('[data-jbrand]', tr) || { value: '' }).value.trim(), moq: L.moq, net: L.r.net, received: 0, rejected: 0 }; });
+    ? $$('#npLines tr[data-mline]').map(tr => { const m = Store.all('materials').find(x => norm(x.name) === norm($('[data-np="mat"]', tr).value) || norm(x.code) === norm($('[data-np="mat"]', tr).value)); return m ? { material: m.code, uom: m.uom, qty: num($('[data-np="qty"]', tr).value), rate: matPrice(m.code), gst: num(m.gst), remark: $('[data-np="rem"]', tr).value.trim(), brand: $('[data-np="brand"]', tr).value.trim(), jc_no: '', received: 0, rejected: 0 } : null; }).filter(l => l && l.qty > 0)
+    : poJcLines().map(L => { const tr = $('#npLines tr[data-key="' + L.key + '"]'); return { material: L.r.material, uom: L.m.uom || '', qty: L.qty, rate: matPrice(L.r.material), gst: num(L.m.gst), remark: $('[data-jrem]', tr).value.trim(), jc_no: '', brand: L.brand || ($('[data-jbrand]', tr) || { value: '' }).value.trim(), moq: L.moq, net: L.r.net, received: 0, rejected: 0 }; });
   // an item with no approved price: ask for it now (Super Admin approves), the PO waits
   const noPrice = Array.from(new Set(lines.filter(l => !(num(l.rate) > 0)).map(l => l.material)));
   if (noPrice.length) { prDialog(noPrice, 'PO', ven, 'Price missing'); $('#npMsg').innerHTML = '<span class="late-txt">' + esc(noPrice.join(', ')) + ': no approved price — the PO can be saved once the Super Admin approves it.</span>'; return; }
@@ -519,10 +543,11 @@ ACTIONS['po-save'] = () => {
   if (PO_UI.editId) (Store.get('purchase_orders', PO_UI.editId).moq_log || []).forEach(x => { const k = norm(x.material); if (allNet[k] != null) allNet[k] = Math.max(allNet[k], num(x.moq)); });
   const byMat = {}; lines.forEach(l => { byMat[norm(l.material)] = (byMat[norm(l.material)] || 0) + num(l.qty); });
   for (const k of Object.keys(byMat)) {
-    const cap = mode === 'manual' ? allNet[k] : Math.max(freshNet[k] || 0, ((PO_UI.moq || {})[(matBy(k) || {}).code] || {}).qty || 0);
-    if (cap != null && byMat[k] > cap + 1e-6) { $('#npMsg').innerHTML = '<span class="late-txt">' + esc((matBy(k) || {}).code || k) + ': qty ' + qtyFmt(byMat[k]) + ' is more than the net requirement ' + qtyFmt(cap) + (mode === 'manual' ? ' — use From JC requirement (with MOQ if the vendor needs it).' : ' — refresh the vendor to recalculate.') + '</span>'; return; }
+    const uom = (matBy(k) || {}).uom;
+    const cap = mode === 'manual' ? roundUom(uom, allNet[k] || 0) : roundUom(uom, Math.max(freshNet[k] || 0, ((PO_UI.moq || {})[(matBy(k) || {}).code] || {}).qty || 0));
+    if (byMat[k] > cap + 1e-6) { $('#npMsg').innerHTML = '<span class="late-txt">' + esc((matBy(k) || {}).code || k) + ': qty ' + qtyFmt(byMat[k]) + ' is more than the net requirement ' + qtyFmt(cap) + (mode === 'manual' ? ' — use From JC requirement (with MOQ if the vendor needs it).' : ' — refresh the vendor to recalculate.') + '</span>'; return; }
   }
-  const moqLog = mode === 'manual' ? [] : Object.keys(PO_UI.moq || {}).map(code => { const r = (PO_UI.net || []).find(x => x.material === code) || {}; return { material: code, net: r.net || 0, moq: PO_UI.moq[code].qty, extra: PO_UI.moq[code].qty - (r.net || 0), reason: PO_UI.moq[code].reason, by: ME.name, at: nowIso() }; });
+  const moqLog = mode === 'manual' ? [] : Object.keys(PO_UI.moq || {}).map(code => { const net = freshNet[norm(code)] || 0; return { material: code, net, moq: PO_UI.moq[code].qty, extra: r3(PO_UI.moq[code].qty - net), reason: PO_UI.moq[code].reason, by: ME.name, at: nowIso() }; });
   if (!ven || !exp || !lines.length) { $('#npMsg').innerHTML = '<span class="late-txt">Vendor, expected date and at least one material line are required.</span>'; return; }
   const vm = vendorBy(ven);
   if (!vm) { $('#npMsg').innerHTML = '<span class="late-txt">Vendor is not in the master — add it in Purchase → Vendors first (with GST/mobile).</span>'; return; }
@@ -533,13 +558,11 @@ ACTIONS['po-save'] = () => {
   if (PO_UI.editId) {
     const ep = Store.get('purchase_orders', PO_UI.editId);
     if (!ep || ep.approval !== 'Amend') { $('#npMsg').innerHTML = '<span class="late-txt">This PO is no longer open for amendment.</span>'; return; }
-    if (ep.amend_by && ep.amend_by !== ME.name) { $('#npMsg').innerHTML = '<span class="late-txt">' + esc(ep.amend_by) + ' is amending this PO.</span>'; return; }
+    if (ep.amend_by && !(ep.amend_by_id ? ep.amend_by_id === ME.id : ep.amend_by === ME.name) && !isSuperAdmin()) { $('#npMsg').innerHTML = '<span class="late-txt">' + esc(ep.amend_by) + ' is amending this PO.</span>'; return; }
     Object.assign(ep, { date: $('#npDate').value || ep.date, expected: exp, remarks: $('#npRem').value.trim(), lines });
     ep.edit_log = (ep.edit_log || []).concat([{ by: ME.name, at: nowIso() }]);
-    if (ep.amend_by === ME.name) {   // amended by the approver himself: approved on save
-      poMarkApproved(ep, 'po.amend_approve');
-      PO_UI.form = false; PO_UI.editId = null; flash(esc(ep.no) + ' amended and approved.'); VIEWS.po.render(); return;
-    }
+    // an amended PO always goes back for approval, and never to the person who amended it
+    ep.amended_by = ME.name; ep.amended_by_id = ME.id; ep.amend_by = ''; ep.amend_by_id = '';
     ep.approval = 'Pending';
     Store.put('purchase_orders', ep); audit('po.amended', ep.no, 'resubmitted for approval'); waSend('po_submitted', ep.id);
     PO_UI.form = false; PO_UI.editId = null; flash(esc(ep.no) + ' updated and sent for approval.'); VIEWS.po.render(); return;
@@ -547,7 +570,7 @@ ACTIONS['po-save'] = () => {
   const dup = Store.all('purchase_orders').find(p => p._sig === sig && (Date.now() - new Date(p.at)) < 60000);
   if (dup) { $('#npMsg').innerHTML = '<span class="late-txt">An identical PO ' + esc(dup.no) + ' was just created (double-submit guard).</span>'; return; }
   const po = Store.put('purchase_orders', { id: uid(), no: fyNo('purchase_orders', 'PO', 3), date: $('#npDate').value || todayYmd(), vendor: vm.name, expected: exp, remarks: $('#npRem').value.trim(), lines, moq_log: moqLog, followups: [], approval: 'Pending', created_by: ME.name, created_by_id: ME.id, at: nowIso(), _sig: sig });
-  audit('po.create', po.no, ven + ' · ' + qtyFmt(lines.reduce((s, l) => s + l.qty, 0)) + ' qty'); waSend('po_submitted', po.id);
+  audit('po.create', po.no, ven + ' · ' + qtyFmt(lines.reduce((s, l) => s + l.qty, 0)) + ' qty'); poUniqueCheck(po).then(() => waSend('po_submitted', po.id));
   if (typeof reqLinkPo === 'function') reqLinkPo(po);
   let mailNote = '';
   if (moqLog.length) {
@@ -561,7 +584,20 @@ ACTIONS['po-save'] = () => {
   PO_UI.form = false; PO_UI.moq = {}; flash(esc(po.no) + ' saved — <b>approval pending</b>.' + mailNote); VIEWS.po.render();
 };
 /* ---- price revision of an approved PO: the old PO is cancelled, a new PO with the new rates goes to the CEO ---- */
-function poRevisable(p) { return !p.cancelled && p.approval === 'Approved' && !(p.lines || []).some(l => num(l.received) > 0) && !Store.all('inwards').some(i => norm(i.po_no) === norm(p.no)); }
+// after saving: if the cloud already has another PO with this number, take the next one
+async function poUniqueCheck(po) {
+  if (!CLOUD || SANDBOX || !SB) return;
+  for (let tries = 0; tries < 3; tries++) {
+    const { data, error } = await SB.from('nx_docs').select('id,data').eq('collection', 'purchase_orders').neq('id', po.id);
+    if (error) return;
+    const taken = new Set((data || []).map(r => norm((r.data || {}).no)));
+    if (!taken.has(norm(po.no))) return;
+    (data || []).forEach(r => { if (!Store.get('purchase_orders', r.id)) DB.purchase_orders.push(r.data); });
+    const was = po.no; po.no = fyNo('purchase_orders', 'PO', 3); Store.put('purchase_orders', po);
+    audit('po.renumber', po.no, 'was ' + was + ' — another PO took that number'); flash('Another PO took ' + esc(was) + ' — this PO is now ' + esc(po.no) + '.', 'err');
+  }
+}
+function poRevisable(p) { return !p.cancelled && p.approval === 'Approved' && !(p.lines || []).some((l, k) => recvOf(p, l, k) > 0) && !Store.all('inwards').some(i => norm(i.po_no) === norm(p.no)); }
 ACTIONS['po-revise'] = el => {
   if (!requirePerm('purchase', 'edit')) return;
   const p = Store.get('purchase_orders', el.dataset.id); if (!p || !poRevisable(p)) { flash('Only an approved PO with nothing received can be revised.', 'err'); return; }
@@ -593,7 +629,30 @@ ACTIONS['po-revise'] = el => {
     waSend('po_submitted', np.id); d.remove(); flash(esc(cur.no) + ' cancelled — ' + esc(np.no) + ' sent to the CEO for approval. The vendor is told when it is approved.'); VIEWS.po.render();
   });
 };
-ACTIONS['po-cancel'] = el => { const p = Store.get('purchase_orders', el.dataset.id); p.cancelled = true; Store.put('purchase_orders', p); audit('po.cancel', p.no, ''); VIEWS.po.render(); };
+// Cancel: only an approver, with a reason, and only while nothing has been received or is at the gate
+ACTIONS['po-cancel'] = el => {
+  if (!requirePerm('purchase', 'edit')) return; if (!canApprove()) { flash('Only an approver can cancel a PO.', 'err'); return; }
+  const p = Store.get('purchase_orders', el.dataset.id); if (!p || p.cancelled) return;
+  const st = poStatus(p); if (!(st === 'Open' || st === 'Pending Approval' || st === 'Amend')) { flash('A PO with receipts cannot be cancelled — short close it instead.', 'err'); return; }
+  if (pendingInwardOf(p.no)) { flash('A gate entry is waiting on this PO — finish or correct it first.', 'err'); return; }
+  formDialog('Cancel ' + p.no + ' · ' + p.vendor, [{ k: 'why', l: 'Reason', type: 'textarea', req: true }], 'Cancel PO', v => {
+    p.cancelled = true; p.cancel_reason = v.why; p.cancelled_by = ME.name; p.cancelled_at = nowIso(); Store.put('purchase_orders', p);
+    if (p.approval === 'Approved') poJcRaise(p, -1);
+    audit('po.cancel', p.no, v.why + (p.approval === 'Approved' ? ' · was approved — inform ' + p.vendor : '')); flash(esc(p.no) + ' cancelled.' + (p.approval === 'Approved' ? ' Inform the vendor.' : '')); VIEWS.po.render();
+  }, true);
+};
+// Short close: the undelivered balance of a partly received PO is closed, so the need can be ordered again
+ACTIONS['po-close'] = el => {
+  if (!requirePerm('purchase', 'edit')) return; if (!canApprove()) { flash('Only an approver can short close a PO.', 'err'); return; }
+  const p = Store.get('purchase_orders', el.dataset.id); if (!p || poStatus(p) !== 'Partial') return;
+  if (pendingInwardOf(p.no)) { flash('A gate entry is waiting on this PO — finish it first.', 'err'); return; }
+  const open = p.lines.map((l, k) => ({ l, k, pen: poLinePending(p, l, k) })).filter(x => x.pen > 0);
+  formDialog('Short close ' + p.no + ' · ' + p.vendor, [{ k: 'what', l: 'Closing', type: 'static', value: open.map(x => x.l.material + ' ' + qtyFmt(x.pen) + ' ' + (x.l.uom || '')).join(', ') }, { k: 'why', l: 'Reason', type: 'textarea', req: true }], 'Short close', v => {
+    open.forEach(x => { x.l.closed = true; x.l.closed_qty = x.pen; x.l.closed_by = ME.name; x.l.closed_at = nowIso(); x.l.closed_why = v.why; });
+    Store.put('purchase_orders', p); audit('po.short_close', p.no, open.map(x => x.l.material + ' −' + qtyFmt(x.pen)).join(', ') + ' · ' + v.why);
+    flash(esc(p.no) + ' short closed — the balance can be ordered again.'); VIEWS.po.render();
+  });
+};
 
 VIEWS.netreq = {
   mod: 'purchase', render() {
@@ -757,9 +816,17 @@ function jcfBomRow(l) {
     '<td><input data-b="mat" list="dlMatJc" value="' + esc(m.name || l.material || '') + '"></td><td class="c muted" data-b-code>' + esc(l.material || '') + '</td><td class="c muted" data-b-uom>' + esc(l.uom || m.uom || '') + '</td>' +
     '<td><input data-b="norms" type="number" min="0" step="any" class="right" value="' + esc(l.norms || l.qty || '') + '"></td><td class="c" data-b-req>0</td><td>' + vendorSel('data-b="supplier"', l.supplier || '') + '</td><td class="c"><a data-act="jcf-bom-del" title="Remove">×</a></td></tr>';
 }
+// +2% extra on the TOTAL (rounded up once), shared over the sizes by largest remainder — not rounded up per size
+function jcExtraSplit(acts) {
+  const tot = acts.reduce((a, v) => a + Math.max(0, num(v)), 0); const want = Math.ceil(tot * 1.02 - 1e-9);
+  const raw = acts.map(v => Math.max(0, num(v)) * 1.02); const base = raw.map(v => Math.floor(v + 1e-9)); let left = want - base.reduce((a, v) => a + v, 0);
+  raw.map((v, i) => ({ i, f: v - base[i] })).filter(x => acts[x.i] > 0).sort((a, b) => b.f - a.f).forEach(x => { if (left > 0) { base[x.i] += 1; left--; } });
+  return base.map((v, i) => acts[i] > 0 ? v : 0);
+}
 function jcfRecalc() {
   let act = 0, ext = 0;
-  $$('#jfSizes tr[data-szrow]').forEach(tr => { const a2 = num($('[data-sz="act"]', tr).value); const e2 = Math.ceil(a2 * 1.02); $('[data-sz-ext]', tr).textContent = a2 ? qtyFmt(e2) : ''; act += a2; ext += a2 ? e2 : 0; });
+  const rows = $$('#jfSizes tr[data-szrow]'); const exs = jcExtraSplit(rows.map(tr => num($('[data-sz="act"]', tr).value)));
+  rows.forEach((tr, n) => { const a2 = num($('[data-sz="act"]', tr).value); const e2 = exs[n]; $('[data-sz-ext]', tr).textContent = a2 ? qtyFmt(e2) : ''; act += a2; ext += a2 ? e2 : 0; });
   $('#jfActT').textContent = qtyFmt(act); $('#jfExtT').textContent = qtyFmt(ext);
   const o = Store.all('orders').find(x => norm(x.no) === norm(($('#jfOrd') || {}).value || ''));
   const li = num(($('#jfLine') || {}).value); const oq = o ? num(jcOrderLine(o, li).qty) : 0;
@@ -858,7 +925,10 @@ ACTIONS['jc-save'] = () => {
   const l = jcOrderLine(o, num($('#jfLine').value));
   const { act, ext } = jcfRecalc();
   if (act !== num(l.qty)) { $('#njMsg').innerHTML = '<span class="late-txt">Act.Ord total (' + qtyFmt(act) + ') must equal order qty (' + qtyFmt(l.qty) + ').</span>'; return; }
-  const sizes = $$('#jfSizes tr[data-szrow]').map(tr => ({ size: $('[data-sz="size"]', tr).value.trim().toUpperCase(), act: num($('[data-sz="act"]', tr).value), extra: Math.ceil(num($('[data-sz="act"]', tr).value) * 1.02) })).filter(x => x.act > 0);
+  const acts = $$('#jfSizes tr[data-szrow]').map(tr => num($('[data-sz="act"]', tr).value)); const exs = jcExtraSplit(acts);
+  const sizes = $$('#jfSizes tr[data-szrow]').map((tr, n) => ({ size: $('[data-sz="size"]', tr).value.trim().toUpperCase(), act: acts[n], extra: exs[n] })).filter(x => x.act > 0);
+  const dupJc = Store.all('job_cards').find(x => norm(x.order_no) === norm(o.no) && (norm(x.no) === norm(l.jc_no || '') || (norm(x.article) === norm(l.article) && norm(x.colour || '') === norm(l.colour || ''))));
+  if (dupJc) { $('#njMsg').innerHTML = '<span class="late-txt">This order line already has job card ' + esc(dupJc.no) + '.</span>'; return; }
   const lines = $$('#jfBom tr[data-bomrow]').map(tr => {
     const m = matBy($('[data-b="mat"]', tr).value); const n = num($('[data-b="norms"]', tr).value);
     return m && n > 0 ? { process: $('[data-b="process"]', tr).value.trim(), section: $('[data-b="section"]', tr).value.trim(), category: $('[data-b="category"]', tr).value.trim() || m.group || '', material: m.code, uom: m.uom, norms: n, required: Math.ceil(n * ext * 1000) / 1000, supplier: $('[data-b="supplier"]', tr).value.trim(), po_raised: 0 } : null;
@@ -995,7 +1065,7 @@ VIEWS.issuance = {
 
     if (U.tab === 'approve') {
       h += '<div class="tbl-wrap"><table class="bomflat"><tr><th>No</th><th>Date</th><th>Req No</th><th>JC / Dept</th><th>Process</th><th>Line</th><th>Picker Name</th><th>Item Name</th><th>Item Code</th><th class="num">Req Qty</th><th class="num">Issue Qty</th><th>Issue Source</th><th>Issued To</th><th>Issue Type</th><th>Sent By</th><th>Sent At</th>' + (appr ? '<th></th>' : '') + '</tr>' +
-        (pend.length ? pend.map(i => '<tr><td><b>' + esc(i.no) + '</b></td><td>' + fmtD(i.date) + '</td><td>' + esc(i.req_no || '') + '</td><td>' + esc(i.to_jc || '') + '</td><td>' + esc(i.process || '') + '</td><td>' + esc(i.line || '') + '</td><td>' + esc(i.picker || '') + '</td><td>' + esc((matBy(i.material) || {}).name || '') + '</td><td>' + esc(i.material) + '</td><td class="num">' + (i.req_qty != null ? qtyFmt(i.req_qty) : '') + '</td><td class="num">' + qtyFmt(i.qty) + '</td><td>' + esc(i.source || 'AUTO') + '</td><td>' + esc(i.to_dept || '') + '</td><td>' + esc(i.issue_type || 'Regular') + '</td><td>' + esc(i.by) + '</td><td class="nowrap">' + fmtDT(i.at) + '</td>' +
+        (pend.length ? pend.map(i => '<tr><td><b>' + esc(i.no) + '</b>' + (i.type === 'return' ? '<div class="small ok-txt">Return</div>' : i.type === 'line_reject' ? '<div class="small late-txt">Line Reject</div>' : i.type === 'scrap' ? '<div class="small late-txt">Write-off</div>' : '') + '</td><td>' + fmtD(i.date) + '</td><td>' + esc(i.req_no || '') + '</td><td>' + esc(i.to_jc || '') + '</td><td>' + esc(i.process || '') + '</td><td>' + esc(i.line || '') + '</td><td>' + esc(i.picker || '') + '</td><td>' + esc((matBy(i.material) || {}).name || '') + '</td><td>' + esc(i.material) + '</td><td class="num">' + (i.req_qty != null ? qtyFmt(i.req_qty) : '') + '</td><td class="num">' + qtyFmt(i.qty) + '</td><td>' + esc(i.source || 'AUTO') + '</td><td>' + esc(i.to_dept || '') + '</td><td>' + esc(i.issue_type || 'Regular') + '</td><td>' + esc(i.by) + '</td><td class="nowrap">' + fmtDT(i.at) + '</td>' +
           (appr ? '<td class="right nowrap"><button class="btn sm primary" data-act="iss-approve" data-id="' + esc(i.id) + '">Approve</button> <button class="btn sm" data-act="iss-amend" data-id="' + esc(i.id) + '">Amend</button> <button class="btn sm ghost danger" data-act="iss-deny" data-id="' + esc(i.id) + '">Reject</button></td>' : '') + '</tr>').join('') : '<tr><td colspan="17" class="empty">No issue approvals pending</td></tr>') + '</table></div>';
     }
 
@@ -1061,9 +1131,9 @@ ACTIONS['lr-save'] = () => {
   const j = jcBy(jc); const jl = j ? (j.lines || []).find(l => norm(l.material) === norm(m.code)) : null;
   const vendor = returnable ? ($('#lrVen').value.trim() || (jl && jl.supplier) || '') : '';
   if (returnable && !vendor) { $('#lrMsg').innerHTML = '<span class="late-txt">Vendor is required for material that goes back to the vendor.</span>'; return; }
-  const i = Store.put('issues', { id: uid(), no: nextNo('issues', 'ISS'), date: todayYmd(), type: 'line_reject', material: m.code, qty, to_jc: jc, returnable, vendor, reason: $('#lrWhy').value, remark: $('#lrRem').value.trim(), status: 'Approved', by: ME.name, approved_by: ME.name, at: nowIso() });
-  audit('issue.line_reject', i.no, m.code + ' × ' + qty + ' ← ' + jc + (returnable ? ' (returnable to ' + vendor + ')' : ' (not returnable)'));
-  flash('Line rejection saved — ' + esc(jc) + ' can be re-issued ' + qtyFmt(qty) + ' as replacement (not excess).'); VIEWS.issuance.render();
+  const i = Store.put('issues', { id: uid(), no: nextNo('issues', 'ISS'), date: todayYmd(), type: 'line_reject', material: m.code, qty, to_jc: jc, returnable, vendor, reason: $('#lrWhy').value, remark: $('#lrRem').value.trim(), status: 'Pending', by: ME.name, at: nowIso() });
+  audit('issue.line_reject', i.no, m.code + ' × ' + qty + ' ← ' + jc + (returnable ? ' (returnable to ' + vendor + ')' : ' (not returnable)') + ' · waiting for approval');
+  flash('Line rejection sent for approval (Issue Approvals).'); VIEWS.issuance.render();
 };
 const LR_REASONS = ['Defective material', 'Damaged in production', 'Wrong cutting', 'Colour / shade mismatch', 'Size mismatch', 'Other'];
 ACTIONS['ir-save'] = () => {
@@ -1102,9 +1172,16 @@ function reqRefresh(reqNo) {
 ACTIONS['iss-approve'] = el => {
   if (!canApproveIssue()) { flash('Only the Store Incharge can approve an issue.', 'err'); return; }
   const i = Store.get('issues', el.dataset.id); if (i.status !== 'Pending') return;
+  if (i.by === ME.name && !isSuperAdmin()) { flash('You entered ' + esc(i.no) + ' — someone else must approve it.', 'err'); return; }
+  if (i.type === 'return' || i.type === 'line_reject') {   // comes back from a job card: never more than what was issued to it
+    const net = issuedToJc(i.to_jc, i.material); if (num(i.qty) > net + 1e-9) { flash('Net issued to ' + esc(i.to_jc) + ' is only ' + qtyFmt(net) + ' — reject or amend.', 'err'); return; }
+  } else if (i.type === 'scrap') {
+    const have = stockMaps().rejScrap[norm(i.material)] || 0; if (num(i.qty) > have + 1e-9) { flash('Only ' + qtyFmt(have) + ' is in rejection stock — reject or amend.', 'err'); return; }
+  } else {
   const avail = i.source === 'OPEN' ? openStockOf(i.material) : i.source === 'RSJW' ? reservedOf(i.material, i.to_jc) : (openStockOf(i.material) + (i.to_jc ? reservedOf(i.material, i.to_jc) : 0));
   if (num(i.qty) > avail) { flash('Stock is now only ' + qtyFmt(avail) + ' — send it back for amendment or reject.', 'err'); return; }
-  if (i.to_jc && i.source !== 'OPEN') {
+  }
+  if (i.to_jc && i.source !== 'OPEN' && !['return', 'line_reject', 'scrap'].includes(i.type)) {
     let need = num(i.qty);
     Store.all('rsjw').filter(r => norm(r.jc_no) === norm(i.to_jc) && norm(r.material) === norm(i.material)).forEach(r => {
       if (need <= 0) return; const take = Math.min(need, num(r.qty)); r.qty = num(r.qty) - take; need -= take;
@@ -1113,7 +1190,7 @@ ACTIONS['iss-approve'] = el => {
   }
   i.status = 'Approved'; i.approved_by = ME.name; i.approved_at = nowIso(); Store.put('issues', i);
   if (i.req_no) reqRefresh(i.req_no);
-  audit('issue.approve', i.no, i.material + ' × ' + qtyFmt(i.qty)); flash(esc(i.no) + ' approved — stock deducted.'); VIEWS.issuance.render();
+  audit('issue.approve', i.no, (i.type && i.type !== 'issue' ? i.type + ' · ' : '') + i.material + ' × ' + qtyFmt(i.qty)); flash(esc(i.no) + ' approved — ' + (i.type === 'return' ? 'stock added back.' : i.type === 'line_reject' ? 'moved to rejection stock.' : i.type === 'scrap' ? 'written off.' : 'stock deducted.')); VIEWS.issuance.render();
 };
 // Amend = back to store to correct and issue again; Reject = this item will not be issued on the slip
 function issDecide(id, kind) {
@@ -1153,8 +1230,8 @@ ACTIONS['ret-save'] = () => {
   if (!jc || !m || qty <= 0) { $('#rtMsg').innerHTML = '<span class="late-txt">JC, material and qty are required.</span>'; return; }
   const net = issuedToJc(jc, m.code);
   if (qty > net) { $('#rtMsg').innerHTML = '<span class="late-txt">Net issued to this JC is only ' + qtyFmt(net) + ' — cannot return more.</span>'; return; }
-  const i = Store.put('issues', { id: uid(), no: nextNo('issues', 'ISS'), date: todayYmd(), type: 'return', material: m.code, qty, to_jc: jc, status: 'Approved', by: ($('#rtBy') ? $('#rtBy').value.trim() : ME.name) || ME.name, approved_by: ME.name, at: nowIso(), remark: $('#rtRem').value.trim() });
-  audit('issue.return', i.no, m.code + ' × ' + qty + ' ← ' + jc); flash('Returned — open stock increased.'); VIEWS.issuance.render();
+  const i = Store.put('issues', { id: uid(), no: nextNo('issues', 'ISS'), date: todayYmd(), type: 'return', material: m.code, qty, to_jc: jc, status: 'Pending', by: ME.name, returned_by: ($('#rtBy') ? $('#rtBy').value.trim() : '') || '', at: nowIso(), remark: $('#rtRem').value.trim() });
+  audit('issue.return', i.no, m.code + ' × ' + qty + ' ← ' + jc + ' · waiting for approval'); flash('Return sent for approval (Issue Approvals) — stock goes up once approved.'); VIEWS.issuance.render();
 };
 ACTIONS['req-reject'] = el => { const r = Store.get('requisitions', el.dataset.id); r.status = 'Rejected'; Store.put('requisitions', r); audit('req.reject', r.no, ''); VIEWS.issuance.render(); };
 
@@ -1202,8 +1279,8 @@ ACTIONS['scrap-open'] = el => { VIEWS.rejstock.scrap = VIEWS.rejstock.scrap === 
 ACTIONS['scrap-save'] = el => {
   if (!requirePerm('store', 'edit')) return;
   const qty = num($('#scQty').value); if (qty <= 0 || qty > num(el.dataset.max) + 1e-9) { flash('Write-off qty must be between 0 and ' + qtyFmt(num(el.dataset.max)) + '.', 'err'); return; }
-  const i = Store.put('issues', { id: uid(), no: nextNo('issues', 'ISS'), date: todayYmd(), type: 'scrap', material: el.dataset.c, qty, remark: $('#scRem').value.trim(), status: 'Approved', by: ME.name, approved_by: ME.name, at: nowIso() });
-  audit('rejection.writeoff', i.no, el.dataset.c + ' × ' + qty); VIEWS.rejstock.scrap = null; flash('Written off.'); VIEWS.rejstock.render();
+  const i = Store.put('issues', { id: uid(), no: nextNo('issues', 'ISS'), date: todayYmd(), type: 'scrap', material: el.dataset.c, qty, remark: $('#scRem').value.trim(), status: 'Pending', by: ME.name, at: nowIso() });
+  audit('rejection.writeoff', i.no, el.dataset.c + ' × ' + qty + ' · waiting for approval'); VIEWS.rejstock.scrap = null; flash('Write-off sent for approval (Issue Approvals).'); VIEWS.rejstock.render();
 };
 
 const RTV_UI = { form: false };
@@ -1657,8 +1734,8 @@ function mrsDetail(code) {
   return '<div class="plm mrsm"><div class="plm-hd"><div><span class="plm-jc">' + esc(r.material) + '</span><span class="plm-meta">' + esc(r.name) + (r.uom ? ' · ' + esc(r.uom) : '') + '</span></div><div class="plm-r"><button class="btn sm ghost" data-act="mrs-close">✕</button></div></div><div class="sxm-b">' +
     '<div class="mrs-k">' + k('Total JC Requirement', qtyFmt(r.demand)) + k('Stock', qtyFmt(r.stock)) + k('Open PO', qtyFmt(r.openPo)) + k('Min Level', r.min ? qtyFmt(r.min) : '—') + k('Net Requirement', qtyFmt(r.net), r.net > 0 ? 'late-txt' : 'done-txt') + '</div>' +
     '<div class="dcard"><div class="dh3">Purchase orders<span class="n">' + pos.length + '</span></div><div class="tbl-wrap"><table class="nopage"><tr><th>PO No</th><th>PO Date</th><th>Vendor</th><th>Brand</th><th class="num">PO Qty</th><th class="num">Received</th><th class="num">Balance</th><th>Delivery Date</th><th>Status</th></tr>' +
-    (pos.length ? pos.map(({ p, l }) => { const bal = Math.max(0, num(l.qty) - num(l.received)); const st = poStatus(p); const late = bal > 0 && p.expected && p.expected < today && st !== 'Pending Approval';
-      return '<tr><td><b>' + esc(p.no) + '</b></td><td class="nowrap">' + fmtD(p.date) + '</td><td>' + esc(p.vendor) + '</td><td>' + esc(l.brand || '') + '</td><td class="num">' + qtyFmt(l.qty) + '</td><td class="num">' + qtyFmt(num(l.received)) + '</td><td class="num' + (bal > 0 ? ' pend-txt' : '') + '">' + qtyFmt(bal) + '</td><td class="nowrap' + (late ? ' late-txt' : '') + '">' + fmtD(p.expected) + '</td><td><span class="st ' + poStCls(bal <= 0 && st !== 'Pending Approval' ? 'Received' : st) + '">' + (bal <= 0 && st !== 'Pending Approval' ? 'Received' : st) + '</span></td></tr>'; }).join('')
+    (pos.length ? pos.map(({ p, l }) => { const bal = poLinePending(p, l); const st = poStatus(p); const late = bal > 0 && p.expected && p.expected < today && st !== 'Pending Approval';
+      return '<tr><td><b>' + esc(p.no) + '</b></td><td class="nowrap">' + fmtD(p.date) + '</td><td>' + esc(p.vendor) + '</td><td>' + esc(l.brand || '') + '</td><td class="num">' + qtyFmt(l.qty) + '</td><td class="num">' + qtyFmt(recvOf(p, l)) + '</td><td class="num' + (bal > 0 ? ' pend-txt' : '') + '">' + qtyFmt(bal) + '</td><td class="nowrap' + (late ? ' late-txt' : '') + '">' + fmtD(p.expected) + '</td><td><span class="st ' + poStCls(bal <= 0 && st !== 'Pending Approval' ? 'Received' : st) + '">' + (bal <= 0 && st !== 'Pending Approval' ? 'Received' : st) + '</span></td></tr>'; }).join('')
       : '<tr><td colspan="9" class="empty">No PO for this item</td></tr>') + '</table></div></div>' +
     '<div class="dcard"><div class="dh3">Job cards / requirements<span class="n">' + r.jcs.length + '</span></div><div class="tbl-wrap"><table class="nopage"><tr><th>JC / Req No</th><th>Brand</th><th>Article</th><th>Colour</th><th>Supplier</th><th class="num">Balance to issue</th></tr>' +
     (r.jcs.length ? r.jcs.map(x => '<tr><td><b>' + esc(x.jc) + '</b></td><td>' + esc(x.brand || '') + '</td><td>' + esc(x.article || '') + '</td><td>' + esc(x.colour || '') + '</td><td>' + esc(x.supplier || '') + '</td><td class="num">' + qtyFmt(x.bal) + '</td></tr>').join('') : '<tr><td colspan="6" class="empty">No open job card needs this item</td></tr>') + '</table></div></div></div></div>';

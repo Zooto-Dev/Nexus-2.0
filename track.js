@@ -39,7 +39,7 @@ function paRows() {
     add('po_approval', { ref: p.no, party: p.vendor, start: at, actual: done ? ts(p.approved_at) : null, by: done ? p.approved_by : '', result: p.approval || '', owners: [] });
     if (p.approval === 'Approved') {
       const ins = Store.all('inwards').filter(i => norm(i.po_no) === norm(p.no)).sort((a, b) => (a.at || '') < (b.at || '') ? -1 : 1);
-      const open = (p.lines || []).some(l => num(l.qty) - num(l.received) > 1e-9);
+      const open = (p.lines || []).some((l, k) => poLinePending(p, l, k) > 0);
       const plan = p.expected ? new Date(p.expected + 'T18:00') : null;
       if (ins.length) add('inward', { ref: p.no, party: p.vendor, start: ts(p.approved_at), plan, actual: ts(ins[0].at), by: ins[0].by, result: ins[0].no });
       else if (open) add('inward', { ref: p.no, party: p.vendor, start: ts(p.approved_at), plan });

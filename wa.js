@@ -322,7 +322,7 @@ function waDaily() {
     const txt = lowStockList().map(m => (m.name || m.code) + ' (Current ' + qtyFmt(stk[norm(m.code)] || 0) + ' ' + (m.uom || '') + ' / Min ' + qtyFmt(m.min_level) + ' ' + (m.uom || '') + ')').join('; ').slice(0, 750);
     if (txt) waSend('low_stock', day, false, { text: txt });
     const t0 = new Date(day + 'T00:00:00').getTime();
-    const vendors = new Set(Store.all('purchase_orders').filter(p => !p.cancelled && p.approval === 'Approved' && p.expected && (p.lines || []).some(l => num(l.qty) - num(l.received) > 1e-9))
+    const vendors = new Set(Store.all('purchase_orders').filter(p => !p.cancelled && p.approval === 'Approved' && p.expected && (p.lines || []).some((l, k) => poLinePending(p, l, k) > 0))
       .filter(p => { const d = Math.round((new Date(p.expected + 'T00:00:00').getTime() - t0) / 86400000); return d <= 7 && d >= -21; }).map(p => p.vendor));
     vendors.forEach(v => waSend('delivery_due', v + '|' + day));
   } catch (e) { console.error(e); }

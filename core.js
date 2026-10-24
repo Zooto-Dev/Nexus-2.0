@@ -546,7 +546,7 @@ const FMS_RULES = [
       const js = (o.lines || []).map(l => l.jc_no && jcBy(l.jc_no)).filter(Boolean); if (!js.length) return null;
       const codes = Array.from(new Set(js.flatMap(j => (j.lines || []).map(l => norm(l.material)))));
       const pos = Store.all('purchase_orders').filter(p => !p.cancelled && p.approval === 'Approved');
-      const ok = codes.length && codes.every(c => { const ls = pos.flatMap(p => p.lines.filter(l => norm(l.material) === c)); return ls.length && ls.every(l => num(l.received) >= num(l.qty)); });
+      const ok = codes.length && codes.every(c => { const ls = pos.flatMap(p => p.lines.map((l, k) => ({ p, l, k })).filter(x => norm(x.l.material) === c)); return ls.length && ls.every(x => poLinePending(x.p, x.l, x.k) <= 0); });
       if (!ok) return null;
       return Store.all('grns').filter(g => g.lines.some(l => codes.includes(norm(l.material)))).map(g => g.at || g.date).sort().pop() || nowIso();
     } },

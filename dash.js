@@ -82,7 +82,7 @@ function vzBars(rows, fmt, opt) {
 /* ---------- purchase numbers ---------- */
 function poLineVal(l) { return num(l.qty) * num(l.rate) * (1 + num(l.gst) / 100); }
 function poVal(p) { return (p.lines || []).reduce((a, l) => a + poLineVal(l), 0); }
-function poPendVal(p) { return (p.lines || []).reduce((a, l) => a + Math.max(0, num(l.qty) - num(l.received)) * num(l.rate) * (1 + num(l.gst) / 100), 0); }
+function poPendVal(p) { return (p.lines || []).reduce((a, l, k) => a + poLinePending(p, l, k) * num(l.rate) * (1 + num(l.gst) / 100), 0); }
 function daysBetween(a, b) { return Math.round((new Date(b + 'T00:00:00') - new Date(a + 'T00:00:00')) / 864e5); }
 function monthKeys(n) { const d = new Date(); const out = []; for (let i = n - 1; i >= 0; i--) { const x = new Date(d.getFullYear(), d.getMonth() - i, 1); out.push({ k: x.getFullYear() + '-' + String(x.getMonth() + 1).padStart(2, '0'), l: MON[x.getMonth()] + ' ' + String(x.getFullYear()).slice(2) }); } return out; }
 
@@ -112,7 +112,7 @@ VIEWS.purchasedash = {
     const apprList = live.filter(p => p.approved_at && p.at && p.approved_at >= since);
     const apprH = apprList.length ? apprList.reduce((a, p) => a + (new Date(p.approved_at) - new Date(p.at)) / 36e5, 0) / apprList.length : null;
     // job cards whose material is not in stock yet: which item, and is a PO on the way
-    const openPoOf = mat => open.map(p => ({ p, l: (p.lines || []).find(l => norm(l.material) === norm(mat) && num(l.qty) > num(l.received)) })).filter(x => x.l).sort((a, b) => (a.p.expected || '9') < (b.p.expected || '9') ? -1 : 1);
+    const openPoOf = mat => open.map(p => ({ p, l: (p.lines || []).find((l, k) => norm(l.material) === norm(mat) && poLinePending(p, l, k) > 0) })).filter(x => x.l).sort((a, b) => (a.p.expected || '9') < (b.p.expected || '9') ? -1 : 1);
     const jcShort = [];
     netReqRows().filter(r => r.stock + 1e-9 < r.demand).forEach(r => {
       let left = r.stock; const pos = openPoOf(r.material);
