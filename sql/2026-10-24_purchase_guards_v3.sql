@@ -99,7 +99,7 @@ begin
   if new.collection = 'rtvs' then
     if tg_op = 'UPDATE' then raise exception 'NX: an RTV cannot be changed'; end if;
     keyn := upper(btrim(coalesce(new.data->>'material', '')));
-    select coalesce(sum(nx_num(x->'rejected', 'rejected')), 0) into have from nx_docs g, jsonb_array_elements(g.data->'lines') x where g.collection = 'grns' and upper(btrim(x->>'material')) = keyn;
+    select coalesce(sum(nx_num(x->'rejected', 'rejected') + nx_num(x->'over_inv', 'over_inv')), 0) into have from nx_docs g, jsonb_array_elements(g.data->'lines') x where g.collection = 'grns' and upper(btrim(x->>'material')) = keyn;
     select have + coalesce(sum(nx_num(d.data->'qty', 'qty')), 0) into have from nx_docs d where d.collection = 'issues' and d.data->>'type' = 'line_reject' and d.data->>'status' = 'Approved' and upper(btrim(d.data->>'material')) = keyn;
     select have - coalesce(sum(nx_num(d.data->'qty', 'qty')), 0) into have from nx_docs d where d.collection = 'rtvs' and upper(btrim(d.data->>'material')) = keyn;
     if nx_num(new.data->'qty', 'qty') <= 0 or nx_num(new.data->'qty', 'qty') > have + 0.000001 then raise exception 'NX: only % of % is in rejected stock', have, keyn; end if;
@@ -202,9 +202,9 @@ begin
         rec := nx_num(l->'recv_qty', 'received'); rej := nx_num(l->'rejected', 'rejected');
         sh := greatest(0, inv - rec); ov := greatest(0, rec - inv); ex := greatest(0, least(rec, inv) - pen); acc := greatest(0, least(rec, inv) - ex - rej);
         if rej > least(rec, inv) - ex + 0.0006 then raise exception 'NX: % reject is more than the qty received against the PO', l->>'material'; end if;
-        if abs(nx_num(l->'inv_qty', 'invoice') - inv) > 0.0006 or abs(nx_num(l->'short', 'short') - sh) > 0.0006 or abs(nx_num(l->'over_inv', 'over_inv') - ov) > 0.0006 or abs(nx_num(l->'excess', 'excess') - (ex + ov)) > 0.0006 or abs(nx_num(l->'accepted', 'accepted') - acc) > 0.0006 then
+        if abs(nx_num(l->'inv_qty', 'invoice') - inv) > 0.0006 or abs(nx_num(l->'short', 'short') - sh) > 0.0006 or abs(nx_num(l->'over_inv', 'over_inv') - ov) > 0.0006 or abs(nx_num(l->'excess', 'excess') - ex) > 0.0006 or abs(nx_num(l->'accepted', 'accepted') - acc) > 0.0006 then
           raise exception 'NX: % GRN quantities do not add up (invoice %, received %, PO pending %)', l->>'material', inv, rec, pen; end if;
-        if ex + ov > 0 and coalesce(l->>'excess_status', '') <> 'Pending' then raise exception 'NX: excess must wait for approval'; end if;
+        if ex > 0 and coalesce(l->>'excess_status', '') <> 'Pending' then raise exception 'NX: excess must wait for approval'; end if;
       end loop;
     else
       if jsonb_array_length(new.data->'lines') <> jsonb_array_length(coalesce(old.data->'lines', '[]')) then raise exception 'NX: GRN lines cannot be added or removed'; end if;

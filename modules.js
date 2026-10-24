@@ -53,7 +53,7 @@ function stockMaps() {
   const stk = {}, rej = {}, rejLine = {}, rejScrap = {}, rtvx = {};
   const add = (m, k, q) => { const key = norm(k); m[key] = (m[key] || 0) + q; };
   Store.all('opening_stock').forEach(o => { if (o.status === 'Approved') add(stk, o.material, num(o.qty)); });   // approved opening stock
-  Store.all('grns').forEach(g => (g.lines || []).forEach(l => { add(stk, l.material, num(l.accepted) + (l.excess_status === 'Approved' ? num(l.excess) : 0)); add(rej, l.material, num(l.rejected)); if (l.excess_status === 'Rejected') add(rtvx, l.material, num(l.excess)); }));
+  Store.all('grns').forEach(g => (g.lines || []).forEach(l => { add(stk, l.material, num(l.accepted) + (l.excess_status === 'Approved' ? num(l.excess) : 0)); add(rej, l.material, num(l.rejected) + num(l.over_inv)); if (l.excess_status === 'Rejected') add(rtvx, l.material, num(l.excess)); }));
   // only APPROVED issues deduct stock (a pending request does not); returns add back
   Store.all('issues').forEach(i => {
     if (i.status !== 'Approved') return;

@@ -647,9 +647,21 @@ function grnCalc(r, pen) {
   const excPo = r3(Math.max(0, got - pen));
   const avail = r3(Math.max(0, got - excPo));            // the most that can be rejected
   const grn = r3(Math.max(0, avail - rej));
-  return { inv, rec, rej, short, over, excess: r3(excPo + over), avail, grn, total: r3(grn + Math.min(rej, avail) + short + excPo) };
+  return { inv, rec, rej, short, over, excess: excPo, avail, grn, total: r3(grn + Math.min(rej, avail) + short + excPo) };
 }
 function inwLineOf(iw, k, material) { return (iw && iw.lines || []).find(x => x.po_line === k) || null; }
+// received more than the invoice says: the person must confirm; the extra has no invoice, so it is kept aside for return to the vendor
+function overInvConfirm(l, inv, recv, ok) {
+  const old = $('#oiDlg'); if (old) old.remove();
+  const d = document.createElement('div'); d.id = 'oiDlg'; d.className = 'dlg-back';
+  d.innerHTML = '<div class="dlg"><div class="dlg-h late-txt">You are receiving more than the invoice</div><table class="jckv">' +
+    '<tr><td class="k">Item</td><td class="v">' + esc(l.material) + ' — ' + esc((matBy(l.material) || {}).name || '') + '</td></tr>' +
+    '<tr><td class="k">Invoice Qty</td><td class="v">' + qtyFmt(inv) + '</td></tr><tr><td class="k">Received Qty</td><td class="v"><b>' + qtyFmt(recv) + '</b></td></tr>' +
+    '<tr><td class="k">Without invoice</td><td class="v late-txt"><b>' + qtyFmt(recv - inv) + '</b> — not added to stock; kept in Rejection RTV stock to go back to the vendor</td></tr></table>' +
+    '<div class="dlg-f"><span class="grow"></span><button class="btn" data-oi-x>Go back</button><button class="btn danger" data-oi-ok>Yes, I received ' + qtyFmt(recv) + '</button></div></div>';
+  document.body.appendChild(d);
+  d.addEventListener('click', ev => { if (ev.target.closest('[data-oi-x]')) { d.remove(); return; } if (ev.target.closest('[data-oi-ok]')) { d.remove(); ok(); } });
+}
 function grnDialog(p, k, done) {
   const l = p.lines[k]; const m = matBy(l.material) || {}; const pen = poLinePending(p, l, k);
   const iw = Store.get('inwards', GRN_UI.inw); const il = inwLineOf(iw, k, l.material);   // item-wise qty fixed at the gate
@@ -665,7 +677,7 @@ function grnDialog(p, k, done) {
     const inv = il ? num(il.inv_qty) : num($('[data-gd="inv"]', d).value), recv = num($('[data-gd="recv"]', d).value);
     if (inv <= 0) { $('#gdMsg', d).textContent = 'Enter the invoice qty.'; return; }
     if ($('[data-gd="recv"]', d).value === '' || recv < 0) { $('#gdMsg', d).textContent = 'Enter the received qty (0 or more).'; return; }
-    if (recv > inv + 1e-9 && !confirm('Received ' + qtyFmt(recv) + ' is more than the invoice qty ' + qtyFmt(inv) + '. The extra ' + qtyFmt(recv - inv) + ' will go for excess approval. Continue?')) return;
+    if (recv > inv + 1e-9) { d.remove(); overInvConfirm(l, inv, recv, () => done({ i: k, inv, recv, rej: 0, rack: m.rack || '' })); return; }
     d.remove(); done({ i: k, inv, recv, rej: 0, rack: m.rack || '' });
   });
   d.addEventListener('keydown', ev => { if (ev.key === 'Escape') d.remove(); if (ev.key === 'Enter') { ev.preventDefault(); $('[data-gd-ok]', d).click(); } });
@@ -693,15 +705,15 @@ VIEWS.grn = {
       const right = iw ? [['Gate Entry', esc(iw.no)], ['Invoice Qty', '<b>' + qtyFmt(iw.qty) + '</b>'], ['Invoice Date', fmtD(iw.bill_date)], ['Invoice Photo', photoThumb(iw.photo)], ['Invoice Approved By', esc(iw.inv_by || '')]] : [];
       h += '<div class="card"><div class="card-b"><div class="inwform">' + kvTable(left) + (iw ? kvTable(right) : '<div></div>') + '</div>';
       if (iw) {
-        const tot = { inv: 0, rec: 0, rej: 0, short: 0, excess: 0, grn: 0, total: 0 };
+        const tot = { inv: 0, rec: 0, rej: 0, short: 0, excess: 0, over: 0, grn: 0, total: 0 };
         const body = U.rows.map((r, n) => { const l = p.lines[r.i]; const mt = matBy(l.material) || {}; const pen = poLinePending(p, l, r.i); const c = grnCalc(r, pen); Object.keys(tot).forEach(k => { tot[k] += c[k]; });
           return '<tr data-gr="' + n + '"><td class="num">' + (n + 1) + '</td><td><b>' + esc(l.material) + '</b></td><td>' + esc(mt.name || '') + '</td><td>' + esc(l.uom || mt.uom || '') + '</td><td class="num">' + qtyFmt(pen) + '</td><td class="num">' + qtyFmt(c.inv) + '</td><td class="num">' + qtyFmt(c.rec) + '</td><td class="num late-txt">' + (c.short ? qtyFmt(c.short) : '') + '</td>' +
-            '<td><input class="qty" type="number" min="0" step="any" data-grrej value="' + (r.rej || '') + '"></td><td class="num"><b>' + qtyFmt(c.grn) + '</b></td><td class="num">' + (c.excess ? qtyFmt(c.excess) : '') + '</td><td class="num">' + qtyFmt(c.total) + '</td><td><input data-grrack value="' + esc(r.rack || '') + '" style="width:80px"></td><td><button class="btn ghost sm danger" data-act="gr-del" data-n="' + n + '">×</button></td></tr>'; }).join('');
+            '<td><input class="qty" type="number" min="0" step="any" data-grrej value="' + (r.rej || '') + '"></td><td class="num"><b>' + qtyFmt(c.grn) + '</b></td><td class="num">' + (c.excess ? qtyFmt(c.excess) : '') + '</td><td class="num late-txt">' + (c.over ? qtyFmt(c.over) : '') + '</td><td class="num">' + qtyFmt(c.total) + '</td><td><input data-grrack value="' + esc(r.rack || '') + '" style="width:80px"></td><td><button class="btn ghost sm danger" data-act="gr-del" data-n="' + n + '">×</button></td></tr>'; }).join('');
         const match = U.rows.length && Math.abs(tot.total - num(iw.qty)) < 1e-6;
         const badRej = U.rows.some(r => { const c = grnCalc(r, poLinePending(p, p.lines[r.i], r.i)); return c.rej > c.avail + 1e-9; });
-        h += '<div class="tbl-wrap" style="margin-top:12px"><table><tr><th class="num">Sr</th><th>Item Code</th><th>Item Name</th><th>UOM</th><th class="num">PO Pending</th><th class="num">Invoice Qty</th><th class="num">Received Qty</th><th class="num">Short</th><th class="num">Reject</th><th class="num">GRN Qty</th><th class="num">Excess</th><th class="num">Total</th><th>Rack</th><th></th></tr>' +
-          (body || '<tr><td colspan="14" class="empty">Select an item</td></tr>') +
-          '<tr class="tt"><td></td><td colspan="4"><b>Grand Total</b></td><td class="num"><b>' + qtyFmt(tot.inv) + '</b></td><td class="num"><b>' + qtyFmt(tot.rec) + '</b></td><td class="num"><b>' + qtyFmt(tot.short) + '</b></td><td class="num"><b>' + qtyFmt(tot.rej) + '</b></td><td class="num"><b>' + qtyFmt(tot.grn) + '</b></td><td class="num"><b>' + qtyFmt(tot.excess) + '</b></td><td class="num"><b>' + qtyFmt(tot.total) + '</b></td><td></td><td></td></tr></table></div>' +
+        h += '<div class="tbl-wrap" style="margin-top:12px"><table><tr><th class="num">Sr</th><th>Item Code</th><th>Item Name</th><th>UOM</th><th class="num">PO Pending</th><th class="num">Invoice Qty</th><th class="num">Received Qty</th><th class="num">Short</th><th class="num">Reject</th><th class="num">GRN Qty</th><th class="num">Excess</th><th class="num">No invoice</th><th class="num">Total</th><th>Rack</th><th></th></tr>' +
+          (body || '<tr><td colspan="15" class="empty">Select an item</td></tr>') +
+          '<tr class="tt"><td></td><td colspan="4"><b>Grand Total</b></td><td class="num"><b>' + qtyFmt(tot.inv) + '</b></td><td class="num"><b>' + qtyFmt(tot.rec) + '</b></td><td class="num"><b>' + qtyFmt(tot.short) + '</b></td><td class="num"><b>' + qtyFmt(tot.rej) + '</b></td><td class="num"><b>' + qtyFmt(tot.grn) + '</b></td><td class="num"><b>' + qtyFmt(tot.excess) + '</b></td><td class="num"><b>' + qtyFmt(tot.over) + '</b></td><td class="num"><b>' + qtyFmt(tot.total) + '</b></td><td></td><td></td></tr></table></div>' +
           (tot.rej > 0 ? '<div class="row" style="margin-top:8px"><label style="flex:1">Reject Reason *<input id="grWhy" value="' + esc(U.why || '') + '"></label></div>' : '');
         h += '</div><div class="card-f"><span class="grn-no">GRN No: <b>' + (match && !badRej ? esc(iw.grn_no || '') : '—') + '</b></span><span class="small muted">Invoice Qty ' + qtyFmt(iw.qty) + ' · Total ' + qtyFmt(tot.total) + '</span><span class="grow"></span><button class="btn primary" data-act="grn-save"' + (match && !badRej ? '' : ' disabled') + '>Save GRN</button><span id="grnMsg" class="small">' + (badRej ? '<span class="late-txt">Reject is more than the qty received against the PO.</span>' : '') + '</span></div></div>';
       } else h += '</div></div>';
@@ -755,9 +767,11 @@ ACTIONS['grn-save'] = async el => {
   const totRej = calc.reduce((x, c) => x + c.rej, 0), totShort = calc.reduce((x, c) => x + c.short, 0), totEx = calc.reduce((x, c) => x + c.excess, 0);
   if (totRej > 0 || totShort > 0) autoTask('Debit Note — ' + iw.bill_no + ' (' + p.vendor + '): reject ' + qtyFmt(totRej) + ', short ' + qtyFmt(totShort), autoDoer('debit_note', 'ACCOUNTS'), 0,
     { kind: 'debit_note', vendor: p.vendor, invoice: iw.bill_no || '', items: calc.filter(c => c.rej || c.short).map(c => ((matBy(c.l.material) || {}).name || c.l.material)).join(', ').slice(0, 300), party: p.vendor, ref: iw.bill_no || '' });
+  const totOver = calc.reduce((x, c) => x + c.over, 0);
+  if (totOver > 0) autoTask('RTV without invoice — ' + p.vendor + ' inv ' + iw.bill_no + ': ' + calc.filter(c => c.over).map(c => c.l.material + ' × ' + qtyFmt(c.over)).join(', ') + ' (received above the invoice)', autoDoer('rtv', 'STORE'), 1);
   if (totRej > 0) autoTask('RTV — ' + p.vendor + ' inv ' + iw.bill_no + ': ' + calc.filter(c => c.rej).map(c => c.l.material + ' × ' + qtyFmt(c.rej)).join(', '), autoDoer('rtv', 'STORE'), 1);
   autoTask('Tally Entry — GRN ' + g.no + ' (' + p.vendor + ', inv ' + iw.bill_no + ')', autoDoer('tally_entry', 'ACCOUNTS'), 1);
-  audit('grn.create', g.no, iw.no + ' · ' + p.no + ' · inv ' + iw.bill_no + ' · GRN ' + qtyFmt(calc.reduce((x, c) => x + c.grn, 0)) + (totRej ? ' / rej ' + qtyFmt(totRej) : '') + (totShort ? ' / short ' + qtyFmt(totShort) : '') + (totEx ? ' / excess ' + qtyFmt(totEx) : ''));
+  audit('grn.create', g.no, iw.no + ' · ' + p.no + ' · inv ' + iw.bill_no + ' · GRN ' + qtyFmt(calc.reduce((x, c) => x + c.grn, 0)) + (totRej ? ' / rej ' + qtyFmt(totRej) : '') + (totShort ? ' / short ' + qtyFmt(totShort) : '') + (totEx ? ' / excess ' + qtyFmt(totEx) : '') + (totOver ? ' / no invoice ' + qtyFmt(totOver) : ''));
   Object.assign(U, { ven: '', po: '', inw: '', rows: [], why: '' });
   VIEWS.grn.render();
   waSend(totEx > 0 ? 'excess_pending' : 'grn_final', g.id);
