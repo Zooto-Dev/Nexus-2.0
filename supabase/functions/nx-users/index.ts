@@ -40,13 +40,11 @@ Deno.serve(async (req) => {
     { const { error: kErr } = await admin.from('nx_profiles').select('user_id').limit(1); if (kErr) return out({ error: 'Server key problem: ' + kErr.message }, 500); }
 
     const b = await req.json();
-    const saveSecret = (email: string, password: string) => admin.from('nx_secrets').upsert({ email, password, updated_at: new Date().toISOString() });
     const makeLogin = async (email: string, password: string, role: string, name: string) => {
       const { data: cu, error: ce } = await admin.auth.admin.createUser({ email, password, email_confirm: true, user_metadata: { name } });
       if (ce || !cu?.user) return ce?.message || 'Could not create login';
       const { error: pe } = await admin.from('nx_profiles').insert({ user_id: cu.user.id, email, role });
       if (pe) { await admin.auth.admin.deleteUser(cu.user.id); return pe.message; }
-      await saveSecret(email, password);
       return '';
     };
     const roleOf = (roleId: string) => roleId === 'r_admin' ? 'superadmin' : roleId === 'r_adm' ? 'admin' : 'user';
@@ -95,7 +93,6 @@ Deno.serve(async (req) => {
       if (pw.length < 6) return out({ error: 'Password must be at least 6 characters' }, 400);
       const { error } = await admin.auth.admin.updateUserById(target.user_id, { password: pw });
       if (error) return out({ error: error.message }, 400);
-      await saveSecret(email, pw);
       return out({ ok: true });
     }
     if (b.action === 'active') {

@@ -184,15 +184,9 @@ VIEWS.users = {
     if (CLOUD && !US_UI.loaded) usLoadSecrets();
   }
 };
-// Passwords are readable only by a Super Admin (cloud: nx_secrets, locked by row security).
-const US_SECRETS = {};
-function usPwd(u) { return CLOUD ? US_SECRETS[norm(u.email || '')] : (u.pwd || u.pin_seed); }
-async function usLoadSecrets() {
-  US_UI.loaded = true; if (!isSuperAdmin()) return;
-  const { data } = await SB.from('nx_secrets').select('email,password');
-  (data || []).forEach(r => { US_SECRETS[norm(r.email)] = r.password; });
-  if (curView().v === 'users') VIEWS.users.render();
-}
+// Passwords are never stored or shown (cloud). Local/demo mode shows the demo PIN only.
+function usPwd(u) { return CLOUD ? '' : (u.pwd || u.pin_seed); }
+async function usLoadSecrets() { US_UI.loaded = true; }
 ACTIONS['us-eye'] = el => { const s = $('[data-pw="' + el.dataset.id + '"]'); const u = Store.get('users', el.dataset.id); if (!s || !u || !isSuperAdmin()) return; s.textContent = s.textContent === '••••••' ? (usPwd(u) || '') : '••••••'; };
 ACTIONS['us-sync'] = async el => {
   if (!isSuperAdmin()) return; el.disabled = true;
