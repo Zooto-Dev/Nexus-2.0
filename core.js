@@ -194,8 +194,10 @@ async function reauth() {
 }
 const RETRY_Q = new Map();   // failed writes: key col|id -> {col, id, isDelete}
 function syncBadge() { const s = $('#syncState'); if (s) s.textContent = SANDBOX ? 'SANDBOX · nothing is saved' : DEMO_SHARED ? 'DEMO' : CLOUD ? (pendingWrites ? 'Saving…' : RETRY_Q.size ? RETRY_Q.size + ' change(s) retrying…' : 'Synced') : DEMO ? 'DEMO' : 'Local mode'; }
-async function cloudWrite(col, doc, isDelete) {
-  pendingWrites++; syncBadge();
+// cloud writes go one after the other, in the order the app made them (a GRN is saved before the gate entry it closes)
+let WRITE_Q = Promise.resolve();
+function cloudWrite(col, doc, isDelete) { pendingWrites++; syncBadge(); const snap = isDelete ? doc : JSON.parse(JSON.stringify(doc)); const run = WRITE_Q.then(() => cloudWriteNow(col, snap, isDelete)); WRITE_Q = run.catch(() => {}); return run; }
+async function cloudWriteNow(col, doc, isDelete) {
   try {
     const q = isDelete ? SB.from(TBL).delete().eq('collection', col).eq('id', doc.id)
       : SB.from(TBL).upsert({ collection: col, id: doc.id, data: doc, updated_at: nowIso() });
@@ -203,7 +205,15 @@ async function cloudWrite(col, doc, isDelete) {
     RETRY_Q.delete(col + '|' + doc.id);
   } catch (e) {
     // "NX: …" = the database refused the change on purpose (a business rule): do not retry, take the cloud copy back
-    if (/^NX:/.test(String(e.message || ''))) { RETRY_Q.delete(col + '|' + doc.id); flash('Not saved — ' + esc(String(e.message).replace(/^NX:\s*/, '')), 'err'); cloudReload(col, doc.id); pendingWrites--; syncBadge(); return; }
+    if (/^NX:/.test(String(e.message || ''))) {
+      RETRY_Q.delete(col + '|' + doc.id); pendingWrites--; syncBadge();
+      // another user took this document number a moment ago: take the next number and save again
+      if (/number .* already taken/i.test(e.message) && (col === 'purchase_orders' || col === 'grns') && !isDelete) {
+        const live = Store.get(col, doc.id);
+        if (live) { try { SYNC_BUSY = false; await cloudSync(); } catch (e2) { } const was = live.no; live.no = col === 'grns' ? reserveGrnNo() : fyNo('purchase_orders', 'PO', 3); Store.put(col, live); audit(col === 'grns' ? 'grn.renumber' : 'po.renumber', live.no, 'was ' + was + ' — the number was taken'); flash('Number ' + esc(was) + ' was taken — saved as ' + esc(live.no) + '.', 'err'); return; }
+      }
+      flash('Not saved — ' + esc(String(e.message).replace(/^NX:\s*/, '')), 'err'); cloudReload(col, doc.id); return;
+    }
     RETRY_Q.set(col + '|' + doc.id, { col, id: doc.id, isDelete: !!isDelete });
     // "permission denied" = the login has ended (signed out elsewhere / expired): renew it or ask for the password
     if (/permission denied|JWT|not authenticated/i.test(String(e.message || e)) || e.code === '42501' || e.code === 'PGRST301') reauth();
