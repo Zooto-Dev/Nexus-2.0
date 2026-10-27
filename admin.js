@@ -229,7 +229,7 @@ function usDialog(u) {
     const btn = ev.target.closest('[data-us-save]'); if (!btn) return;
     if (!requirePerm('users', 'edit')) return;
     const v = { name: g('name').value.trim(), email: norm(g('email').value), pin: g('pin').value.trim(), role_id: g('role_id').value, department: g('department').value, designation: g('designation').value, mobile: g('mobile').value.trim(), active: g('active').value === '1' };
-    const hadLogin = !isNew && !!u.email && (!CLOUD || !!US_SECRETS[norm(u.email)] || !!Store.all('users').find(x => x.id === u.id && x.role_id === 'r_admin'));
+    const hadLogin = !isNew && !!u.email;   // cloud: the server says "No login found" if there is none yet, and we create it then
     if (!isNew && u.email) v.email = norm(u.email);
     const newLogin = !hadLogin && !!v.email;
     if (newLogin && !v.pin) v.pin = v.mobile;
@@ -245,17 +245,24 @@ function usDialog(u) {
     btn.disabled = true; $('#usMsg', d).textContent = '';
     try {
       if (CLOUD) {
-        if (newLogin) await usCloud({ action: 'create', email: v.email, password: v.pin, role: cloudRole(v.role_id), name: v.name });
+        const create = () => usCloud({ action: 'create', email: v.email, password: v.pin, role: cloudRole(v.role_id), name: v.name });
+        if (newLogin) await create();
         else {
-          if (v.role_id !== u.role_id) await usCloud({ action: 'role', email: v.email, role: cloudRole(v.role_id) });
-          if (v.pin) await usCloud({ action: 'password', email: v.email, password: v.pin });
-          if (v.active !== (u.active !== false)) await usCloud({ action: 'active', email: v.email, active: v.active });
+          try {
+            if (v.pin) await usCloud({ action: 'password', email: v.email, password: v.pin });
+            if (v.role_id !== u.role_id) await usCloud({ action: 'role', email: v.email, role: cloudRole(v.role_id) });
+            if (v.active !== (u.active !== false)) await usCloud({ action: 'active', email: v.email, active: v.active });
+          } catch (e) {
+            if (!/No login found/i.test(e.message)) throw e;
+            if (!v.pin) v.pin = v.mobile;   // first login: password = mobile number
+            await create();
+          }
         }
       }
       const doc = isNew ? { id: uid() } : Store.get('users', u.id);
       const pin = v.pin; delete v.pin;
       Object.assign(doc, v);
-      if (pin) { if (CLOUD) US_SECRETS[norm(doc.email)] = pin; else { doc.pin_hash = await hashPin(doc.email, pin); doc.pwd = pin; delete doc.pin_seed; } }
+      if (pin && !CLOUD) { doc.pin_hash = await hashPin(doc.email, pin); doc.pwd = pin; delete doc.pin_seed; }
       Store.put('users', doc); audit(isNew ? 'users.create' : 'users.edit', doc.email, roleName(doc.role_id) + ' · ' + doc.department + ' · ' + doc.designation);
       d.remove(); flash(esc(doc.name) + (isNew ? ' added.' : ' saved.')); VIEWS.users.render();
     } catch (e) { btn.disabled = false; $('#usMsg', d).textContent = e.message; }
