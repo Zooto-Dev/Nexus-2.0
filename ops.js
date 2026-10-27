@@ -77,17 +77,28 @@ function homeData(who) {
   const paMine = self || sa ? pa.filter(r => paOpen(r) && (sa || paDef(r.k).can(r))) : [];
   const done = tasks.filter(t => t.status === 'Completed');
   const doneN = done.length + paDone.length, onTime = done.filter(t => !t.delay).length + paDone.filter(r => !(r.delay > 0)).length;
-  const fmsNext = {};
-  allOpenSteps().forEach(x => { if (norm(x.step.doer) === norm(who)) fmsNext[x.order.no + '|' + x.step.name] = nextStepsOf(x); });
-  const held = tasks.filter(t => t.status === 'Delayed').map(t => ({ what: t.task, ref: t.ref, party: t.party, planned: t.planned, delay: t.delay, waits: t.src === 'FMS' ? fmsNext[t.ref + '|' + t.task] || '' : '' }))
-    .concat(paMine.filter(r => r.status === 'Late' && !actDoer(r)).map(r => ({ what: r.act, ref: r.ref, party: r.party, planned: r.planned, delay: r.delay, waits: paDef(r.k).next })))
-    .sort((a, b) => b.delay - a.delay);
+  // other people's work that cannot start because this person's step is late
+  const held = [];
+  allOpenSteps().forEach(x => {
+    if (x.step.status !== 'Late' || norm(x.step.doer) !== norm(who)) return;
+    const r = resolveOrder(x.order); if (!r) return;
+    (x.spec.steps || []).forEach(d => {
+      const after = (Array.isArray(d.trigger) ? d.trigger : [d.trigger]).some(t => t && t.type === 'afterStep' && t.step === x.step.id);
+      const ds = r.steps[d.id]; if (!after || !ds || ds.status === 'Done' || norm(ds.doer) === norm(who)) return;
+      held.push({ what: d.name, doer: ds.doer || '', ref: x.order.no, party: x.order.customer_name, because: x.step.name, planned: x.step.planned, delay: x.step.delayMinutes || 0 });
+    });
+  });
+  // group activities (PO approval, invoice approval, issuance…) only on one's own home: the viewer is the one others wait on
+  (self ? paMine : []).filter(r => r.status === 'Late' && !actDoer(r) && paDef(r.k).next).forEach(r => held.push({ what: paDef(r.k).next, doer: '', ref: r.ref, party: r.party, because: r.act, planned: r.planned, delay: r.delay }));
+  held.sort((a, b) => b.delay - a.delay);
   // escalations: only the tickets this person is part of (doer, Level 1 or Level 2 owner)
   try { escRun(); } catch (e) { console.error(e); }
   const tickets = Store.all('tickets').filter(t => ticketEscalated(t) && names.has(t.by));
-  const escs = Store.all('escalations').filter(e => e.status === 'Open' && escInvolved(e, who)).sort((a, b) => b.level - a.level || (a.planned < b.planned ? -1 : 1));
+  const escAll = Store.all('escalations').filter(e => e.status === 'Open' && escInvolved(e, who)).sort((a, b) => b.level - a.level || (a.planned < b.planned ? -1 : 1));
+  const escs = escAll.filter(e => norm(e.doer) === norm(who));          // this person's own escalated tasks
+  const escToMe = escAll.filter(e => norm(e.doer) !== norm(who));       // others' tasks escalated to this person (Level 1 / Level 2)
   const sc = scoreOf(who, 30, true);
-  return { tasks, done, doneN, onTime, score: sc ? Math.round(sc.quality) : null, sc, held, tickets, escs, open: paMine.filter(r => r.status === 'Pending').sort((a, b) => a.planned - b.planned) };
+  return { tasks, done, doneN, onTime, score: sc ? Math.round(sc.quality) : null, sc, held, tickets, escs, escToMe, open: paMine.filter(r => r.status === 'Pending').sort((a, b) => a.planned - b.planned) };
 }
 function homeTaskTable(tasks) {
   const order = { Delayed: 0, Pending: 1, Upcoming: 2, Completed: 3 };
@@ -149,14 +160,18 @@ VIEWS.home = {
     h += myScoreCard(who);
     const heldShow = HT_UI.heldAll ? D.held : D.held.slice(0, 6);
     h += '<div class="dcard" id="heldCard"><div class="dh3">' + (self ? 'Held up because of me' : 'Held up because of ' + esc(person)) + '<span class="n">' + D.held.length + '</span></div>' +
-      (D.held.length ? heldShow.map(x => '<div class="dl"><div><div class="t">' + esc(x.what) + '</div><div class="m">' + esc([x.ref, x.party].filter(Boolean).join(' · ')) + (x.waits ? ' · waiting: ' + esc(x.waits) : '') + '</div><div class="m">Planned ' + fmtDT(x.planned) + '</div></div><div class="d">' + fmtDelay(x.delay) + '</div></div>').join('') +
+      (D.held.length ? heldShow.map(x => '<div class="dl"><div><div class="t">' + esc(x.what) + (x.doer ? ' <span class="muted">· ' + esc(x.doer) + '</span>' : '') + '</div><div class="m">' + esc([x.ref, x.party].filter(Boolean).join(' · ')) + '</div><div class="m">Waiting on ' + (self ? 'my' : esc(person) + '\'s') + ' <b>' + esc(x.because) + '</b> · planned ' + fmtDT(x.planned) + '</div></div><div class="d">' + fmtDelay(x.delay) + '</div></div>').join('') +
         (D.held.length > 6 ? '<div class="dl-more"><a data-act="ht-held-all">' + (HT_UI.heldAll ? 'Show less' : 'Show all ' + D.held.length) + '</a></div>' : '') : '<div class="dl-empty">Nothing is held up</div>') + '</div>';
+    const escLine = e => { const role = norm(e.doer) === norm(who) ? 'Doer' : norm(e.l1) === norm(who) ? 'Level 1' : 'Level 2';
+      return '<a class="dl" href="#/escalations"><div><div class="t">' + esc(e.task) + '</div><div class="m">' + esc(e.no) + ' · ' + esc([e.ref, e.party].filter(Boolean).join(' · ')) + ' · ' + esc(e.doer) + '</div><div class="m">L' + e.level + ' · ' + role + (e.commit_at ? ' · new date ' + fmtDT(e.commit_at) : '') + '</div></div><div class="d">L' + e.level + '</div></a>'; };
+    // this person's own tasks that escalated (+ their tickets that escalated)
     const escN = D.tickets.length + D.escs.length;
     h += '<div class="dcard"><div class="dh3">Escalations<span class="n' + (escN ? ' red' : '') + '">' + escN + '</span><span class="grow"></span><a class="small" href="#/escalations">All</a></div>' +
-      (escN ? D.escs.slice(0, 6).map(e => { const role = norm(e.doer) === norm(who) ? 'Doer' : norm(e.l1) === norm(who) ? 'Level 1' : 'Level 2';
-        return '<a class="dl" href="#/escalations"><div><div class="t">' + esc(e.task) + '</div><div class="m">' + esc(e.no) + ' · ' + esc([e.ref, e.party].filter(Boolean).join(' · ')) + ' · ' + esc(e.doer) + '</div><div class="m">L' + e.level + ' · ' + role + (e.commit_at ? ' · new date ' + fmtDT(e.commit_at) : '') + '</div></div><div class="d">L' + e.level + '</div></a>'; }).join('') +
+      (escN ? D.escs.slice(0, 6).map(escLine).join('') +
         D.tickets.slice(0, 3).map(t => '<a class="dl" href="#/tickets"><div><div class="t">' + esc(t.subject) + '</div><div class="m">Ticket ' + esc(t.no) + ' · ' + esc(t.dept) + ' · ' + esc(t.by) + '</div></div><div class="d">' + Math.floor((Date.now() - new Date(t.at)) / 3600000) + 'h</div></a>').join('')
         : '<div class="dl-empty">No escalations</div>') + '</div>';
+    // others' tasks escalated to this person (Level 1 / Level 2 owner)
+    if (D.escToMe.length) h += '<div class="dcard"><div class="dh3">' + (self ? 'Escalated to me' : 'Escalated to ' + esc(person)) + '<span class="n red">' + D.escToMe.length + '</span><span class="grow"></span><a class="small" href="#/escalations">All</a></div>' + D.escToMe.slice(0, 6).map(escLine).join('') + '</div>';
     h += '</div></div>';
 
     // requests this person sent for approval
