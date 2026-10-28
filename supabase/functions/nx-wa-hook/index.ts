@@ -18,13 +18,14 @@ async function signatureOk(raw: string, header: string, secret: string) {
   let diff = 0; for (let i = 0; i < mac.length; i++) diff |= mac.charCodeAt(i) ^ got.charCodeAt(i);
   return diff === 0;
 }
-function bodyOf(m: Doc): { type: string; body: string; media_id?: string; media_mime?: string; filename?: string } {
+function bodyOf(m: Doc): { type: string; body: string; media_id?: string; media_mime?: string; filename?: string; reply_to?: string } {
   const t = String(m.type || '');
   if (t === 'text') return { type: t, body: String(m.text?.body || '') };
   if (t === 'button') return { type: t, body: String(m.button?.text || m.button?.payload || '') };
   if (t === 'interactive') return { type: t, body: String(m.interactive?.button_reply?.title || m.interactive?.list_reply?.title || '') };
   if (t === 'location') return { type: t, body: 'Location: ' + (m.location?.name || '') + ' ' + (m.location?.latitude ?? '') + ',' + (m.location?.longitude ?? '') };
-  if (t === 'reaction') return { type: t, body: 'Reaction ' + String(m.reaction?.emoji || '') };
+  // a reaction points at the message it was put on; an empty emoji means the reaction was removed
+  if (t === 'reaction') return { type: t, body: String(m.reaction?.emoji || ''), reply_to: String(m.reaction?.message_id || '') };
   const media = m[t];
   if (media && media.id) return { type: t, body: String(media.caption || ''), media_id: String(media.id), media_mime: String(media.mime_type || ''), filename: String(media.filename || '') };
   return { type: t || 'unknown', body: '' };
@@ -56,7 +57,12 @@ Deno.serve(async (req) => {
       for (const m of v.messages || []) {
         const from = String(m.from || '').replace(/\D/g, '');
         const at = m.timestamp ? new Date(Number(m.timestamp) * 1000).toISOString() : new Date().toISOString();
-        rows.push({ id: String(m.id), wa: from, name: names[from] || null, dir: 'in', status: 'received', at, reply_to: m.context?.id ? String(m.context.id) : null, ...bodyOf(m) });
+        const bo = bodyOf(m);
+        if (bo.type === 'reaction') {   // one reaction per person per message: replace the earlier one, drop it when removed
+          await db.from('nx_wa_msgs').delete().eq('type', 'reaction').eq('dir', 'in').eq('wa', from).eq('reply_to', bo.reply_to || '');
+          if (!bo.body) continue;
+        }
+        rows.push({ id: String(m.id), wa: from, name: names[from] || null, dir: 'in', status: 'received', at, reply_to: m.context?.id ? String(m.context.id) : null, ...bo });
       }
       for (const s of v.statuses || []) {
         const err = (s.errors || []).map((e: Doc) => e.error_data?.details || e.title || e.message).filter(Boolean).join('; ');

@@ -152,7 +152,7 @@ ACTIONS['wa-test'] = () => {
 };
 
 /* ---------- Operations → WhatsApp Inbox: every chat on the company WhatsApp number, with reply ---------- */
-const WAI = { msgs: [], loaded: false, loading: false, sel: '', draft: {}, sub: null };
+const WAI = { msgs: [], loaded: false, loading: false, sel: '', draft: {}, sub: null, q: '', f: 'all', blobs: {}, reply: null, pick: null };
 (function () {
   const st = document.createElement('style');
   st.textContent = '.wai{display:grid;grid-template-columns:330px 1fr;gap:12px;height:calc(100vh - 150px);min-height:420px}' +
@@ -167,7 +167,13 @@ const WAI = { msgs: [], loaded: false, loading: false, sel: '', draft: {}, sub: 
     '.wai-q{border-left:3px solid #0e6a73;background:rgba(0,0,0,.05);padding:3px 7px;border-radius:5px;font-size:12px;color:#374151;margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
     '.wai-rq{display:flex;align-items:center;gap:8px;padding:6px 10px;border-top:1px solid var(--line,#eef0ef);background:#f8faf9}.wai-rq .wai-q{flex:1;margin:0}.wai-rq a{cursor:pointer;font-size:18px;color:#6b7280}' +
     '.wai-f{display:flex;gap:8px;padding:10px;border-top:1px solid var(--line,#eef0ef)}.wai-f textarea{flex:1;resize:none;height:54px}.wai-note{padding:8px 12px;font-size:12px;color:#92400e;background:#fef3c7}' +
-    '@media(max-width:760px){.wai{grid-template-columns:1fr;height:auto}.wai-list{max-height:260px}.wai-chat{min-height:420px}}';
+    '.wai-s{padding:8px;border-bottom:1px solid var(--line,#eef0ef)}.wai-s input{width:100%}' +
+    '.wai-md img{max-width:100%;max-height:320px;border-radius:7px;display:block;cursor:zoom-in}.wai-md video{max-width:100%;max-height:320px;border-radius:7px;display:block}.wai-md audio{width:260px;max-width:100%;display:block}.wai-md .ph{color:#6b7280;font-size:12px;padding:30px 10px;text-align:center;background:#f3f4f6;border-radius:7px;min-width:160px}.wai-b.img{padding:4px}.wai-b.img .meta{padding:0 6px 2px}.wai-b.img .wai-q{margin:3px 6px}' +
+    '.wai-re{display:flex;gap:4px;margin-top:2px}.wai-re span{background:#fff;border:1px solid var(--line,#e3e6e4);border-radius:10px;padding:0 6px;font-size:13px;line-height:20px}.wai-re span.me{border-color:#0e6a73;cursor:pointer}.wai-b.out .wai-re span{background:#eef8ec}' +
+    '.wai-pk{display:flex;gap:6px;background:#fff;border:1px solid var(--line,#e3e6e4);border-radius:18px;padding:4px 8px;margin-bottom:4px;box-shadow:0 2px 6px rgba(0,0,0,.12)}.wai-pk a{cursor:pointer;font-size:20px;text-decoration:none;line-height:1}' +
+    '.wai-f .btn.ghost{padding:0 7px;font-size:17px;align-self:center}.wai-f textarea{height:54px}' +
+    '.wai-pv{text-align:center;padding:6px 0 10px}.wai-pv img{max-width:100%;max-height:300px;border-radius:7px}.wai-pf{font-size:15px;padding:24px 10px;background:#f3f4f6;border-radius:7px}' +
+    '@media(max-width:760px){.wai{grid-template-columns:1fr;height:auto}.wai-list{max-height:300px}.wai-chat{min-height:420px}.wai-b{max-width:88%}.wai-h .btn{font-size:11px;padding:0 6px}}';
   document.head.appendChild(st);
 })();
 function waiWho(num) {
@@ -212,43 +218,117 @@ async function waiLoad() {
   WAI.loading = false;
   if (curView().v === 'wainbox') VIEWS.wainbox.render();
 }
+/* media (photos, voice notes, videos, files) are fetched through the server once and kept as blob URLs for this screen */
+async function waiMedia(mid) {
+  if (WAI.blobs[mid]) return WAI.blobs[mid];
+  WAI.blobs[mid] = (async () => {
+    const { data, error } = await SB.functions.invoke('nx-wa', { body: { action: 'media', media_id: mid } });
+    let msg = data && data.error;
+    if (error) { msg = error.message; try { const j = await error.context.json(); msg = j.error || msg; } catch (e) { } }
+    if (msg) throw new Error(msg);
+    const bin = atob(data.data); const arr = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+    return { url: URL.createObjectURL(new Blob([arr], { type: data.mime })), mime: data.mime, filename: data.filename || '' };
+  })();
+  WAI.blobs[mid].catch(() => { delete WAI.blobs[mid]; });
+  return WAI.blobs[mid];
+}
+// fill the media placeholders of the open chat (images, voice notes, videos show inline; files stay as a link)
+function waiLoadMedia() {
+  $$('[data-wmid]').forEach(async el => {
+    const mid = el.dataset.wmid, kind = el.dataset.wkind; el.removeAttribute('data-wmid');
+    try {
+      const m = await waiMedia(mid);
+      if (kind === 'image' || kind === 'sticker') el.innerHTML = '<a data-act="wai-img" data-src="' + esc(m.url) + '"><img src="' + esc(m.url) + '" alt=""></a>';
+      else if (kind === 'audio') el.innerHTML = '<audio controls preload="metadata" src="' + esc(m.url) + '"></audio>';
+      else if (kind === 'video') el.innerHTML = '<video controls preload="metadata" src="' + esc(m.url) + '"></video>';
+      else el.innerHTML = '<a href="' + esc(m.url) + '" download="' + esc(m.filename || el.dataset.wname || 'file') + '" target="_blank">📎 ' + esc(el.dataset.wname || m.filename || 'Attachment') + '</a>';
+    } catch (e) { el.innerHTML = '<span class="err">📎 ' + esc(el.dataset.wname || 'Attachment') + ' — ' + esc(e.message) + '</span>'; }
+  });
+}
+const WAI_EMOJI = ['👍', '❤️', '😂', '🙏', '✅', '❌', '😮', '😢'];
+const waiOpenChat = c => !!(c && c.lastIn && (Date.now() - new Date(c.lastIn).getTime()) < 24 * 3600 * 1000);
+// people we can start a chat with: every active user and vendor with a mobile number
+function waiPeople() {
+  const d10 = m => String(m || '').replace(/\D/g, '').slice(-10);
+  const out = [];
+  Store.all('users').filter(u => u.active !== false && /^[6-9]\d{9}$/.test(d10(u.mobile))).forEach(u => out.push({ name: u.name, mobile: d10(u.mobile), kind: 'User' }));
+  Store.all('vendors').filter(v => /^[6-9]\d{9}$/.test(d10(v.mobile))).forEach(v => out.push({ name: v.name, mobile: d10(v.mobile), kind: 'Vendor' }));
+  return out.sort((a, b) => a.name.localeCompare(b.name));
+}
+function waiConversations() {
+  const conv = {};
+  WAI.msgs.forEach(m => {
+    if (m.type === 'reaction') return;
+    const c = conv[m.wa] || (conv[m.wa] = { wa: m.wa, last: m, unread: 0, lastIn: '', hits: 0 });
+    if ((m.at || '') >= (c.last.at || '')) c.last = m;
+    if (m.dir === 'in') { if (!m.seen) c.unread++; if ((m.at || '') > c.lastIn) c.lastIn = m.at; }
+  });
+  return conv;
+}
 VIEWS.wainbox = {
   mod: 'audit', render() {
     if (!CLOUD || !isAdminRole()) { setMain('<div class="tbl-wrap"><table><tr><td class="empty">' + (CLOUD ? 'Only Admin and Super Admin can see WhatsApp chats' : 'WhatsApp Inbox works in cloud mode') + '</td></tr></table></div>'); return; }
     waiWake(); waiPoll();
     if (!WAI.loaded) { setMain('<div class="tbl-wrap"><table><tr><td class="empty">Loading…</td></tr></table></div>'); waiLoad(); return; }
-    const conv = {};
-    WAI.msgs.forEach(m => { const c = conv[m.wa] || (conv[m.wa] = { wa: m.wa, last: m, unread: 0, lastIn: '' }); if ((m.at || '') >= (c.last.at || '')) c.last = m; if (m.dir === 'in') { if (!m.seen) c.unread++; if ((m.at || '') > c.lastIn) c.lastIn = m.at; } });
-    const list = Object.values(conv).sort((a, b) => (b.last.at || '') < (a.last.at || '') ? -1 : 1);
-    if (!WAI.sel && list.length) WAI.sel = list[0].wa;
-    const snip = m => (m.dir === 'out' ? '↩ ' : '') + (m.template ? m.template : m.body || (m.filename || m.type || ''));
-    let h = (isSuperAdmin() ? '<div class="toolbar"><span class="grow"></span><button class="btn" data-act="wa-test">Send test messages</button></div>' : '') +
-      '<div class="wai"><div class="wai-list"><div class="rows">' +
-      (list.length ? list.map(c => '<div class="wai-c' + (c.wa === WAI.sel ? ' on' : '') + '" data-act="wai-open" data-wa="' + esc(c.wa) + '"><div class="n">' + esc(waiWho(c.wa)) + '</div><div class="t">' + fmtDT(c.last.at) + '</div><div class="s">' + esc(snip(c.last)) + '</div>' + (c.unread ? '<div class="u">' + c.unread + '</div>' : '<div></div>') + '</div>').join('')
-        : '<div class="wai-c"><div class="s">No chats yet</div></div>') + '</div></div>';
+    const conv = waiConversations();
+    const q = norm(WAI.q || '');
+    let list = Object.values(conv);
+    if (q) list.forEach(c => { c.hits = WAI.msgs.filter(m => m.wa === c.wa && m.type !== 'reaction' && norm(m.body || m.filename || m.template || '').includes(q)).length; });
+    list = list.filter(c => (!q || c.hits || norm(waiWho(c.wa)).includes(q) || String(c.wa).includes(q.replace(/\D/g, '') || '§')) && (WAI.f !== 'unread' || c.unread));
+    list.sort((a, b) => (b.last.at || '') < (a.last.at || '') ? -1 : 1);
+    if (!WAI.sel && list.length && !q) WAI.sel = list[0].wa;
+    const snip = m => (m.dir === 'out' ? '↩ ' : '') + (m.template ? m.template : m.body || (m.filename || (m.type === 'image' ? '📷 Photo' : m.type === 'audio' ? '🎤 Voice note' : m.type === 'video' ? '🎬 Video' : m.type) || ''));
+    const unreadN = Object.values(conv).filter(c => c.unread).length;
+    let h = '<div class="toolbar"><button class="btn primary" data-act="wai-new">+ New chat</button>' + seg('waif', [{ v: 'all', l: 'All' }, { v: 'unread', l: 'Unread (' + unreadN + ')' }], WAI.f) + '<span class="grow"></span>' + (isSuperAdmin() ? '<button class="btn" data-act="wa-test">Send test messages</button>' : '') + '</div>' +
+      '<div class="wai"><div class="wai-list"><div class="wai-s"><input id="waiQ" placeholder="Search name, number or message" value="' + esc(WAI.q || '') + '"></div><div class="rows">' +
+      (list.length ? list.map(c => '<div class="wai-c' + (c.wa === WAI.sel ? ' on' : '') + '" data-act="wai-open" data-wa="' + esc(c.wa) + '"><div class="n">' + esc(waiWho(c.wa)) + '</div><div class="t">' + fmtDT(c.last.at) + '</div><div class="s">' + (q && c.hits ? '<b>' + c.hits + ' match' + (c.hits > 1 ? 'es' : '') + '</b> · ' : '') + esc(snip(c.last)) + '</div>' + (c.unread ? '<div class="u">' + c.unread + '</div>' : '<div></div>') + '</div>').join('')
+        : '<div class="wai-c"><div class="s">' + (q ? 'No chat matches' : WAI.f === 'unread' ? 'No unread chats' : 'No chats yet') + '</div></div>') + '</div></div>';
     const c = conv[WAI.sel];
     if (c) {
-      const msgs = WAI.msgs.filter(m => m.wa === c.wa).sort((a, b) => (a.at || '') < (b.at || '') ? -1 : 1);
+      const all = WAI.msgs.filter(m => m.wa === c.wa).sort((a, b) => (a.at || '') < (b.at || '') ? -1 : 1);
+      const reacts = {}; all.filter(m => m.type === 'reaction' && m.reply_to).forEach(m => (reacts[m.reply_to] = reacts[m.reply_to] || []).push(m));
+      const msgs = all.filter(m => m.type !== 'reaction');
       const tick = m => m.dir !== 'out' ? '' : m.status === 'sending' ? ' 🕓' : m.status === 'read' ? ' <span class="rd">✓✓</span>' : m.status === 'delivered' ? ' ✓✓' : m.status === 'failed' ? ' ✕' : ' ✓';
-      const open = c.lastIn && (Date.now() - new Date(c.lastIn).getTime()) < 24 * 3600 * 1000;
+      const open = waiOpenChat(c);
       const byId = new Map(msgs.map(m => [m.id, m]));
-      const quote = id => { const q = byId.get(id); return q ? '<div class="wai-q">' + esc(q.dir === 'in' ? waiWho(q.wa) : 'You') + ': ' + esc((q.template || q.body || q.filename || q.type || '').slice(0, 120)) + '</div>' : ''; };
-      h += '<div class="wai-chat"><div class="wai-h">' + esc(waiWho(c.wa)) + (c.wa ? '<small>+' + esc(c.wa) + '</small>' : '') + '<span class="grow"></span><button class="btn sm ghost danger" data-act="wai-delchat" data-confirm="Delete this whole chat?">Delete chat</button></div><div class="wai-m" id="waiM">' +
-        msgs.map(m => '<div class="wai-b ' + m.dir + '">' + '<div class="wai-x"><a data-act="wai-reply" data-id="' + esc(m.id) + '" title="Reply">↩</a> <a data-act="wai-del" data-id="' + esc(m.id) + '" data-confirm="Delete?" title="Delete">🗑</a></div>' +
-          (m.reply_to ? quote(m.reply_to) : '') + (m.template ? '<div class="tpl">' + esc(m.template) + '</div>' : '') + esc(m.body || '') +
-          (m.media_id ? '<div><a data-act="wai-media" data-id="' + esc(m.media_id) + '">📎 ' + esc(m.filename || m.type || 'Attachment') + '</a></div>' : (m.filename && m.dir === 'out' ? '<div>📎 ' + esc(m.filename) + '</div>' : '')) +
+      const label = m => m.template || m.body || m.filename || (m.type === 'image' ? '📷 Photo' : m.type === 'audio' ? '🎤 Voice note' : m.type === 'video' ? '🎬 Video' : m.type) || '';
+      const quote = id => { const qm = byId.get(id); return qm ? '<div class="wai-q">' + esc(qm.dir === 'in' ? waiWho(qm.wa) : 'You') + ': ' + esc(label(qm).slice(0, 120)) + '</div>' : ''; };
+      const mediaHtml = m => {
+        if (!m.media_id) return m.filename && m.dir === 'out' ? '<div>📎 ' + esc(m.filename) + '</div>' : '';
+        const kind = m.type === 'sticker' ? 'image' : m.type;
+        const inline = ['image', 'audio', 'video'].includes(kind) ? kind : 'document';
+        if (inline === 'document') return '<div class="wai-md"><a data-act="wai-media" data-id="' + esc(m.media_id) + '">📎 ' + esc(m.filename || 'Attachment') + '</a></div>';   // files open on click
+        return '<div class="wai-md ' + inline + '" data-wmid="' + esc(m.media_id) + '" data-wkind="' + inline + '" data-wname="' + esc(m.filename || '') + '">' + (inline === 'image' ? '<div class="ph">📷 Loading…</div>' : '⏳') + '</div>';
+      };
+      const reactHtml = m => { const r = reacts[m.id]; if (!r || !r.length) return ''; return '<div class="wai-re">' + r.map(x => '<span class="' + (x.dir === 'out' ? 'me' : '') + '" title="' + esc(x.dir === 'out' ? (x.by_name || 'You') : waiWho(x.wa)) + '"' + (x.dir === 'out' ? ' data-act="wai-react" data-id="' + esc(m.id) + '" data-e=""' : '') + '>' + esc(x.body) + '</span>').join('') + '</div>'; };
+      const wamid = m => /^wamid\./.test(m.id);
+      h += '<div class="wai-chat"><div class="wai-h"><span>' + esc(waiWho(c.wa)) + (c.wa ? '<small>+' + esc(c.wa) + '</small>' : '') + '</span><span class="grow"></span>' +
+        (c.wa ? '<a class="btn sm ghost" href="https://wa.me/' + esc(c.wa) + '" target="_blank" rel="noopener" title="Open this number in the WhatsApp app">Open in WhatsApp ↗</a><button class="btn sm ghost" data-act="wai-unread" title="Show this chat as unread again">Mark unread</button>' : '') +
+        '<button class="btn sm ghost danger" data-act="wai-delchat" data-confirm="Delete this whole chat?">Delete chat</button></div><div class="wai-m" id="waiM">' +
+        msgs.map(m => '<div class="wai-b ' + m.dir + (m.type === 'image' || m.type === 'sticker' ? ' img' : '') + '" id="wm-' + esc(m.id) + '">' +
+          '<div class="wai-x">' + (open && wamid(m) ? '<a data-act="wai-reply" data-id="' + esc(m.id) + '" title="Reply">↩</a> <a data-act="wai-pick" data-id="' + esc(m.id) + '" title="React">😊</a> ' : '') + (wamid(m) || m.media_id ? '<a data-act="wai-fwd" data-id="' + esc(m.id) + '" title="Forward">➦</a> ' : '') + '<a data-act="wai-del" data-id="' + esc(m.id) + '" data-confirm="Delete?" title="Delete">🗑</a></div>' +
+          (WAI.pick === m.id ? '<div class="wai-pk">' + WAI_EMOJI.map(e => '<a data-act="wai-react" data-id="' + esc(m.id) + '" data-e="' + e + '">' + e + '</a>').join('') + '</div>' : '') +
+          (m.reply_to ? quote(m.reply_to) : '') + (m.template ? '<div class="tpl">' + esc(m.template) + '</div>' : '') + mediaHtml(m) + esc(m.body || '') +
           (m.ref ? '<div class="meta" style="text-align:left">' + esc(m.ref) + '</div>' : '') +
           (m.error ? '<div class="err">' + esc(m.error) + '</div>' : '') +
           (m.status === 'failed' && m.event && m.rid && isAdminRole() ? '<div><a data-act="wa-resend" data-e="' + esc(m.event) + '" data-id="' + esc(m.rid) + '">Resend</a></div>' : '') +
-          '<div class="meta">' + (m.by_name ? esc(m.by_name) + ' · ' : '') + fmtDT(m.at) + tick(m) + '</div></div>').join('') + '</div>' +
-        (open || !c.wa ? '' : '<div class="wai-note">' + (c.lastIn ? 'Reply closed — no message from this number in the last 24 hours.' : 'Reply closed — this number has not written to us.') + '</div>') +
+          '<div class="meta">' + (m.by_name ? esc(m.by_name) + ' · ' : '') + fmtDT(m.at) + tick(m) + '</div>' + reactHtml(m) + '</div>').join('') + '</div>' +
+        (open || !c.wa ? '' : '<div class="wai-note">' + (c.lastIn ? 'Reply closed — no message from this number in the last 24 hours. Only a template can be sent now (New chat).' : 'Reply closed — this number has not written to us.') + '</div>') +
         (WAI.reply && byId.get(WAI.reply) && open ? '<div class="wai-rq">' + quote(WAI.reply) + '<a data-act="wai-reply-x">×</a></div>' : '') +
-        (!c.wa ? '' : '<div class="wai-f"><textarea id="waiTxt"' + (open ? '' : ' disabled') + '>' + esc(WAI.draft[c.wa] || '') + '</textarea><button class="btn primary" data-act="wai-send"' + (open ? '' : ' disabled') + '>Send</button></div>') + '</div>';
-    } else h += '<div class="wai-chat"></div>';
+        (!c.wa ? '' : '<div class="wai-f">' +
+          '<button class="btn sm ghost" data-act="wai-attach" title="Photo, PDF, video or file"' + (open ? '' : ' disabled') + '>📎</button><button class="btn sm ghost" data-act="wai-camera" title="Take a photo"' + (open ? '' : ' disabled') + '>📷</button><button class="btn sm ghost" data-act="wai-doc" title="Send a Nexus document (PO / Job Card / GRN)"' + (open ? '' : ' disabled') + '>📄</button>' +
+          '<input type="file" id="waiFile" accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.ppt,.pptx" hidden><input type="file" id="waiCam" accept="image/*" capture="environment" hidden>' +
+          '<textarea id="waiTxt"' + (open ? '' : ' disabled') + ' placeholder="Type a message">' + esc(WAI.draft[c.wa] || '') + '</textarea><button class="btn primary" data-act="wai-send"' + (open ? '' : ' disabled') + '>Send</button></div>') + '</div>';
+    } else h += '<div class="wai-chat"><div class="wai-m"><div class="dl-empty">' + (list.length ? 'Pick a chat' : 'Start with + New chat') + '</div></div></div>';
     h += '</div>';
     const main = setMain(h);
     const box = $('#waiM'); if (box) box.scrollTop = box.scrollHeight;
     const t = $('#waiTxt'); if (t) { t.addEventListener('input', () => { WAI.draft[WAI.sel] = t.value; }); t.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); ACTIONS['wai-send'](); } }); if (WAI.reply) t.focus(); }
+    const sq = $('#waiQ'); if (sq) { sq.addEventListener('input', () => { WAI.q = sq.value; clearTimeout(WAI.qT); WAI.qT = setTimeout(() => { const pos = sq.selectionStart; VIEWS.wainbox.render(); const n = $('#waiQ'); if (n) { n.focus(); n.setSelectionRange(pos, pos); } }, 250); }); }
+    const fi = $('#waiFile'); if (fi) fi.addEventListener('change', () => { if (fi.files[0]) waiPickFile(fi.files[0]); fi.value = ''; });
+    const ci = $('#waiCam'); if (ci) ci.addEventListener('change', () => { if (ci.files[0]) waiPickFile(ci.files[0]); ci.value = ''; });
+    onSeg(e => { if (e.target.dataset.seg === 'waif') { WAI.f = e.detail; VIEWS.wainbox.render(); } });
+    waiLoadMedia();
     if (c && c.unread) waiSeen(c.wa);
     return main;
   }
@@ -257,60 +337,184 @@ async function waiSeen(wa) {
   WAI.msgs.forEach(m => { if (m.wa === wa && m.dir === 'in') m.seen = true; });
   try { await SB.from('nx_wa_msgs').update({ seen: true }).eq('wa', wa).eq('dir', 'in').eq('seen', false); } catch (e) { }
 }
-ACTIONS['wai-open'] = el => { WAI.sel = el.dataset.wa; VIEWS.wainbox.render(); };
+ACTIONS['wai-open'] = el => { WAI.sel = el.dataset.wa; WAI.pick = null; VIEWS.wainbox.render(); };
+ACTIONS['wai-img'] = el => { const w = window.open(''); if (w) { w.document.write('<body style="margin:0;background:#111;display:flex;align-items:center;justify-content:center;min-height:100vh"><img src="' + el.dataset.src + '" style="max-width:100%;max-height:100vh"></body>'); } };
+// talk to the server function; returns an error text or ''
+async function waiCall(body) {
+  try {
+    const { data, error } = await SB.functions.invoke('nx-wa', { body });
+    let msg = data && data.error;
+    if (error) { msg = error.message; try { const j = await error.context.json(); msg = j.error || msg; } catch (e) { } }
+    return { err: msg || '', data: data || {} };
+  } catch (e) { return { err: e.message, data: {} }; }
+}
+// optimistic bubble: shown as "sending" until the server answers
+function waiTmp(to, fields) { const tmp = Object.assign({ id: 'tmp-' + Date.now() + Math.random().toString(36).slice(2, 6), wa: to, dir: 'out', type: 'text', body: '', status: 'sending', by_name: ME.name, seen: true, at: new Date().toISOString(), reply_to: null }, fields); WAI.msgs.push(tmp); return tmp; }
+function waiSettle(tmp, r) {
+  const k = WAI.msgs.indexOf(tmp);
+  if (r.err) { if (k >= 0) Object.assign(WAI.msgs[k], { status: 'failed', error: r.err }); flash('Not sent: ' + esc(r.err), 'err'); }
+  else if (k >= 0) { const id = r.data.id; if (id && WAI.msgs.some(x => x.id === id)) WAI.msgs.splice(k, 1); else Object.assign(WAI.msgs[k], { id: id || tmp.id, status: 'sent', media_id: r.data.media_id || tmp.media_id || null }); }
+  if (curView().v === 'wainbox') VIEWS.wainbox.render();
+}
 ACTIONS['wai-send'] = async () => {
   const t = $('#waiTxt'); const text = t ? t.value.trim() : ''; const to = WAI.sel;
   if (!text || !to) return;
   const replyTo = WAI.reply && /^wamid\./.test(WAI.reply) ? WAI.reply : '';
-  const tmp = { id: 'tmp-' + Date.now(), wa: to, dir: 'out', type: 'text', body: text, status: 'sending', by_name: ME.name, seen: true, at: new Date().toISOString(), reply_to: replyTo || null };
-  WAI.msgs.push(tmp); WAI.draft[to] = ''; WAI.reply = null; VIEWS.wainbox.render();
-  let msg = '', id = '';
-  try {
-    const { data, error } = await SB.functions.invoke('nx-wa', { body: { action: 'reply', to, text, reply_to: replyTo } });
-    msg = data && data.error; id = data && data.id;
-    if (error) { msg = error.message; try { const j = await error.context.json(); msg = j.error || msg; } catch (e) { } }
-  } catch (e) { msg = e.message; }
-  const k = WAI.msgs.indexOf(tmp);
-  if (msg) { if (k >= 0) Object.assign(WAI.msgs[k], { status: 'failed', error: msg }); WAI.draft[to] = text; flash('Not sent: ' + esc(msg), 'err'); }
-  else {
-    audit('wa.reply', '+' + to, text.slice(0, 80));
-    if (k >= 0) { if (id && WAI.msgs.some(x => x.id === id)) WAI.msgs.splice(k, 1); else Object.assign(WAI.msgs[k], { id: id || tmp.id, status: 'sent' }); }
-  }
-  if (curView().v === 'wainbox') VIEWS.wainbox.render();
+  const tmp = waiTmp(to, { type: 'text', body: text, reply_to: replyTo || null });
+  WAI.draft[to] = ''; WAI.reply = null; VIEWS.wainbox.render();
+  const r = await waiCall({ action: 'reply', to, text, reply_to: replyTo });
+  if (r.err) WAI.draft[to] = text; else audit('wa.reply', '+' + to, text.slice(0, 80));
+  waiSettle(tmp, r);
 };
-ACTIONS['wai-reply'] = el => { WAI.reply = el.dataset.id; VIEWS.wainbox.render(); };
+ACTIONS['wai-reply'] = el => { WAI.reply = el.dataset.id; WAI.pick = null; VIEWS.wainbox.render(); };
 ACTIONS['wai-reply-x'] = () => { WAI.reply = null; VIEWS.wainbox.render(); };
+ACTIONS['wai-pick'] = el => { WAI.pick = WAI.pick === el.dataset.id ? null : el.dataset.id; VIEWS.wainbox.render(); const b = $('#wm-' + CSS.escape(el.dataset.id)); if (b) b.scrollIntoView({ block: 'nearest' }); };
+ACTIONS['wai-react'] = async el => {
+  const id = el.dataset.id, emoji = el.dataset.e || ''; WAI.pick = null;
+  const m = WAI.msgs.find(x => x.id === id); if (!m) return;
+  // show it at once; the server confirms
+  WAI.msgs = WAI.msgs.filter(x => !(x.type === 'reaction' && x.dir === 'out' && x.reply_to === id));
+  if (emoji) WAI.msgs.push({ id: 'tmp-re-' + Date.now(), wa: m.wa, dir: 'out', type: 'reaction', body: emoji, reply_to: id, status: 'sending', by_name: ME.name, seen: true, at: new Date().toISOString() });
+  VIEWS.wainbox.render();
+  const r = await waiCall({ action: 'react', message_id: id, emoji });
+  if (r.err) { WAI.msgs = WAI.msgs.filter(x => !String(x.id).startsWith('tmp-re-')); flash('Reaction not sent: ' + esc(r.err), 'err'); VIEWS.wainbox.render(); }
+  else audit('wa.react', '+' + m.wa, (emoji || 'removed') + ' on ' + (m.body || m.type || '').slice(0, 60));
+};
+/* ---- attachments: photo (camera or gallery), PDF, video, voice/audio, any file; big photos are shrunk in the browser ---- */
+ACTIONS['wai-attach'] = () => { const f = $('#waiFile'); if (f) f.click(); };
+ACTIONS['wai-camera'] = () => { const f = $('#waiCam'); if (f) f.click(); };
+function waiShrink(file) {
+  return new Promise(ok => {
+    if (!/^image\/(jpeg|png|webp)$/.test(file.type) || file.size < 1200000) return ok(file);
+    const img = new Image(); const url = URL.createObjectURL(file);
+    img.onload = () => {
+      const max = 1600, sc = Math.min(1, max / Math.max(img.width, img.height));
+      const cv = document.createElement('canvas'); cv.width = Math.round(img.width * sc); cv.height = Math.round(img.height * sc);
+      cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height); URL.revokeObjectURL(url);
+      cv.toBlob(bl => ok(bl ? new File([bl], file.name.replace(/\.\w+$/, '') + '.jpg', { type: 'image/jpeg' }) : file), 'image/jpeg', 0.85);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); ok(file); };
+    img.src = url;
+  });
+}
+const waiB64 = file => new Promise((ok, bad) => { const fr = new FileReader(); fr.onload = () => ok(String(fr.result).split('base64,')[1] || ''); fr.onerror = () => bad(new Error('Could not read the file')); fr.readAsDataURL(file); });
+async function waiPickFile(file0) {
+  const to = WAI.sel; if (!to) return;
+  const file = await waiShrink(file0);
+  const kind = file.type.startsWith('image/') ? 'image' : file.type.startsWith('video/') ? 'video' : file.type.startsWith('audio/') ? 'audio' : 'document';
+  const limit = kind === 'image' ? 5 : 12;
+  if (file.size > limit * 1024 * 1024) { flash('File is too large — WhatsApp allows ' + limit + ' MB for a ' + kind + '.', 'err'); return; }
+  const old = $('#waiAtt'); if (old) old.remove();
+  const d = document.createElement('div'); d.id = 'waiAtt'; d.className = 'dlg-back';
+  const prev = kind === 'image' ? URL.createObjectURL(file) : '';
+  d.innerHTML = '<div class="dlg"><div class="dlg-h">Send to ' + esc(waiWho(to)) + '</div><div class="wai-pv">' + (prev ? '<img src="' + esc(prev) + '">' : '<div class="wai-pf">' + (kind === 'video' ? '🎬' : kind === 'audio' ? '🎤' : '📎') + ' ' + esc(file.name) + '</div>') + '<div class="small muted">' + esc(file.name) + ' · ' + (file.size / 1024 / 1024).toFixed(2) + ' MB</div></div>' +
+    (kind === 'audio' ? '' : '<table class="jckv"><tr><td class="k">Caption</td><td class="v"><input id="waiCap" maxlength="1024"></td></tr></table>') +
+    '<div class="dlg-f"><span id="waiAttMsg" class="small late-txt"></span><span class="grow"></span><button class="btn" data-att-x>Cancel</button><button class="btn primary" data-att-ok>Send</button></div></div>';
+  document.body.appendChild(d); const cap = $('#waiCap', d); if (cap) cap.focus();
+  d.addEventListener('click', async ev => {
+    if (ev.target.closest('[data-att-x]') || ev.target === d) { d.remove(); if (prev) URL.revokeObjectURL(prev); return; }
+    const okb = ev.target.closest('[data-att-ok]'); if (!okb) return;
+    okb.disabled = true; const caption = cap ? cap.value.trim() : '';
+    let data; try { data = await waiB64(file); } catch (e) { $('#waiAttMsg', d).textContent = e.message; okb.disabled = false; return; }
+    d.remove();
+    const replyTo = WAI.reply && /^wamid\./.test(WAI.reply) ? WAI.reply : ''; WAI.reply = null;
+    const tmp = waiTmp(to, { type: kind, body: caption, filename: file.name, reply_to: replyTo || null });
+    if (prev) { WAI.blobs['tmp:' + tmp.id] = Promise.resolve({ url: prev, mime: file.type, filename: file.name }); tmp.media_id = 'tmp:' + tmp.id; tmp.media_mime = file.type; }
+    VIEWS.wainbox.render();
+    const r = await waiCall({ action: 'send_media', to, kind, mime: file.type || 'application/octet-stream', filename: file.name, caption, data, reply_to: replyTo });
+    if (!r.err) { audit('wa.send_file', '+' + to, kind + ' ' + file.name + (caption ? ' · ' + caption.slice(0, 60) : '')); if (prev && r.data.media_id) WAI.blobs[r.data.media_id] = WAI.blobs['tmp:' + tmp.id]; }
+    waiSettle(tmp, r);
+  });
+}
+/* ---- a Nexus document (the same PDF the Print button makes) straight into the chat ---- */
+ACTIONS['wai-doc'] = () => {
+  const to = WAI.sel; if (!to) return;
+  const kinds = { 'Purchase Order': 'po', 'Job Card': 'jc', 'GRN': 'grn' };
+  const pick = kind => { const col = kind === 'po' ? 'purchase_orders' : kind === 'jc' ? 'job_cards' : 'grns'; return Store.all(col).filter(x => !x.cancelled).sort((a, b) => (b.at || b.date || '') < (a.at || a.date || '') ? -1 : 1).slice(0, 300); };
+  const old = $('#waiDoc'); if (old) old.remove();
+  const d = document.createElement('div'); d.id = 'waiDoc'; d.className = 'dlg-back';
+  const opts = kind => pick(kind).map(x => '<option value="' + esc(x.id) + '">' + esc(x.no + (x.vendor ? ' · ' + x.vendor : x.brand ? ' · ' + x.brand : '')) + '</option>').join('');
+  d.innerHTML = '<div class="dlg"><div class="dlg-h">Send a Nexus document to ' + esc(waiWho(to)) + '</div><table class="jckv"><tr><td class="k">Document *</td><td class="v"><select id="wdKind">' + Object.keys(kinds).map(k => '<option value="' + kinds[k] + '">' + k + '</option>').join('') + '</select></td></tr>' +
+    '<tr><td class="k">Number *</td><td class="v"><select id="wdId">' + opts('po') + '</select></td></tr><tr><td class="k">Caption</td><td class="v"><input id="wdCap" maxlength="1024"></td></tr></table>' +
+    '<div class="dlg-f"><span id="wdMsg" class="small late-txt"></span><span class="grow"></span><button class="btn" data-wd-x>Cancel</button><button class="btn primary" data-wd-ok>Send PDF</button></div></div>';
+  document.body.appendChild(d);
+  $('#wdKind', d).addEventListener('change', () => { $('#wdId', d).innerHTML = opts($('#wdKind', d).value); });
+  d.addEventListener('click', async ev => {
+    if (ev.target.closest('[data-wd-x]') || ev.target === d) { d.remove(); return; }
+    const okb = ev.target.closest('[data-wd-ok]'); if (!okb) return;
+    const kind = $('#wdKind', d).value, id = $('#wdId', d).value, caption = $('#wdCap', d).value.trim();
+    if (!id) { $('#wdMsg', d).textContent = 'Pick a number.'; return; }
+    const rec = Store.get(kind === 'po' ? 'purchase_orders' : kind === 'jc' ? 'job_cards' : 'grns', id); if (!rec) return;
+    okb.disabled = true; $('#wdMsg', d).textContent = 'Making the PDF…';
+    let data; try { data = await waPdf(kind, id); } catch (e) { $('#wdMsg', d).textContent = e.message; okb.disabled = false; return; }
+    d.remove();
+    const filename = (kind === 'po' ? 'PO_' : kind === 'jc' ? 'JobCard_' : 'GRN_') + String(rec.no || id).replace(/[^\w.-]+/g, '_') + '.pdf';
+    const tmp = waiTmp(to, { type: 'document', body: caption, filename }); VIEWS.wainbox.render();
+    const r = await waiCall({ action: 'send_media', to, kind: 'document', mime: 'application/pdf', filename, caption, data });
+    if (!r.err) audit('wa.send_doc', '+' + to, filename + (caption ? ' · ' + caption.slice(0, 60) : ''));
+    waiSettle(tmp, r);
+  });
+};
+/* ---- forward one message to another chat (only chats that wrote to us in the last 24 hours can receive it) ---- */
+ACTIONS['wai-fwd'] = el => {
+  const m = WAI.msgs.find(x => x.id === el.dataset.id); if (!m) return;
+  const conv = waiConversations();
+  const targets = Object.values(conv).filter(c => c.wa && c.wa !== m.wa && waiOpenChat(c)).map(c => ({ wa: c.wa, l: waiWho(c.wa) + ' · +' + c.wa })).sort((a, b) => a.l.localeCompare(b.l));
+  if (!targets.length) { flash('No other chat is open for a reply right now (24-hour rule).', 'err'); return; }
+  formDialog('Forward to', [{ k: 'to', l: 'Chat', type: 'select', options: targets.map(t => t.l), req: true }], 'Forward', v => {
+    const t = targets.find(x => x.l === v.to); if (!t) return 'Pick a chat.';
+    (async () => {
+      const tmp = waiTmp(t.wa, { type: m.type, body: m.template ? m.template + ': ' + (m.body || '') : m.body || '', filename: m.filename || '', media_id: m.media_id || null, media_mime: m.media_mime || null });
+      WAI.sel = t.wa; WAI.pick = null; VIEWS.wainbox.render();
+      const r = await waiCall({ action: 'forward', to: t.wa, id: m.id });
+      if (!r.err) audit('wa.forward', '+' + t.wa, 'from +' + m.wa + ' · ' + (m.body || m.filename || m.type || '').slice(0, 60));
+      waiSettle(tmp, r);
+    })();
+    return '';
+  });
+};
+/* ---- start a chat: an approved template goes to a user or vendor; they can then reply and the chat opens ---- */
+ACTIONS['wai-new'] = () => {
+  const people = waiPeople(); if (!people.length) { flash('No user or vendor has a mobile number.', 'err'); return; }
+  const labels = people.map(p => p.name + ' · ' + p.mobile + ' · ' + p.kind);
+  formDialog('New chat', [{ k: 'who', l: 'Send to', type: 'select', options: labels, req: true }, { k: 'note', l: 'Note', type: 'static', value: 'WhatsApp opens a new chat only with an approved template (nexus_hello). The person can reply for 24 hours after that, and then photos, files and free text work.' }], 'Send template', v => {
+    const p = people[labels.indexOf(v.who)]; if (!p) return 'Pick a person.';
+    (async () => {
+      const to = '91' + p.mobile;
+      const r = await waiCall({ action: 'start', to: p.mobile });
+      if (r.err) { flash('Not sent: ' + esc(r.err), 'err'); return; }
+      audit('wa.start', '+' + to, p.name + ' (' + p.kind + ')');
+      if (!WAI.msgs.some(x => x.id === r.data.id)) WAI.msgs.push({ id: r.data.id || 'tmp-' + Date.now(), wa: r.data.wa || to, dir: 'out', type: 'template', template: 'nexus_hello', body: 'name: ' + p.name, status: 'sent', by_name: ME.name, seen: true, at: new Date().toISOString() });
+      WAI.sel = r.data.wa || to; WAI.q = ''; WAI.f = 'all'; flash('Template sent to ' + esc(p.name) + '.'); VIEWS.wainbox.render();
+    })();
+    return '';
+  });
+};
+/* ---- unread ---- */
+ACTIONS['wai-unread'] = async () => {
+  const wa = WAI.sel; const last = WAI.msgs.filter(m => m.wa === wa && m.dir === 'in' && m.type !== 'reaction').sort((a, b) => (a.at || '') < (b.at || '') ? 1 : -1)[0];
+  if (!last) { flash('This chat has no incoming message to mark.', 'err'); return; }
+  last.seen = false; WAI.sel = null; WAI.pick = null; VIEWS.wainbox.render();
+  try { await SB.from('nx_wa_msgs').update({ seen: false }).eq('id', last.id); } catch (e) { }
+};
 async function waiDelete(body) {
-  try {
-    const { data, error } = await SB.functions.invoke('nx-wa', { body: Object.assign({ action: 'delete' }, body) });
-    let msg = data && data.error; if (error) { msg = error.message; try { const j = await error.context.json(); msg = j.error || msg; } catch (e) { } }
-    if (msg) { flash('Not deleted: ' + esc(msg), 'err'); return false; }
-    return true;
-  } catch (e) { flash('Not deleted: ' + esc(e.message), 'err'); return false; }
+  const r = await waiCall(Object.assign({ action: 'delete' }, body));
+  if (r.err) { flash('Not deleted: ' + esc(r.err), 'err'); return false; }
+  return true;
 }
 ACTIONS['wai-del'] = async el => {
   const id = el.dataset.id; const m = WAI.msgs.find(x => x.id === id); if (!m) return;
   if (!id.startsWith('tmp-') && !(await waiDelete({ ids: [id] }))) return;
-  WAI.msgs = WAI.msgs.filter(x => x.id !== id); audit('wa.delete_message', '+' + m.wa, (m.template || m.body || '').slice(0, 80)); VIEWS.wainbox.render();
+  WAI.msgs = WAI.msgs.filter(x => x.id !== id && !(x.type === 'reaction' && x.reply_to === id));
+  audit('wa.delete_message', '+' + m.wa, (m.template || m.body || m.filename || m.type || '').slice(0, 80)); VIEWS.wainbox.render();
 };
 ACTIONS['wai-delchat'] = async () => {
   const wa = WAI.sel; if (wa == null) return;
   if (!(await waiDelete({ wa }))) return;
-  const n = WAI.msgs.filter(x => x.wa === wa).length; WAI.msgs = WAI.msgs.filter(x => x.wa !== wa); WAI.sel = null; WAI.reply = null;
+  const n = WAI.msgs.filter(x => x.wa === wa).length; WAI.msgs = WAI.msgs.filter(x => x.wa !== wa); WAI.sel = null; WAI.reply = null; WAI.pick = null;
   audit('wa.delete_chat', '+' + wa, n + ' message(s)'); flash('Chat deleted.'); VIEWS.wainbox.render();
 };
-ACTIONS['wai-media'] = async el => {
-  try {
-    const { data, error } = await SB.functions.invoke('nx-wa', { body: { action: 'media', media_id: el.dataset.id } });
-    let msg = data && data.error;
-    if (error) { msg = error.message; try { const j = await error.context.json(); msg = j.error || msg; } catch (e) { } }
-    if (msg) { flash(esc(msg), 'err'); return; }
-    const bin = atob(data.data); const arr = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
-    const url = URL.createObjectURL(new Blob([arr], { type: data.mime }));
-    const a = document.createElement('a'); a.href = url; a.target = '_blank'; if (data.filename) a.download = data.filename; document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 60000);
-  } catch (e) { flash(esc(e.message), 'err'); }
-};
+ACTIONS['wai-media'] = async el => { try { const m = await waiMedia(el.dataset.id); const a = document.createElement('a'); a.href = m.url; a.target = '_blank'; if (m.filename) a.download = m.filename; document.body.appendChild(a); a.click(); a.remove(); } catch (e) { flash(esc(e.message), 'err'); } };
 
 /* ---------- daily: low stock list to Purchase, delivery reminders to vendors (server sends each once a day) ---------- */
 function waDaily() {

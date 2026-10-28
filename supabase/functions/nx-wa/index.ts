@@ -55,7 +55,7 @@ Deno.serve(async (req) => {
     const isAdmin = ['superadmin', 'admin'].includes(me.role);
 
     const event = String(b.event || ''), id = String(b.id || ''), resend = b.resend === true;
-    if (!id && !['test', 'reply', 'media', 'delete'].includes(b.action)) return out({ error: 'Missing record id' }, 400);
+    if (!id && !['test', 'reply', 'media', 'delete', 'send_media', 'react', 'forward', 'start'].includes(b.action)) return out({ error: 'Missing record id' }, 400);
     if (resend && !isAdmin) return out({ error: 'Only Admin can resend' }, 403);
 
     const token = Deno.env.get('WA_TOKEN') || '', phoneId = Deno.env.get('WA_PHONE_ID') || '';
@@ -66,8 +66,35 @@ Deno.serve(async (req) => {
     };
     // context of the event being sent, stored with each chat message so it can be resent
     let ctx = { event: '', rid: '', ref: '' };
-    const keepOut = async (to: string, type: string, body: string, template: string, wamid: string, err: string, filename = '', name = '', replyTo = '') => {
-      await db.from('nx_wa_msgs').insert({ id: wamid || crypto.randomUUID(), wa: to, name: name || null, dir: 'out', type, body, template: template || null, filename: filename || null, status: err ? 'failed' : 'sent', error: err || null, by_name: await actor(), seen: true, event: ctx.event || null, rid: ctx.rid || null, ref: ctx.ref || null, reply_to: replyTo || null });
+    const keepOut = async (to: string, type: string, body: string, template: string, wamid: string, err: string, filename = '', name = '', replyTo = '', mediaId = '', mediaMime = '') => {
+      await db.from('nx_wa_msgs').insert({ id: wamid || crypto.randomUUID(), wa: to, name: name || null, dir: 'out', type, body, template: template || null, filename: filename || null, status: err ? 'failed' : 'sent', error: err || null, by_name: await actor(), seen: true, event: ctx.event || null, rid: ctx.rid || null, ref: ctx.ref || null, reply_to: replyTo || null, media_id: mediaId || null, media_mime: mediaMime || null });
+    };
+    // free-form messages (text, photo, file, forward, reaction) go only to a number that wrote to us in the last 24 hours (WhatsApp rule)
+    const chatOpen = async (to: string): Promise<string> => {
+      const { data: last } = await db.from('nx_wa_msgs').select('at').eq('wa', to).eq('dir', 'in').order('at', { ascending: false }).limit(1);
+      if (!last || !last.length) return 'This number has not written to us — only templates can be sent to it';
+      if (Date.now() - new Date(last[0].at).getTime() > 24 * 3600 * 1000) return 'No message from this number in the last 24 hours — WhatsApp allows only templates now';
+      return '';
+    };
+    const wamidOk = (x: unknown) => /^wamid\.[\w=+/-]+$/.test(String(x || ''));
+    // one WhatsApp message of any kind; returns [wamid, error]
+    const sendRaw = async (payload: Doc): Promise<[string, string]> => {
+      const r = await fetch(GRAPH + phoneId + '/messages', { method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify({ messaging_product: 'whatsapp', recipient_type: 'individual', ...payload }) });
+      const j = await r.json().catch(() => ({}));
+      return [j.messages?.[0]?.id || '', j.messages && j.messages.length ? '' : String(j.error?.error_data?.details || j.error?.message || r.status)];
+    };
+    const MEDIA_MAX: Record<string, number> = { image: 5 * 1024 * 1024, sticker: 500 * 1024, audio: 16 * 1024 * 1024, video: 16 * 1024 * 1024, document: 12 * 1024 * 1024 };
+    const uploadMedia = async (b64: string, mime: string, name: string, kind: string): Promise<{ id?: string; error?: string }> => {
+      let bytes: Uint8Array<ArrayBuffer>;
+      try { bytes = Uint8Array.from(atob(String(b64 || '')), (c) => c.charCodeAt(0)); } catch (_e) { return { error: 'File data is not valid' }; }
+      if (!bytes.length) return { error: 'File is empty' };
+      if (bytes.length > (MEDIA_MAX[kind] || MEDIA_MAX.document)) return { error: 'File is too large for WhatsApp (' + Math.round((MEDIA_MAX[kind] || MEDIA_MAX.document) / 1048576) + ' MB max for ' + kind + ')' };
+      const fd = new FormData();
+      fd.append('messaging_product', 'whatsapp');
+      fd.append('file', new Blob([bytes], { type: mime }), name);
+      const up = await fetch(GRAPH + phoneId + '/media', { method: 'POST', headers: { Authorization: 'Bearer ' + token }, body: fd });
+      const uj = await up.json().catch(() => ({}));
+      return uj.id ? { id: uj.id } : { error: 'Upload failed: ' + (uj.error?.message || up.status) };
     };
     const uploadPdf = async (b64: string, name: string): Promise<{ id?: string; error?: string }> => {
       const bytes = Uint8Array.from(atob(String(b64 || '')), (c) => c.charCodeAt(0));
@@ -108,6 +135,82 @@ Deno.serve(async (req) => {
       const wamid = j.messages?.[0]?.id || '';
       await keepOut(to, 'text', text, '', wamid, err, '', '', replyTo);
       return err ? out({ ok: false, error: err }) : out({ ok: true, id: wamid });
+    }
+    // Photo / file / video / voice note from the chat screen (the browser sends the file as base64)
+    if (b.action === 'send_media') {
+      if (!isAdmin) return out({ error: 'Only Admin can send files' }, 403);
+      if (!token || !phoneId) return out({ error: 'WhatsApp is not set up (WA_TOKEN / WA_PHONE_ID)' }, 400);
+      const to = String(b.to || '').replace(/\D/g, ''); if (!to) return out({ error: 'Number is required' }, 400);
+      const mime = String(b.mime || 'application/octet-stream').toLowerCase().slice(0, 100);
+      const kind = ['image', 'video', 'audio', 'document'].includes(String(b.kind)) ? String(b.kind) : mime.startsWith('image/') ? 'image' : mime.startsWith('video/') ? 'video' : mime.startsWith('audio/') ? 'audio' : 'document';
+      const filename = String(b.filename || (kind + '.' + (mime.split('/')[1] || 'bin'))).replace(/[\\/:*?"<>|]+/g, '_').slice(0, 120);
+      const caption = String(b.caption || '').trim().slice(0, 1024);
+      const replyTo = wamidOk(b.reply_to) ? String(b.reply_to) : '';
+      const closed = await chatOpen(to); if (closed) return out({ error: closed }, 400);
+      const up = await uploadMedia(b.data, mime, filename, kind);
+      if (!up.id) { await keepOut(to, kind, caption, '', '', up.error || 'Upload failed', filename); return out({ ok: false, error: up.error }); }
+      const media: Doc = { id: up.id };
+      if (kind === 'document') media.filename = filename;
+      if (caption && kind !== 'audio') media.caption = caption;
+      const [wamid, err] = await sendRaw({ to, type: kind, [kind]: media, ...(replyTo ? { context: { message_id: replyTo } } : {}) });
+      await keepOut(to, kind, caption, '', wamid, err, filename, '', replyTo, up.id, mime);
+      return err ? out({ ok: false, error: err }) : out({ ok: true, id: wamid, media_id: up.id });
+    }
+    // Emoji reaction on one message (empty emoji removes ours)
+    if (b.action === 'react') {
+      if (!isAdmin) return out({ error: 'Only Admin can react' }, 403);
+      if (!token || !phoneId) return out({ error: 'WhatsApp is not set up (WA_TOKEN / WA_PHONE_ID)' }, 400);
+      const mid = String(b.message_id || ''); if (!wamidOk(mid)) return out({ error: 'Message not found' }, 400);
+      const { data: row } = await db.from('nx_wa_msgs').select('wa, dir').eq('id', mid).maybeSingle();
+      if (!row) return out({ error: 'Message not found' }, 404);
+      const emoji = String(b.emoji || '').trim().slice(0, 8);
+      const closed = await chatOpen(row.wa); if (closed) return out({ error: closed }, 400);
+      const [wamid, err] = await sendRaw({ to: row.wa, type: 'reaction', reaction: { message_id: mid, emoji } });
+      if (err) return out({ ok: false, error: err });
+      // one reaction of ours per message: replace the old one
+      await db.from('nx_wa_msgs').delete().eq('type', 'reaction').eq('dir', 'out').eq('reply_to', mid);
+      if (emoji) await keepOut(row.wa, 'reaction', emoji, '', wamid, '', '', '', mid);
+      return out({ ok: true, id: wamid });
+    }
+    // Forward one message (text or attachment) to another chat
+    if (b.action === 'forward') {
+      if (!isAdmin) return out({ error: 'Only Admin can forward' }, 403);
+      if (!token || !phoneId) return out({ error: 'WhatsApp is not set up (WA_TOKEN / WA_PHONE_ID)' }, 400);
+      const to = String(b.to || '').replace(/\D/g, ''); const src = String(b.id || '');
+      if (!to || !src) return out({ error: 'Message and number are required' }, 400);
+      const { data: m } = await db.from('nx_wa_msgs').select('*').eq('id', src).maybeSingle();
+      if (!m) return out({ error: 'Message not found' }, 404);
+      const closed = await chatOpen(to); if (closed) return out({ error: closed }, 400);
+      let payload: Doc; let type = String(m.type || 'text');
+      if (m.media_id && ['image', 'video', 'audio', 'document', 'sticker'].includes(type)) {
+        const media: Doc = { id: m.media_id }; if (type === 'document' && m.filename) media.filename = m.filename; if (m.body && type !== 'audio' && type !== 'sticker') media.caption = m.body;
+        payload = { to, type, [type]: media };
+      } else {
+        const text = String(m.template ? (m.template + ': ' + (m.body || '')) : m.body || '').trim(); if (!text) return out({ error: 'Nothing to forward' }, 400);
+        type = 'text'; payload = { to, type: 'text', text: { body: text, preview_url: false } };
+      }
+      const [wamid, err] = await sendRaw(payload);
+      if (err && m.media_id) return out({ ok: false, error: 'Could not forward the attachment (WhatsApp keeps files for 30 days): ' + err });
+      await keepOut(to, type, type === 'text' ? String(payload.text.body) : String(m.body || ''), '', wamid, err, m.filename || '', '', '', m.media_id || '', m.media_mime || '');
+      return err ? out({ ok: false, error: err }) : out({ ok: true, id: wamid });
+    }
+    // Start a chat with a user or vendor: only an approved template can open a conversation
+    if (b.action === 'start') {
+      if (!isAdmin) return out({ error: 'Only Admin can start a chat' }, 403);
+      if (!token || !phoneId) return out({ error: 'WhatsApp is not set up (WA_TOKEN / WA_PHONE_ID)' }, 400);
+      const to = phone(b.to); if (!to) return out({ error: 'Enter a valid 10-digit mobile number' }, 400);
+      // the number must belong to a Nexus user or vendor: this function never messages arbitrary numbers
+      const people = [...(await db.from('nx_docs').select('data').eq('collection', 'users')).data || [], ...(await db.from('nx_docs').select('data').eq('collection', 'vendors')).data || []].map((r: { data: Doc }) => r.data);
+      const who = people.find((x) => phone(x.mobile) === to);
+      if (!who) return out({ error: 'This number is not a Nexus user or vendor' }, 400);
+      const tpl = String(b.template || Deno.env.get('WA_HELLO_TEMPLATE') || 'nexus_hello').replace(/[^a-z0-9_]/g, '').slice(0, 64);
+      const name = safe(who.name);
+      const tryLang = async (lang: string) => sendRaw({ to, type: 'template', template: { name: tpl, language: { code: lang }, components: [{ type: 'body', parameters: [{ type: 'text', text: name }] }] } });
+      let [wamid, err] = await tryLang('en');
+      if (err && /language|locale/i.test(err)) [wamid, err] = await tryLang('en_US');
+      if (err && /parameter|component/i.test(err)) [wamid, err] = await sendRaw({ to, type: 'template', template: { name: tpl, language: { code: 'en' } } });   // template without a name parameter
+      await keepOut(to, 'template', 'name: ' + name, tpl, wamid, err, '', String(who.name || ''));
+      return err ? out({ ok: false, error: err }) : out({ ok: true, id: wamid, wa: to });
     }
     // Delete messages or a whole chat from Nexus (WhatsApp does not allow deleting them from the other phone)
     if (b.action === 'delete') {
