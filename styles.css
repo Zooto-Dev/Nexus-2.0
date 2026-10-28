@@ -877,3 +877,7 @@ td, th { vertical-align: middle; }
 .hx-list tr.clk { cursor: pointer; }
 .hx-list tr.clk:hover td { background: #f3f7fb; }
 .hx-sum { max-width: 520px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* order page: all open steps */
+.ord-now{margin-bottom:10px}.ord-steps{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}.ord-step{display:inline-block;padding:4px 9px;border-radius:7px;background:#f3f4f6;border:1px solid var(--line,#e3e6e4);font-size:12.5px}.ord-step.late{background:#fef2f2;border-color:#fecaca}
+@media print{.ord-step{border:1px solid #999}}

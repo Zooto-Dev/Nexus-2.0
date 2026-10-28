@@ -542,6 +542,10 @@ VIEWS.order = {
     const proc = Store.get('processes', o.process_id);
     let h = '<div class="toolbar"><h1 style="margin:0">' + esc(o.no) + ' · ' + esc(o.customer_name) + '</h1>' + stHtml(st.label).replace('st ' + stCls(st.label), 'st ' + st.cls) + '<span class="grow"></span>' +
       (can('orders', 'edit') && !d.total ? '<a class="btn" href="#/punch/' + esc(o.id) + '">Edit</a>' : '') + '<button class="btn" data-act="print">Print</button></div>';
+    // where the order stands right now: every step that is open (several can run side by side), most late first
+    const openSteps = r && st.open ? r.order.map(sid => r.steps[sid]).filter(s => s.status === 'Pending' || s.status === 'Late').sort((a, b) => (b.status === 'Late') - (a.status === 'Late') || (b.delayMinutes || 0) - (a.delayMinutes || 0) || a.planned - b.planned) : [];
+    if (openSteps.length) h += '<div class="panel ord-now"><b>Current status</b> · ' + openSteps.length + ' step(s) open<div class="ord-steps">' +
+      openSteps.map(s => '<span class="ord-step ' + (s.status === 'Late' ? 'late' : '') + '"><b>' + esc(s.name) + '</b> · ' + esc(s.doer || '') + ' · ' + fmtDT(s.planned) + (s.status === 'Late' ? ' · <span class="late-txt">Late ' + fmtDelay(s.delayMinutes) + '</span>' : ' · <span class="pend-txt">Pending</span>') + '</span>').join('') + '</div></div>';
     if (can('orders', 'edit') && st.label !== 'Dispatched') h += '<div class="toolbar noprint"><span class="muted small">Priority</span>' + seg('opri', [{ v: '', l: 'Normal' }, { v: 'Urgent', l: 'Urgent' }, { v: 'On Hold', l: 'On Hold' }, { v: 'Cancelled', l: 'Cancel order' }], o.priority || '') + '</div>';
     h += '<div class="grid2"><div>';
     h += '<div class="panel"><table class="kv">' + [['Time stamp', fmtDT(o.created_at)], ['Order date', fmtD(o.order_date)], ['Buyer PO no', o.buyer_po], ['PO expiry date', fmtD(o.po_expiry_date)], ['Tooling / Mould no', o.tooling_no], ['Category', o.category], ['Channel', o.channel], ['Priority', o.priority || 'Normal'], ['Remarks', o.remarks], ['Punched by', o.created_by], ['FMS flow', proc ? proc.name + ' v' + proc.version : '—']]

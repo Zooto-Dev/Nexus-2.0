@@ -718,10 +718,11 @@ VIEWS.grn = {
         h += '</div><div class="card-f"><span class="grn-no">GRN No: <b>' + (match && !badRej ? esc(iw.grn_no || '') : '—') + '</b></span><span class="small muted">Invoice Qty ' + qtyFmt(iw.qty) + ' · Total ' + qtyFmt(tot.total) + '</span><span class="grow"></span><button class="btn primary" data-act="grn-save"' + (match && !badRej ? '' : ' disabled') + '>Save GRN</button><span id="grnMsg" class="small">' + (badRej ? '<span class="late-txt">Reject is more than the qty received against the PO.</span>' : '') + '</span></div></div>';
       } else h += '</div></div>';
     }
-    const nl = ready.filter(i => (!U.ven || i.vendor === U.ven) && (!U.po || i.po_no === U.po) && (!U.inw || i.id === U.inw));
+    // GRN notes from the invoice approval, shown on top: only the invoice being posted (before an invoice is picked, the vendor / PO ones)
+    const nl = iw ? [iw] : ready.filter(i => (!U.ven || i.vendor === U.ven) && (!U.po || i.po_no === U.po));
     const notes = []; nl.forEach(i => (i.grn_notes || []).forEach((n, k) => notes.push({ i, n, k })));
-    h += '<h2>GRN notes</h2><div class="tbl-wrap"><table><tr><th>Gate Entry</th><th>GRN No</th><th>Vendor</th><th>PO No</th><th>Invoice No</th><th class="num">Sr</th><th>Item name on invoice</th><th>Item Code</th><th>Item Name</th><th>Note</th><th>Approved By</th></tr>' +
-      (notes.length ? notes.map(({ i, n, k }) => '<tr' + (k === 0 ? ' class="bomfirst"' : '') + '><td>' + esc(i.no) + '</td><td>' + esc(i.grn_no || '') + '</td><td>' + esc(i.vendor) + '</td><td>' + esc(i.po_no) + '</td><td>' + esc(i.bill_no) + '</td><td class="num">' + (k + 1) + '</td><td>' + esc(n.inv_item) + '</td><td><b>' + esc(n.code) + '</b></td><td>' + esc((matBy(n.code) || {}).name || '') + '</td><td>' + esc(n.note || '') + '</td><td>' + esc(i.inv_by || '') + '</td></tr>').join('') : '<tr><td colspan="11" class="empty">No GRN notes</td></tr>') + '</table></div>';
+    h = '<h2 style="margin-top:0">GRN notes' + (iw ? ' · Invoice ' + esc(iw.bill_no) + ' · ' + esc(iw.vendor) : '') + '</h2><div class="tbl-wrap"><table><tr><th>Gate Entry</th><th>GRN No</th><th>Vendor</th><th>PO No</th><th>Invoice No</th><th class="num">Sr</th><th>Item name on invoice</th><th>Item Code</th><th>Item Name</th><th>Note</th><th>Approved By</th></tr>' +
+      (notes.length ? notes.map(({ i, n, k }) => '<tr' + (k === 0 ? ' class="bomfirst"' : '') + '><td>' + esc(i.no) + '</td><td>' + esc(i.grn_no || '') + '</td><td>' + esc(i.vendor) + '</td><td>' + esc(i.po_no) + '</td><td>' + esc(i.bill_no) + '</td><td class="num">' + (k + 1) + '</td><td>' + esc(n.inv_item) + '</td><td><b>' + esc(n.code) + '</b></td><td>' + esc((matBy(n.code) || {}).name || '') + '</td><td>' + esc(n.note || '') + '</td><td>' + esc(i.inv_by || '') + '</td></tr>').join('') : '<tr><td colspan="11" class="empty">No GRN notes</td></tr>') + '</table></div>' + h;
     const m = setMain(h);
     m.addEventListener('change', e => {
       const t = e.target;
