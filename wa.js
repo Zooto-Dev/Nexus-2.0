@@ -313,7 +313,8 @@ VIEWS.wainbox = {
           (m.error ? '<div class="err">' + esc(m.error) + '</div>' : '') +
           (m.status === 'failed' && m.event && m.rid && isAdminRole() ? '<div><a data-act="wa-resend" data-e="' + esc(m.event) + '" data-id="' + esc(m.rid) + '">Resend</a></div>' : '') +
           '<div class="meta">' + (m.by_name ? esc(m.by_name) + ' · ' : '') + fmtDT(m.at) + tick(m) + '</div>' + reactHtml(m) + '</div>').join('') + '</div>' +
-        (open || !c.wa ? '' : '<div class="wai-note">' + (c.lastIn ? 'Reply closed — no message from this number in the last 24 hours. Only a template can be sent now (New chat).' : 'Reply closed — this number has not written to us.') + '</div>') +
+        (open || !c.wa ? '' : '<div class="wai-note">' + (c.lastIn ? 'Reply closed — no message from this number in the last 24 hours.' : 'Reply closed — this number has never written to us.') + ' WhatsApp allows only a template now; once they reply, photos, files and free text open for 24 hours. ' +
+          (waiPeople().some(p => '91' + p.mobile === c.wa) ? '<button class="btn sm" data-act="wai-hello" data-wa="' + esc(c.wa) + '">Send hello template</button>' : '<span class="muted">(not a Nexus user or vendor, so no template can go)</span>') + '</div>') +
         (WAI.reply && byId.get(WAI.reply) && open ? '<div class="wai-rq">' + quote(WAI.reply) + '<a data-act="wai-reply-x">×</a></div>' : '') +
         (!c.wa ? '' : '<div class="wai-f">' +
           '<button class="btn sm ghost" data-act="wai-attach" title="Photo, PDF, video or file"' + (open ? '' : ' disabled') + '>📎</button><button class="btn sm ghost" data-act="wai-camera" title="Take a photo"' + (open ? '' : ' disabled') + '>📷</button><button class="btn sm ghost" data-act="wai-doc" title="Send a Nexus document (PO / Job Card / GRN)"' + (open ? '' : ' disabled') + '>📄</button>' +
@@ -489,6 +490,16 @@ ACTIONS['wai-new'] = () => {
     })();
     return '';
   });
+};
+// hello template straight from a closed chat (the number must be a Nexus user or vendor)
+ACTIONS['wai-hello'] = async el => {
+  const wa = el.dataset.wa; const p = waiPeople().find(x => '91' + x.mobile === wa); if (!p) return;
+  el.disabled = true;
+  const r = await waiCall({ action: 'start', to: p.mobile });
+  if (r.err) { el.disabled = false; flash('Not sent: ' + esc(r.err), 'err'); return; }
+  audit('wa.start', '+' + wa, p.name + ' (' + p.kind + ')');
+  if (!WAI.msgs.some(x => x.id === r.data.id)) WAI.msgs.push({ id: r.data.id || 'tmp-' + Date.now(), wa, dir: 'out', type: 'template', template: 'nexus_hello', body: 'name: ' + p.name, status: 'sent', by_name: ME.name, seen: true, at: new Date().toISOString() });
+  flash('Template sent to ' + esc(p.name) + ' — the chat opens when they reply.'); VIEWS.wainbox.render();
 };
 /* ---- unread ---- */
 ACTIONS['wai-unread'] = async () => {
