@@ -107,14 +107,24 @@ Deno.serve(async (req) => {
       return uj.id ? { id: uj.id } : { error: 'PDF upload failed: ' + (uj.error?.message || up.status) };
     };
     const sendTpl = async (m: Msg, media: string, fileName: string): Promise<string> => {
-      const comp: Doc[] = [];
-      if (m.doc) comp.push({ type: 'header', parameters: [{ type: 'document', document: { id: media, filename: fileName } }] });
-      // named templates send parameter_name; the older positional ones ({{1}}, {{2}}) have an empty key
-      comp.push({ type: 'body', parameters: m.params.map(([k, v]) => (k && !/^\d+$/.test(k) ? { type: 'text', parameter_name: k, text: v } : { type: 'text', text: v })) });
-      const r = await fetch(GRAPH + phoneId + '/messages', { method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify({ messaging_product: 'whatsapp', to: m.to, type: 'template', template: { name: m.template, language: { code: 'en' }, components: comp } }) });
-      const j = await r.json().catch(() => ({}));
-      const err = j.messages && j.messages.length ? '' : String(j.error?.error_data?.details || j.error?.message || r.status);
-      await keepOut(m.to, 'template', m.params.map(([k, v]) => k + ': ' + v).join(' | '), m.template, j.messages?.[0]?.id || '', err, m.doc ? fileName : '', m.name).catch(() => {});
+      const call = async (params: [string, string][]) => {
+        const comp: Doc[] = [];
+        if (m.doc) comp.push({ type: 'header', parameters: [{ type: 'document', document: { id: media, filename: fileName } }] });
+        // named templates send parameter_name; the older positional ones ({{1}}, {{2}}) have an empty key
+        comp.push({ type: 'body', parameters: params.map(([k, v]) => (k && !/^\d+$/.test(k) ? { type: 'text', parameter_name: k, text: v } : { type: 'text', text: v })) });
+        const r = await fetch(GRAPH + phoneId + '/messages', { method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify({ messaging_product: 'whatsapp', to: m.to, type: 'template', template: { name: m.template, language: { code: 'en' }, components: comp } }) });
+        const j = await r.json().catch(() => ({}));
+        return { j, err: j.messages && j.messages.length ? '' : String(j.error?.error_data?.details || j.error?.message || r.status) };
+      };
+      let params = m.params; let { j, err } = await call(params);
+      // the template in Meta has fewer {{n}} than we send (someone made it shorter): keep the first ones, join the rest into the last
+      const want = /expected number of params \((\d+)\)/.exec(err);
+      if (want && +want[1] > 0 && +want[1] < params.length) {
+        const n = +want[1]; const head = params.slice(0, n - 1); const tail = params.slice(n - 1).map(([, v]) => v).filter(Boolean).join(' - ');
+        params = head.concat([[String(n), tail]]).map(([k, v], i) => [/^\d+$/.test(k) || !k ? String(i + 1) : k, v]) as [string, string][];
+        ({ j, err } = await call(params));
+      }
+      await keepOut(m.to, 'template', params.map(([k, v]) => k + ': ' + v).join(' | '), m.template, j.messages?.[0]?.id || '', err, m.doc ? fileName : '', m.name).catch(() => {});
       return err;
     };
 
