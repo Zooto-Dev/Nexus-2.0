@@ -70,38 +70,47 @@ function eaMomHtml() {
     const pts = EA_UI.pts.length ? EA_UI.pts : (EA_UI.pts = [{ task: '', doer: '', due: '' }]);
     h += '<div class="panel" id="momForm"><table class="jckv">' +
       '<tr><td class="k">Meeting *</td><td class="v"><input id="mmTitle" value="' + esc(EA_UI.title || '') + '"></td></tr>' +
-      '<tr><td class="k">Date &amp; time *</td><td class="v"><input id="mmAt" type="datetime-local" value="' + esc(EA_UI.at || nowIso().slice(0, 16)) + '"></td></tr>' +
+      '<tr><td class="k">Date *</td><td class="v"><input id="mmDate" type="date" value="' + esc(EA_UI.date || todayYmd()) + '"></td></tr>' +
+      '<tr><td class="k">Time *</td><td class="v"><input id="mmTime" type="time" value="' + esc(EA_UI.time || nowIso().slice(11, 16)) + '"></td></tr>' +
       '<tr><td class="k">Attendees *</td><td class="v"><div class="chips">' + eaUsers().map(n => '<label class="chip"><input type="checkbox" class="mmAtt" value="' + esc(n) + '"' + ((EA_UI.att || []).includes(n) ? ' checked' : '') + '>' + esc(n) + '</label>').join('') + '</div></td></tr>' +
-      '<tr><td class="k">Notes</td><td class="v"><textarea id="mmNotes" rows="5">' + esc(EA_UI.notes || '') + '</textarea></td></tr></table>' +
-      '<h2>Action points</h2><div class="tbl-wrap"><table class="nopage nofilter"><tr><th class="num">Sr</th><th>Action point</th><th>Doer</th><th>Due date</th><th></th></tr>' +
+      '<tr><td class="k">Agenda *</td><td class="v"><textarea id="mmAgenda" rows="3">' + esc(EA_UI.agenda || '') + '</textarea></td></tr>' +
+      '<tr><td class="k">KDP (Key Discussion Points) *</td><td class="v"><textarea id="mmKdp" rows="6">' + esc(EA_UI.kdp || '') + '</textarea></td></tr></table>' +
+      '<h2>Action Items</h2><div class="tbl-wrap"><table class="nopage nofilter"><tr><th class="num">Sr</th><th>Action item</th><th>Doer</th><th>Due date</th><th></th></tr>' +
       pts.map((p, i) => '<tr data-pt="' + i + '"><td class="num">' + (i + 1) + '</td><td><input data-pk="task" value="' + esc(p.task) + '"></td><td><select data-pk="doer">' + doerOpts(clDoerList(), p.doer) + '</select></td><td><input data-pk="due" type="date" value="' + esc(p.due) + '"></td><td><button class="btn ghost sm" data-act="ea-pt-rm" data-i="' + i + '">×</button></td></tr>').join('') +
-      '</table></div><div class="toolbar"><button class="btn sm" data-act="ea-pt-add">+ Action point</button><span class="grow"></span><button class="btn primary" data-act="ea-mom-save">Save MOM</button><button class="btn" data-act="ea-cancel">Cancel</button><span id="eaMsg" class="small late-txt"></span></div></div>';
+      '</table></div><div class="toolbar"><button class="btn sm" data-act="ea-pt-add">+ Action item</button></div>' +
+      '<table class="jckv"><tr><td class="k">Conclusion *</td><td class="v"><textarea id="mmConc" rows="3">' + esc(EA_UI.conc || '') + '</textarea></td></tr></table>' +
+      '<div class="toolbar"><span class="grow"></span><button class="btn primary" data-act="ea-mom-save">Save MOM</button><button class="btn" data-act="ea-cancel">Cancel</button><span id="eaMsg" class="small late-txt"></span></div></div>';
   }
-  h += '<div class="tbl-wrap"><table class="bomflat"><tr><th>No</th><th>Date &amp; time</th><th>Meeting</th><th>Attendees</th><th>Action points</th><th>Prepared by</th><th class="noprint"></th></tr>' +
+  h += '<div class="tbl-wrap"><table class="bomflat"><tr><th>No</th><th>Date</th><th>Time</th><th>Meeting</th><th>Attendees</th><th>Action items</th><th>Prepared by</th><th class="noprint"></th></tr>' +
     (moms.length ? moms.map(m => { const st = (m.points || []).map(p => eaPointStatus(Store.get('checklist', p.cl_id))); const done = st.filter(x => x.status === 'Done').length, late = st.filter(x => x.status === 'Overdue').length;
-      return '<tr' + (EA_UI.open === m.id ? ' class="cur"' : '') + '><td class="nowrap"><b>' + esc(m.no) + '</b></td><td class="nowrap">' + fmtDT(m.at) + '</td><td>' + esc(m.title) + '</td><td>' + esc((m.attendees || []).join(', ')) + '</td><td>' + done + ' / ' + st.length + ' done' + (late ? ' · <span class="late-txt">' + late + ' late</span>' : '') + '</td><td>' + esc(m.by) + '</td><td class="noprint nowrap"><button class="btn sm" data-act="ea-mom-open" data-id="' + esc(m.id) + '">' + (EA_UI.open === m.id ? 'Close' : 'Open') + '</button></td></tr>' +
-        (EA_UI.open === m.id ? '<tr class="inline-form"><td colspan="7">' + eaMomDetail(m, st) + '</td></tr>' : ''); }).join('')
-      : '<tr><td colspan="7" class="empty">No MOM yet</td></tr>') + '</table></div>';
+      return '<tr' + (EA_UI.open === m.id ? ' class="cur"' : '') + '><td class="nowrap"><b>' + esc(m.no) + '</b></td><td class="nowrap">' + fmtD(m.at) + '</td><td class="nowrap">' + String(fmtDT(m.at)).slice(-5) + '</td><td>' + esc(m.title) + '</td><td>' + esc((m.attendees || []).join(', ')) + '</td><td>' + done + ' / ' + st.length + ' done' + (late ? ' · <span class="late-txt">' + late + ' late</span>' : '') + '</td><td>' + esc(m.by) + '</td><td class="noprint nowrap"><button class="btn sm" data-act="ea-mom-open" data-id="' + esc(m.id) + '">' + (EA_UI.open === m.id ? 'Close' : 'Open') + '</button></td></tr>' +
+        (EA_UI.open === m.id ? '<tr class="inline-form"><td colspan="8">' + eaMomDetail(m, st) + '</td></tr>' : ''); }).join('')
+      : '<tr><td colspan="8" class="empty">No MOM yet</td></tr>') + '</table></div>';
   return h;
 }
 function eaMomDetail(m, st) {
-  return '<div class="panel"><table class="kv"><tr><td class="muted" style="width:120px">Meeting</td><td><b>' + esc(m.title) + '</b> · ' + fmtDT(m.at) + '</td></tr><tr><td class="muted">Attendees</td><td>' + esc((m.attendees || []).join(', ')) + '</td></tr><tr><td class="muted">Notes</td><td style="white-space:pre-wrap">' + esc(m.notes || '') + '</td></tr></table>' +
-    '<div class="tbl-wrap" style="margin-top:8px"><table class="nopage nofilter"><tr><th class="num">Sr</th><th>Action point</th><th>Doer</th><th>Due date</th><th>Status</th><th>Done on</th><th>By</th></tr>' +
-    (m.points || []).map((p, i) => { const s = st[i] || eaPointStatus(Store.get('checklist', p.cl_id)); return '<tr><td class="num">' + (i + 1) + '</td><td>' + esc(p.task) + '</td><td>' + esc(p.doer) + '</td><td class="nowrap">' + fmtD(p.due) + '</td><td><span class="st ' + (s.status === 'Done' ? 'Done' : s.status === 'Overdue' ? 'Late' : 'Pending') + '">' + (s.status === 'Overdue' ? 'Late' : s.status) + '</span></td><td class="nowrap">' + (s.at ? fmtDT(s.at) : '') + '</td><td>' + esc(s.by || '') + '</td></tr>'; }).join('') + '</table></div></div>';
+  const kv = (k, v, pre) => '<tr><td class="muted" style="width:150px;vertical-align:top">' + k + '</td><td' + (pre ? ' style="white-space:pre-wrap"' : '') + '>' + v + '</td></tr>';
+  return '<div class="panel mom-doc"><table class="kv">' +
+    kv('Meeting', '<b>' + esc(m.title) + '</b>') + kv('Date', fmtD(m.at)) + kv('Time', String(fmtDT(m.at)).slice(-5)) +
+    kv('Attendees', esc((m.attendees || []).join(', '))) + kv('Agenda', esc(m.agenda || m.notes || ''), true) + kv('KDP', esc(m.kdp || ''), true) + '</table>' +
+    '<h2>Action Items</h2><div class="tbl-wrap"><table class="nopage nofilter"><tr><th class="num">Sr</th><th>Action item</th><th>Doer</th><th>Due date</th><th>Status</th><th>Done on</th><th>By</th></tr>' +
+    ((m.points || []).length ? (m.points || []).map((p, i) => { const s = st[i] || eaPointStatus(Store.get('checklist', p.cl_id)); return '<tr><td class="num">' + (i + 1) + '</td><td>' + esc(p.task) + '</td><td>' + esc(p.doer) + '</td><td class="nowrap">' + fmtD(p.due) + '</td><td><span class="st ' + (s.status === 'Done' ? 'Done' : s.status === 'Overdue' ? 'Late' : 'Pending') + '">' + (s.status === 'Overdue' ? 'Late' : s.status) + '</span></td><td class="nowrap">' + (s.at ? fmtDT(s.at) : '') + '</td><td>' + esc(s.by || '') + '</td></tr>'; }).join('') : '<tr><td colspan="7" class="empty">No action items</td></tr>') + '</table></div>' +
+    '<table class="kv" style="margin-top:8px">' + kv('Conclusion', esc(m.conclusion || ''), true) + kv('Prepared by', esc(m.by) + ' · ' + fmtDT(m.created_at)) + '</table></div>';
 }
-function eaKeepMom() { EA_UI.title = ($('#mmTitle') || {}).value; EA_UI.at = ($('#mmAt') || {}).value; EA_UI.notes = ($('#mmNotes') || {}).value; EA_UI.att = $$('.mmAtt:checked').map(x => x.value); EA_UI.pts = $$('tr[data-pt]').map(tr => ({ task: $('[data-pk="task"]', tr).value, doer: $('[data-pk="doer"]', tr).value, due: $('[data-pk="due"]', tr).value })); }
-ACTIONS['ea-mom-new'] = () => { EA_UI.form = 'mom'; EA_UI.pts = []; EA_UI.title = ''; EA_UI.notes = ''; EA_UI.att = []; EA_UI.at = ''; VIEWS.ea.render(); };
+function eaKeepMom() { EA_UI.title = ($('#mmTitle') || {}).value; EA_UI.date = ($('#mmDate') || {}).value; EA_UI.time = ($('#mmTime') || {}).value; EA_UI.agenda = ($('#mmAgenda') || {}).value; EA_UI.kdp = ($('#mmKdp') || {}).value; EA_UI.conc = ($('#mmConc') || {}).value; EA_UI.att = $$('.mmAtt:checked').map(x => x.value); EA_UI.pts = $$('tr[data-pt]').map(tr => ({ task: $('[data-pk="task"]', tr).value, doer: $('[data-pk="doer"]', tr).value, due: $('[data-pk="due"]', tr).value })); }
+ACTIONS['ea-mom-new'] = () => { EA_UI.form = 'mom'; EA_UI.pts = []; EA_UI.title = ''; EA_UI.agenda = ''; EA_UI.kdp = ''; EA_UI.conc = ''; EA_UI.att = []; EA_UI.date = ''; EA_UI.time = ''; EA_UI.momMtg = null; VIEWS.ea.render(); };
 ACTIONS['ea-mom-open'] = el => { EA_UI.open = EA_UI.open === el.dataset.id ? null : el.dataset.id; VIEWS.ea.render(); };
 ACTIONS['ea-pt-add'] = () => { eaKeepMom(); EA_UI.pts.push({ task: '', doer: '', due: '' }); VIEWS.ea.render(); };
 ACTIONS['ea-pt-rm'] = el => { eaKeepMom(); EA_UI.pts.splice(+el.dataset.i, 1); VIEWS.ea.render(); };
 ACTIONS['ea-mom-save'] = () => {
   if (!requirePerm('ea', 'edit')) return;
   eaKeepMom(); const U = EA_UI; const msg = t => { $('#eaMsg').textContent = t; };
-  if (!U.title.trim()) return msg('Enter the meeting name.'); if (!U.at) return msg('Enter date and time.'); if (!U.att.length) return msg('Tick the attendees.');
+  if (!U.title.trim()) return msg('Enter the meeting name.'); if (!U.date || !U.time) return msg('Enter date and time.'); if (!U.att.length) return msg('Tick the attendees.');
+  if (!U.agenda.trim()) return msg('Enter the agenda.'); if (!U.kdp.trim()) return msg('Enter the key discussion points.'); if (!U.conc.trim()) return msg('Enter the conclusion.');
   const pts = U.pts.filter(p => p.task.trim() || p.doer || p.due);
   const bad = pts.find(p => !p.task.trim() || !p.doer || !p.due); if (bad) return msg('Every action point needs the point, a doer and a due date.');
   const past = pts.find(p => p.due < todayYmd()); if (past) return msg('A due date cannot be in the past.');
-  const m = { id: uid(), no: nextNo('moms', 'MOM'), title: U.title.trim(), at: new Date(U.at).toISOString(), attendees: U.att, notes: U.notes.trim(), points: [], by: ME.name, created_at: nowIso() };
+  const m = { id: uid(), no: nextNo('moms', 'MOM'), title: U.title.trim(), at: new Date(U.date + 'T' + U.time + ':00').toISOString(), attendees: U.att, agenda: U.agenda.trim(), kdp: U.kdp.trim(), conclusion: U.conc.trim(), points: [], by: ME.name, created_at: nowIso() };
   pts.forEach(p => { const cl = eaDelegate(p.task, p.doer, p.due, 'mom', m.no); m.points.push({ task: p.task.trim(), doer: p.doer, due: p.due, cl_id: cl.id }); });
   if (U.momMtg) { const mt = Store.get('meetings', U.momMtg); if (mt) { mt.mom_id = m.id; mt.status = 'Held'; Store.put('meetings', mt); m.meeting_no = mt.no; } U.momMtg = null; }
   Store.put('moms', m); audit('mom.create', m.no, m.title + ' · ' + m.attendees.length + ' attendee(s) · ' + m.points.length + ' action point(s)');
@@ -217,7 +226,7 @@ ACTIONS['ea-mtg-cancel'] = async el => {
   if (m.cal_id && CLOUD && SB) { const r = await eaMail({ action: 'calendar', op: 'cancel', id: m.cal_id }); if (r.err && !/not found/i.test(r.err)) { flash('Google Calendar said: ' + esc(r.err), 'err'); return; } }
   m.status = 'Cancelled'; m.cancelled_by = ME.name; m.cancelled_at = nowIso(); Store.put('meetings', m); audit('meeting.cancel', m.no, m.title); flash(esc(m.no) + ' cancelled, attendees notified.'); VIEWS.ea.render();
 };
-ACTIONS['ea-mtg-mom'] = el => { const m = Store.get('meetings', el.dataset.id); if (!m) return; EA_UI.tab = 'mom'; EA_UI.form = 'mom'; EA_UI.pts = []; EA_UI.title = m.title; EA_UI.at = m.start.slice(0, 16); EA_UI.notes = m.agenda ? 'Agenda: ' + m.agenda + '\n' : ''; EA_UI.att = (m.attendees || []).map(a => a.name).filter(n => eaUsers().includes(n)); EA_UI.momMtg = m.id; VIEWS.ea.render(); };
+ACTIONS['ea-mtg-mom'] = el => { const m = Store.get('meetings', el.dataset.id); if (!m) return; EA_UI.tab = 'mom'; EA_UI.form = 'mom'; EA_UI.pts = []; EA_UI.title = m.title; EA_UI.date = ymdOf(new Date(m.start)); EA_UI.time = String(fmtDT(m.start)).slice(-5); EA_UI.agenda = m.agenda || ''; EA_UI.kdp = ''; EA_UI.conc = ''; EA_UI.att = (m.attendees || []).map(a => a.name).filter(n => eaUsers().includes(n)); EA_UI.momMtg = m.id; VIEWS.ea.render(); };
 ACTIONS['ea-mtg-mom-open'] = el => { EA_UI.tab = 'mom'; EA_UI.open = el.dataset.id; VIEWS.ea.render(); };
 // events made straight in Google Calendar (next 30 days) come in as meetings too
 ACTIONS['ea-mtg-sync'] = async el => {
