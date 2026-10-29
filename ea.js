@@ -66,12 +66,14 @@ const eaUsers = () => Store.all('users').filter(u => u.active !== false).map(u =
 /* ---- compact people picker: chosen ones as chips, a search box, a short list to pick from ---- */
 EA_UI.pick = {};   // id → { options:[{v,l,sub}], sel:[v…], q }
 function eaPicker(id, options, selected) {
-  const P = EA_UI.pick[id] = EA_UI.pick[id] || { sel: [], q: '', mode: 'all' }; P.options = options; if (selected) { P.sel = selected.slice(); P.mode = 'all'; }
+  const P = EA_UI.pick[id] = EA_UI.pick[id] || { sel: [], q: '' }; P.options = options; if (selected) P.sel = selected.slice();
   const q = norm(P.q); const byV = new Map(options.map(o => [o.v, o]));
-  // "Present today": only the people who punched in today (from the payroll attendance), matched to this list by name or employee code
-  const pool = P.mode === 'present' && EA_PRESENT.list ? eaPresentOptions(options) : options;
+  // the list is today's present people (punched in at the gate, from the payroll attendance); everyone else is still found by search
+  if (CLOUD && !EA_PRESENT.list && !EA_PRESENT.msg) eaLoadPresent();
+  const present = EA_PRESENT.list ? eaPresentOptions(options) : [];
+  const pool = q ? options : (present.length ? present : options);
   const list = pool.filter(o => !P.sel.includes(o.v) && (!q || norm(o.l + ' ' + (o.sub || '')).includes(q))).slice(0, 12);
-  const presentBar = CLOUD ? '<div class="ea-pm">' + seg('pm_' + id, [{ v: 'all', l: 'All' }, { v: 'present', l: 'Present today' + (EA_PRESENT.list && P.mode === 'present' ? ' (' + pool.length + ')' : '') }], P.mode) + (P.mode === 'present' && EA_PRESENT.list ? '<span class="small muted">' + EA_PRESENT.count + ' punched in on ' + fmtD(EA_PRESENT.date) + (EA_PRESENT.unmatched ? ' · ' + EA_PRESENT.unmatched + ' not in this list' : '') + ' <a data-act="ea-pick-all" data-pick="' + esc(id) + '">Add all</a></span>' : P.mode === 'present' ? '<span class="small muted">' + esc(EA_PRESENT.msg || 'Loading…') + '</span>' : '') + '</div>' : '';
+  const presentBar = !CLOUD ? '' : '<div class="ea-pm small muted">' + (EA_PRESENT.list ? (present.length ? '<b>' + present.length + ' present today</b> (' + EA_PRESENT.count + ' punched in on ' + fmtD(EA_PRESENT.date) + ') <a data-act="ea-pick-all" data-pick="' + esc(id) + '">Add all present</a> · search for anyone else' : 'Nobody from this list has punched in today (' + EA_PRESENT.count + ' punched in) · showing everyone') : esc(EA_PRESENT.msg || 'Checking today\'s attendance…')) + '</div>';
   return '<div class="ea-pick" data-pick="' + esc(id) + '">' + presentBar + '<div class="ea-sel">' + (P.sel.length ? P.sel.map(v => { const o = byV.get(v) || { l: v }; return '<span class="chip on">' + esc(o.l) + ' <a data-act="ea-pick-rm" data-pick="' + esc(id) + '" data-v="' + esc(v) + '" title="Remove">×</a></span>'; }).join('') : '<span class="muted small">Nobody picked yet</span>') + '</div>' +
     '<input class="ea-pq" data-pick="' + esc(id) + '" placeholder="Type a name to search…" value="' + esc(P.q) + '">' +
     '<div class="ea-pl">' + (list.length ? list.map(o => '<a data-act="ea-pick-add" data-pick="' + esc(id) + '" data-v="' + esc(o.v) + '">' + esc(o.l) + (o.sub ? ' <span class="muted small">' + esc(o.sub) + '</span>' : '') + '</a>').join('') : '<span class="muted small">' + (q ? 'No match' : 'All picked') + '</span>') + '</div></div>';
@@ -81,7 +83,7 @@ const eaPicked = id => ((EA_UI.pick[id] || {}).sel || []).slice();
 const EA_PRESENT = { list: null, date: '', count: 0, unmatched: 0, msg: '', at: 0 };
 async function eaLoadPresent() {
   if (EA_PRESENT.list && Date.now() - EA_PRESENT.at < 10 * 60000) return;
-  EA_PRESENT.msg = 'Loading…';
+  EA_PRESENT.msg = 'Checking today\'s attendance…';
   try {
     const { data, error } = await SB.functions.invoke('nx-hr', { body: { action: 'present' } });
     let msg = data && data.error; if (error) { msg = error.message; try { const j = await error.context.json(); msg = j.error || msg; } catch (e) { } }
@@ -104,7 +106,6 @@ function eaPresentOptions(options) {
   return out;
 }
 ACTIONS['ea-pick-all'] = el => { const P = EA_UI.pick[el.dataset.pick]; if (!P) return; eaPresentOptions(P.options).forEach(o => { if (!P.sel.includes(o.v)) P.sel.push(o.v); }); eaRefreshPickers(); };
-document.addEventListener('segchange', e => { const s = e.target.dataset.seg || ''; if (!s.startsWith('pm_')) return; const P = EA_UI.pick[s.slice(3)]; if (!P) return; P.mode = e.detail; P.q = ''; if (P.mode === 'present') eaLoadPresent(); eaRefreshPickers(); });
 ACTIONS['ea-pick-add'] = el => { const P = EA_UI.pick[el.dataset.pick]; if (!P || P.sel.includes(el.dataset.v)) return; P.sel.push(el.dataset.v); P.q = ''; eaRefreshPickers(); };
 ACTIONS['ea-pick-rm'] = el => { const P = EA_UI.pick[el.dataset.pick]; if (!P) return; P.sel = P.sel.filter(v => v !== el.dataset.v); eaRefreshPickers(); };
 // redraw only the pickers, so the rest of the form keeps what was typed
