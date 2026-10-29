@@ -263,7 +263,7 @@ Deno.serve(async (req) => {
         { to, name: '', template: 'low_stock_alert', params: [['1', 'EVA-10 (Current 10 PAIR / Min 100 PAIR)']] },
         { to, name: '', template: 'po_revised_vendor', params: [['old_po_number', 'TEST/PO/001'], ['po_number', 'TEST/PO/002'], ['total_amount', '1100.00'], ['delivery_date', '05-Oct-2026']], doc: true },
         { to, name: '', template: 'vendor_delivery_due', params: [['1', 'Test Vendor'], ['2', 'EVA-10 (qty 100, due 05-Oct-2026)'], ['3', 'TEST/PO/001'], ['4', '05-Oct-2026']] },
-        { to, name: '', template: 'nexus_followup', params: [['1', 'Nexus Test'], ['2', 'Please share the quotation for EVA sheets'], ['3', 'EA']] },
+        { to, name: '', template: 'nexus_followup', params: [['1', 'Nexus Test'], ['2', 'TEST/PO/001'], ['3', 'Delivery of EVA sheets due on 05-Nov-2026']] },
         { to, name: '', template: 'nexus_daily_brief', params: [['1', 'Nexus'], ['2', 'Meetings today: 2 | Late tasks: 3 | Decisions pending: 1 | Follow-ups today: 2']] }
       ];
       const up = await uploadPdf(b.pdf, 'Nexus_Test.pdf');
@@ -418,7 +418,7 @@ Deno.serve(async (req) => {
       const people = [...users, ...(await all('vendors')), ...(await all('contacts'))];
       const who = people.find((x) => norm(x.name) === norm(f.to_name) || (f.mobile && phone(x.mobile) === phone(f.mobile)));
       if (!who) return out({ error: f.to_name + ' is not a Nexus user, vendor or contact' }, 400);
-      msgs = [{ to: phone(who.mobile), name: String(who.name || ''), template: 'nexus_followup', params: [['1', safe(who.name)], ['2', safe(f.text)], ['3', safe(f.by)]] }];
+      msgs = [{ to: phone(who.mobile), name: String(who.name || ''), template: 'nexus_followup', params: [['1', safe(who.name)], ['2', safe(f.ref || f.no)], ['3', safe(f.text)]] }];
     } else if (event === 'daily_brief') {
       // morning brief to the Super Admins (and the EA): today's meetings, late tasks, pending decisions / follow-ups — text built in the app
       ref = 'Daily brief ' + id; round = id;

@@ -254,26 +254,27 @@ function eaFuHtml() {
       '<tr><td class="k">To *</td><td class="v"><select id="fuWho">' + selOpts(labels, '') + '</select></td></tr>' +
       '<tr><td class="k">Send by *</td><td class="v">' + seg('fuCh', [{ v: 'WhatsApp', l: 'WhatsApp' }, { v: 'Mail', l: 'Mail' }, { v: 'Both', l: 'Both' }], EA_UI.fuCh || 'WhatsApp') + '</td></tr>' +
       '<tr><td class="k">When *</td><td class="v"><input id="fuDate" type="date" value="' + todayYmd() + '"> <input id="fuTime" type="time" value="10:00"></td></tr>' +
+      '<tr><td class="k">Reference</td><td class="v"><input id="fuRef" placeholder="PO / invoice / order no. (blank = follow-up no.)" maxlength="60"></td></tr>' +
       '<tr><td class="k">Message *</td><td class="v"><textarea id="fuText" rows="3" maxlength="500"></textarea></td></tr></table>' +
       '<div class="toolbar"><button class="btn primary" data-act="ea-fu-save">Schedule</button><button class="btn" data-act="ea-cancel">Cancel</button><span id="eaMsg" class="small late-txt"></span></div></div>';
   }
-  h += '<div class="tbl-wrap"><table class="bomflat"><tr><th>No</th><th>When</th><th>To</th><th>Type</th><th>By</th><th>Message</th><th>Status</th><th>Sent on</th><th>Result</th><th>Set by</th>' + (edit ? '<th class="noprint"></th>' : '') + '</tr>' +
-    (list.length ? list.map(f => '<tr><td class="nowrap"><b>' + esc(f.no) + '</b></td><td class="nowrap">' + fmtDT(f.at) + '</td><td>' + esc(f.to_name) + '</td><td>' + esc(f.to_kind) + '</td><td>' + esc(f.channel) + '</td><td style="white-space:pre-wrap;max-width:320px">' + esc(f.text) + '</td><td><span class="st ' + (f.status === 'Sent' ? 'Done' : f.status === 'Cancelled' ? 'Cancelled' : f.status === 'Failed' ? 'Late' : 'Pending') + '">' + esc(f.status) + '</span></td><td class="nowrap">' + (f.sent_at ? fmtDT(f.sent_at) : '') + '</td><td class="small">' + esc(f.result || '') + '</td><td>' + esc(f.by) + '</td>' +
+  h += '<div class="tbl-wrap"><table class="bomflat"><tr><th>No</th><th>When</th><th>To</th><th>Type</th><th>By</th><th>Reference</th><th>Message</th><th>Status</th><th>Sent on</th><th>Result</th><th>Set by</th>' + (edit ? '<th class="noprint"></th>' : '') + '</tr>' +
+    (list.length ? list.map(f => '<tr><td class="nowrap"><b>' + esc(f.no) + '</b></td><td class="nowrap">' + fmtDT(f.at) + '</td><td>' + esc(f.to_name) + '</td><td>' + esc(f.to_kind) + '</td><td>' + esc(f.channel) + '</td><td>' + esc(f.ref || '') + '</td><td style="white-space:pre-wrap;max-width:320px">' + esc(f.text) + '</td><td><span class="st ' + (f.status === 'Sent' ? 'Done' : f.status === 'Cancelled' ? 'Cancelled' : f.status === 'Failed' ? 'Late' : 'Pending') + '">' + esc(f.status) + '</span></td><td class="nowrap">' + (f.sent_at ? fmtDT(f.sent_at) : '') + '</td><td class="small">' + esc(f.result || '') + '</td><td>' + esc(f.by) + '</td>' +
       (edit ? '<td class="noprint">' + (f.status === 'Scheduled' ? '<button class="btn sm ghost danger" data-act="ea-fu-cancel" data-id="' + esc(f.id) + '" data-confirm="Cancel this follow-up?">Cancel</button>' : f.status === 'Failed' ? '<button class="btn sm" data-act="ea-fu-retry" data-id="' + esc(f.id) + '">Send again</button>' : '') + '</td>' : '') + '</tr>').join('')
-      : '<tr><td colspan="11" class="empty">No follow-ups</td></tr>') + '</table></div>';
+      : '<tr><td colspan="12" class="empty">No follow-ups</td></tr>') + '</table></div>';
   return h;
 }
 ACTIONS['ea-fu-new'] = () => { EA_UI.form = 'fu'; VIEWS.ea.render(); };
 ACTIONS['ea-fu-save'] = () => {
   if (!requirePerm('ea', 'edit')) return;
   const P = eaFuPeople(); const labels = P.map(p => p.name + ' · ' + p.kind + (p.mobile ? ' · ' + p.mobile : '') + (p.email ? ' · ' + p.email : ''));
-  const who = P[labels.indexOf($('#fuWho').value)]; const ch = EA_UI.fuCh || 'WhatsApp'; const date = $('#fuDate').value, time = $('#fuTime').value, text = $('#fuText').value.trim();
+  const who = P[labels.indexOf($('#fuWho').value)]; const ch = EA_UI.fuCh || 'WhatsApp'; const date = $('#fuDate').value, time = $('#fuTime').value, text = $('#fuText').value.trim(), ref = $('#fuRef').value.trim();
   const msg = t => { $('#eaMsg').textContent = t; };
   if (!who) return msg('Pick who to follow up.'); if (!date || !time) return msg('Enter date and time.'); if (!text) return msg('Write the message.');
   if ((ch === 'WhatsApp' || ch === 'Both') && !/^[6-9]\d{9}$/.test(who.mobile)) return msg(who.name + ' has no mobile number for WhatsApp.');
   if ((ch === 'Mail' || ch === 'Both') && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(who.email)) return msg(who.name + ' has no email ID.');
   const at = new Date(date + 'T' + time + ':00'); if (at < new Date(Date.now() - 60000)) return msg('The time is already past.');
-  const f = Store.put('followups', { id: uid(), no: nextNo('followups', 'FU'), to_name: who.name, to_kind: who.kind, mobile: who.mobile, email: who.email, channel: ch, at: at.toISOString(), text, status: 'Scheduled', by: ME.name, created_at: nowIso() });
+  const f = Store.put('followups', { id: uid(), no: nextNo('followups', 'FU'), to_name: who.name, to_kind: who.kind, mobile: who.mobile, email: who.email, channel: ch, at: at.toISOString(), text, ref, status: 'Scheduled', by: ME.name, created_at: nowIso() });
   audit('followup.create', f.no, who.name + ' · ' + ch + ' · ' + fmtDT(f.at) + ' · ' + text.slice(0, 60));
   EA_UI.form = false; flash(esc(f.no) + ' scheduled for ' + fmtDT(f.at) + '.'); VIEWS.ea.render(); eaFuRun();
 };
@@ -292,7 +293,7 @@ async function eaFuRun(force) {
       f.status = 'Sending'; f.sender = ME.name; Store.put('followups', f);   // claimed by this browser; another one sees it and leaves it
       const res = [];
       if (f.channel === 'Mail' || f.channel === 'Both') {
-        const mq = Store.put('mail_queue', { id: uid(), to: f.email, subject: 'Follow-up from ' + (settings().company || 'Zooto Fashion') + ' — ' + f.no, body: 'Dear ' + f.to_name + ',\n\n' + f.text + '\n\nRegards,\n' + f.by + '\n' + (settings().company || 'Zooto Fashion'), ref: f.no, name: 'Nexus EA', status: 'queued', at: nowIso(), by: f.by });
+        const mq = Store.put('mail_queue', { id: uid(), to: f.email, subject: 'Follow-up from ' + (settings().company || 'Zooto Fashion') + ' — ' + (f.ref || f.no), body: 'Dear ' + f.to_name + ',\n\nReference: ' + (f.ref || f.no) + '\n' + f.text + '\n\nRegards,\n' + f.by + '\n' + (settings().company || 'Zooto Fashion'), ref: f.no, name: 'Nexus EA', status: 'queued', at: nowIso(), by: f.by });
         await mailSend(mq.id); const m2 = Store.get('mail_queue', mq.id); res.push('Mail: ' + ((m2 && m2.status) || 'queued') + (m2 && m2.error ? ' — ' + m2.error : ''));
       }
       if (f.channel === 'WhatsApp' || f.channel === 'Both') {
