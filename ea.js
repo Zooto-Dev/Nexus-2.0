@@ -63,6 +63,22 @@ ACTIONS['ea-del-rm'] = el => { if (!requirePerm('ea', 'edit')) return; const t =
 
 /* ---------- MOM: minutes of meeting; every action point is a delegation ---------- */
 const eaUsers = () => Store.all('users').filter(u => u.active !== false).map(u => u.name).sort();
+/* ---- compact people picker: chosen ones as chips, a search box, a short list to pick from ---- */
+EA_UI.pick = {};   // id → { options:[{v,l,sub}], sel:[v…], q }
+function eaPicker(id, options, selected) {
+  const P = EA_UI.pick[id] = EA_UI.pick[id] || { sel: [], q: '' }; P.options = options; if (selected) P.sel = selected.slice();
+  const q = norm(P.q); const byV = new Map(options.map(o => [o.v, o]));
+  const list = options.filter(o => !P.sel.includes(o.v) && (!q || norm(o.l + ' ' + (o.sub || '')).includes(q))).slice(0, 12);
+  return '<div class="ea-pick" data-pick="' + esc(id) + '"><div class="ea-sel">' + (P.sel.length ? P.sel.map(v => { const o = byV.get(v) || { l: v }; return '<span class="chip on">' + esc(o.l) + ' <a data-act="ea-pick-rm" data-pick="' + esc(id) + '" data-v="' + esc(v) + '" title="Remove">×</a></span>'; }).join('') : '<span class="muted small">Nobody picked yet</span>') + '</div>' +
+    '<input class="ea-pq" data-pick="' + esc(id) + '" placeholder="Type a name to search…" value="' + esc(P.q) + '">' +
+    '<div class="ea-pl">' + (list.length ? list.map(o => '<a data-act="ea-pick-add" data-pick="' + esc(id) + '" data-v="' + esc(o.v) + '">' + esc(o.l) + (o.sub ? ' <span class="muted small">' + esc(o.sub) + '</span>' : '') + '</a>').join('') : '<span class="muted small">' + (q ? 'No match' : 'All picked') + '</span>') + '</div></div>';
+}
+const eaPicked = id => ((EA_UI.pick[id] || {}).sel || []).slice();
+ACTIONS['ea-pick-add'] = el => { const P = EA_UI.pick[el.dataset.pick]; if (!P || P.sel.includes(el.dataset.v)) return; P.sel.push(el.dataset.v); P.q = ''; eaRefreshPickers(); };
+ACTIONS['ea-pick-rm'] = el => { const P = EA_UI.pick[el.dataset.pick]; if (!P) return; P.sel = P.sel.filter(v => v !== el.dataset.v); eaRefreshPickers(); };
+// redraw only the pickers, so the rest of the form keeps what was typed
+function eaRefreshPickers() { $$('.ea-pick').forEach(el => { const id = el.dataset.pick; const P = EA_UI.pick[id]; if (!P) return; const tmp = document.createElement('div'); tmp.innerHTML = eaPicker(id, P.options); el.replaceWith(tmp.firstElementChild); }); }
+document.addEventListener('input', e => { const t = e.target; if (!t.classList || !t.classList.contains('ea-pq')) return; const P = EA_UI.pick[t.dataset.pick]; if (!P) return; P.q = t.value; const box = t.closest('.ea-pick'); const tmp = document.createElement('div'); tmp.innerHTML = eaPicker(t.dataset.pick, P.options); const nw = tmp.firstElementChild; box.replaceWith(nw); const i = $('.ea-pq', nw); i.focus(); i.setSelectionRange(i.value.length, i.value.length); });
 function eaMomHtml() {
   const moms = Store.all('moms').sort((a, b) => (b.at || '') < (a.at || '') ? -1 : 1);
   let h = '<div class="toolbar noprint"><span class="grow"></span><button class="btn" data-act="print">Print</button>' + (eaEdit() ? '<button class="btn primary" data-act="ea-mom-new">+ MOM</button>' : '') + '</div>';
@@ -72,7 +88,7 @@ function eaMomHtml() {
       '<tr><td class="k">Meeting *</td><td class="v"><input id="mmTitle" value="' + esc(EA_UI.title || '') + '"></td></tr>' +
       '<tr><td class="k">Date *</td><td class="v"><input id="mmDate" type="date" value="' + esc(EA_UI.date || todayYmd()) + '"></td></tr>' +
       '<tr><td class="k">Time *</td><td class="v"><input id="mmTime" type="time" value="' + esc(EA_UI.time || nowIso().slice(11, 16)) + '"></td></tr>' +
-      '<tr><td class="k">Attendees *</td><td class="v"><div class="chips">' + eaUsers().map(n => '<label class="chip"><input type="checkbox" class="mmAtt" value="' + esc(n) + '"' + ((EA_UI.att || []).includes(n) ? ' checked' : '') + '>' + esc(n) + '</label>').join('') + '</div></td></tr>' +
+      '<tr><td class="k">Attendees *</td><td class="v">' + eaPicker('mmAtt', Store.all('users').filter(u => u.active !== false).map(u => ({ v: u.name, l: u.name, sub: u.department || '' })).sort((a, b) => a.l.localeCompare(b.l)), EA_UI.attInit) + '</td></tr>' +
       '<tr><td class="k">Agenda *</td><td class="v"><textarea id="mmAgenda" rows="3">' + esc(EA_UI.agenda || '') + '</textarea></td></tr>' +
       '<tr><td class="k">KDP (Key Discussion Points) *</td><td class="v"><textarea id="mmKdp" rows="6">' + esc(EA_UI.kdp || '') + '</textarea></td></tr></table>' +
       '<h2>Action Items</h2><div class="tbl-wrap"><table class="nopage nofilter"><tr><th class="num">Sr</th><th>Action item</th><th>Doer</th><th>Due date</th><th></th></tr>' +
@@ -97,8 +113,8 @@ function eaMomDetail(m, st) {
     ((m.points || []).length ? (m.points || []).map((p, i) => { const s = st[i] || eaPointStatus(Store.get('checklist', p.cl_id)); return '<tr><td class="num">' + (i + 1) + '</td><td>' + esc(p.task) + '</td><td>' + esc(p.doer) + '</td><td class="nowrap">' + fmtD(p.due) + '</td><td><span class="st ' + (s.status === 'Done' ? 'Done' : s.status === 'Overdue' ? 'Late' : 'Pending') + '">' + (s.status === 'Overdue' ? 'Late' : s.status) + '</span></td><td class="nowrap">' + (s.at ? fmtDT(s.at) : '') + '</td><td>' + esc(s.by || '') + '</td></tr>'; }).join('') : '<tr><td colspan="7" class="empty">No action items</td></tr>') + '</table></div>' +
     '<table class="kv" style="margin-top:8px">' + kv('Conclusion', esc(m.conclusion || ''), true) + kv('Prepared by', esc(m.by) + ' · ' + fmtDT(m.created_at)) + '</table></div>';
 }
-function eaKeepMom() { EA_UI.title = ($('#mmTitle') || {}).value; EA_UI.date = ($('#mmDate') || {}).value; EA_UI.time = ($('#mmTime') || {}).value; EA_UI.agenda = ($('#mmAgenda') || {}).value; EA_UI.kdp = ($('#mmKdp') || {}).value; EA_UI.conc = ($('#mmConc') || {}).value; EA_UI.att = $$('.mmAtt:checked').map(x => x.value); EA_UI.pts = $$('tr[data-pt]').map(tr => ({ task: $('[data-pk="task"]', tr).value, doer: $('[data-pk="doer"]', tr).value, due: $('[data-pk="due"]', tr).value })); }
-ACTIONS['ea-mom-new'] = () => { EA_UI.form = 'mom'; EA_UI.pts = []; EA_UI.title = ''; EA_UI.agenda = ''; EA_UI.kdp = ''; EA_UI.conc = ''; EA_UI.att = []; EA_UI.date = ''; EA_UI.time = ''; EA_UI.momMtg = null; VIEWS.ea.render(); };
+function eaKeepMom() { EA_UI.title = ($('#mmTitle') || {}).value; EA_UI.date = ($('#mmDate') || {}).value; EA_UI.time = ($('#mmTime') || {}).value; EA_UI.agenda = ($('#mmAgenda') || {}).value; EA_UI.kdp = ($('#mmKdp') || {}).value; EA_UI.conc = ($('#mmConc') || {}).value; EA_UI.att = eaPicked('mmAtt'); EA_UI.attInit = null; EA_UI.pts = $$('tr[data-pt]').map(tr => ({ task: $('[data-pk="task"]', tr).value, doer: $('[data-pk="doer"]', tr).value, due: $('[data-pk="due"]', tr).value })); }
+ACTIONS['ea-mom-new'] = () => { EA_UI.form = 'mom'; EA_UI.pts = []; EA_UI.title = ''; EA_UI.agenda = ''; EA_UI.kdp = ''; EA_UI.conc = ''; EA_UI.att = []; EA_UI.attInit = []; EA_UI.date = ''; EA_UI.time = ''; EA_UI.momMtg = null; VIEWS.ea.render(); };
 ACTIONS['ea-mom-open'] = el => { EA_UI.open = EA_UI.open === el.dataset.id ? null : el.dataset.id; VIEWS.ea.render(); };
 ACTIONS['ea-pt-add'] = () => { eaKeepMom(); EA_UI.pts.push({ task: '', doer: '', due: '' }); VIEWS.ea.render(); };
 ACTIONS['ea-pt-rm'] = el => { eaKeepMom(); EA_UI.pts.splice(+el.dataset.i, 1); VIEWS.ea.render(); };
@@ -183,7 +199,7 @@ function eaMtgHtml() {
       '<tr><td class="k">Title *</td><td class="v"><input id="mgTitle" value="' + esc(M.title || '') + '"></td></tr>' +
       '<tr><td class="k">Date *</td><td class="v"><input id="mgDate" type="date" value="' + esc(M.date || todayYmd()) + '"></td></tr>' +
       '<tr><td class="k">Time *</td><td class="v"><input id="mgFrom" type="time" value="' + esc(M.from || '11:00') + '"> to <input id="mgTo" type="time" value="' + esc(M.to || '12:00') + '"></td></tr>' +
-      '<tr><td class="k">Attendees *</td><td class="v"><div class="chips">' + eaPeople().map(p => '<label class="chip"><input type="checkbox" class="mgAtt" value="' + esc(p.email) + '"' + (sel.has(p.email) ? ' checked' : '') + '>' + esc(p.name) + ' <span class="muted small">' + esc(p.kind) + '</span></label>').join('') + '</div>' +
+      '<tr><td class="k">Attendees *</td><td class="v">' + eaPicker('mgAtt', eaPeople().map(p => ({ v: p.email, l: p.name, sub: p.kind + ' · ' + p.email })), M.emailsInit) + 
       '<input id="mgExtra" placeholder="Other email IDs, comma separated" value="' + esc(M.extra || '') + '" style="margin-top:6px"></td></tr>' +
       '<tr><td class="k">Where</td><td class="v">' + seg('mgWhere', [{ v: 'office', l: 'Office / place' }, { v: 'meet', l: 'Google Meet' }], M.where || 'office') + ' <input id="mgLoc" placeholder="Room / address" value="' + esc(M.location || '') + '"' + ((M.where || 'office') === 'meet' ? ' disabled' : '') + '></td></tr>' +
       '<tr><td class="k">Agenda</td><td class="v"><textarea id="mgAgenda" rows="4">' + esc(M.agenda || '') + '</textarea></td></tr></table>' +
@@ -196,9 +212,9 @@ function eaMtgHtml() {
       : '<tr><td colspan="11" class="empty">No meetings</td></tr>') + '</table></div>';
   return h;
 }
-function eaKeepMtg() { const M = EA_UI.mtg = EA_UI.mtg || {}; M.title = ($('#mgTitle') || {}).value || ''; M.date = ($('#mgDate') || {}).value || ''; M.from = ($('#mgFrom') || {}).value || ''; M.to = ($('#mgTo') || {}).value || ''; M.emails = $$('.mgAtt:checked').map(x => x.value); M.extra = ($('#mgExtra') || {}).value || ''; M.location = ($('#mgLoc') || {}).value || ''; M.agenda = ($('#mgAgenda') || {}).value || ''; }
-ACTIONS['ea-mtg-new'] = () => { EA_UI.form = 'mtg'; EA_UI.mtg = { where: 'office' }; VIEWS.ea.render(); };
-ACTIONS['ea-mtg-edit'] = el => { const m = Store.get('meetings', el.dataset.id); if (!m) return; EA_UI.form = 'mtg'; EA_UI.mtg = { id: m.id, title: m.title, date: ymdOf(new Date(m.start)), from: String(fmtDT(m.start)).slice(-5), to: String(fmtDT(m.end)).slice(-5), emails: (m.attendees || []).map(a => a.email), extra: '', where: m.meet_link || m.meet ? 'meet' : 'office', location: m.location || '', agenda: m.agenda || '' }; VIEWS.ea.render(); };
+function eaKeepMtg() { const M = EA_UI.mtg = EA_UI.mtg || {}; M.title = ($('#mgTitle') || {}).value || ''; M.date = ($('#mgDate') || {}).value || ''; M.from = ($('#mgFrom') || {}).value || ''; M.to = ($('#mgTo') || {}).value || ''; M.emails = eaPicked('mgAtt'); M.emailsInit = null; M.extra = ($('#mgExtra') || {}).value || ''; M.location = ($('#mgLoc') || {}).value || ''; M.agenda = ($('#mgAgenda') || {}).value || ''; }
+ACTIONS['ea-mtg-new'] = () => { EA_UI.form = 'mtg'; EA_UI.mtg = { where: 'office', emailsInit: [] }; VIEWS.ea.render(); };
+ACTIONS['ea-mtg-edit'] = el => { const m = Store.get('meetings', el.dataset.id); if (!m) return; EA_UI.form = 'mtg'; EA_UI.mtg = { id: m.id, title: m.title, date: ymdOf(new Date(m.start)), from: String(fmtDT(m.start)).slice(-5), to: String(fmtDT(m.end)).slice(-5), emails: (m.attendees || []).map(a => a.email), emailsInit: (m.attendees || []).map(a => a.email), extra: '', where: m.meet_link || m.meet ? 'meet' : 'office', location: m.location || '', agenda: m.agenda || '' }; VIEWS.ea.render(); };
 ACTIONS['ea-mtg-save'] = async el => {
   if (!requirePerm('ea', 'edit')) return;
   eaKeepMtg(); const M = EA_UI.mtg; const msg = t => { const e = $('#eaMsg'); if (e) e.textContent = t; };
@@ -226,7 +242,7 @@ ACTIONS['ea-mtg-cancel'] = async el => {
   if (m.cal_id && CLOUD && SB) { const r = await eaMail({ action: 'calendar', op: 'cancel', id: m.cal_id }); if (r.err && !/not found/i.test(r.err)) { flash('Google Calendar said: ' + esc(r.err), 'err'); return; } }
   m.status = 'Cancelled'; m.cancelled_by = ME.name; m.cancelled_at = nowIso(); Store.put('meetings', m); audit('meeting.cancel', m.no, m.title); flash(esc(m.no) + ' cancelled, attendees notified.'); VIEWS.ea.render();
 };
-ACTIONS['ea-mtg-mom'] = el => { const m = Store.get('meetings', el.dataset.id); if (!m) return; EA_UI.tab = 'mom'; EA_UI.form = 'mom'; EA_UI.pts = []; EA_UI.title = m.title; EA_UI.date = ymdOf(new Date(m.start)); EA_UI.time = String(fmtDT(m.start)).slice(-5); EA_UI.agenda = m.agenda || ''; EA_UI.kdp = ''; EA_UI.conc = ''; EA_UI.att = (m.attendees || []).map(a => a.name).filter(n => eaUsers().includes(n)); EA_UI.momMtg = m.id; VIEWS.ea.render(); };
+ACTIONS['ea-mtg-mom'] = el => { const m = Store.get('meetings', el.dataset.id); if (!m) return; EA_UI.tab = 'mom'; EA_UI.form = 'mom'; EA_UI.pts = []; EA_UI.title = m.title; EA_UI.date = ymdOf(new Date(m.start)); EA_UI.time = String(fmtDT(m.start)).slice(-5); EA_UI.agenda = m.agenda || ''; EA_UI.kdp = ''; EA_UI.conc = ''; EA_UI.att = (m.attendees || []).map(a => a.name).filter(n => eaUsers().includes(n)); EA_UI.attInit = EA_UI.att.slice(); EA_UI.momMtg = m.id; VIEWS.ea.render(); };
 ACTIONS['ea-mtg-mom-open'] = el => { EA_UI.tab = 'mom'; EA_UI.open = el.dataset.id; VIEWS.ea.render(); };
 // events made straight in Google Calendar (next 30 days) come in as meetings too
 ACTIONS['ea-mtg-sync'] = async el => {
