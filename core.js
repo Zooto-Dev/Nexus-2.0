@@ -60,7 +60,7 @@ function saveLocal() {
     localStorage.setItem(DB_KEY, JSON.stringify(DB));
   } catch (e) { flash('Browser storage full — export a backup from Settings.', 'err'); }
 }
-const COLS = ['users', 'roles', 'customers', 'items', 'materials', 'processes', 'orders', 'samples', 'dispatches', 'purchase_orders', 'sourcing', 'grns', 'inwards', 'vendors', 'issues', 'rsjw', 'rtvs', 'boms', 'job_cards', 'requisitions', 'tickets', 'checklist', 'checklist_log', 'escalations', 'attributes', 'item_types', 'mail_queue', 'requirements', 'prod_reports', 'prod_plans', 'wa_log', 'opening_stock', 'price_requests', 'moms', 'decisions', 'audit'];
+const COLS = ['users', 'roles', 'customers', 'items', 'materials', 'processes', 'orders', 'samples', 'dispatches', 'purchase_orders', 'sourcing', 'grns', 'inwards', 'vendors', 'issues', 'rsjw', 'rtvs', 'boms', 'job_cards', 'requisitions', 'tickets', 'checklist', 'checklist_log', 'escalations', 'attributes', 'item_types', 'mail_queue', 'requirements', 'prod_reports', 'prod_plans', 'wa_log', 'opening_stock', 'price_requests', 'moms', 'decisions', 'meetings', 'followups', 'travels', 'contacts', 'audit'];
 let DB = null;
 const CFG = window.NEXUS_CONFIG || {};
 // demo shares one demo table (nx_demo) between all demo users; it can never reach the real table
@@ -366,7 +366,7 @@ const MODULES = [
   { key: 'dispatch', label: 'Dispatch' },
   { key: 'tickets', label: 'Tickets', note: 'Edit = raise & work tickets' },
   { key: 'checklist', label: 'Checklist', note: 'Edit = add & mark tasks' },
-  { key: 'ea', label: 'EA (Delegation, MOM, CEO Decision)', note: 'Edit = delegate & write MOM; decisions by Super Admin' },
+  { key: 'ea', label: 'EA (Delegation, MOM, Meetings, Follow-ups, Travel, Contacts)', note: 'Edit = all EA work; CEO decisions by Super Admin' },
   { key: 'tracker', label: 'FMS Tracker', note: 'Edit = mark anyone\'s step, undo' },
   { key: 'builder', label: 'FMS Builder', note: 'Edit = change & activate flows' },
   { key: 'masters', label: 'Brands, Articles & Materials' },

@@ -262,7 +262,9 @@ Deno.serve(async (req) => {
         { to, name: '', template: 'production_no_material_alert', params: [['1', 'ZF-TEST']] },
         { to, name: '', template: 'low_stock_alert', params: [['1', 'EVA-10 (Current 10 PAIR / Min 100 PAIR)']] },
         { to, name: '', template: 'po_revised_vendor', params: [['old_po_number', 'TEST/PO/001'], ['po_number', 'TEST/PO/002'], ['total_amount', '1100.00'], ['delivery_date', '05-Oct-2026']], doc: true },
-        { to, name: '', template: 'vendor_delivery_due', params: [['1', 'Test Vendor'], ['2', 'EVA-10 (qty 100, due 05-Oct-2026)'], ['3', 'TEST/PO/001'], ['4', '05-Oct-2026']] }
+        { to, name: '', template: 'vendor_delivery_due', params: [['1', 'Test Vendor'], ['2', 'EVA-10 (qty 100, due 05-Oct-2026)'], ['3', 'TEST/PO/001'], ['4', '05-Oct-2026']] },
+        { to, name: '', template: 'nexus_followup', params: [['1', 'Nexus Test'], ['2', 'Please share the quotation for EVA sheets'], ['3', 'EA']] },
+        { to, name: '', template: 'nexus_daily_brief', params: [['1', 'Nexus'], ['2', 'Meetings today: 2 | Late tasks: 3 | Decisions pending: 1 | Follow-ups today: 2']] }
       ];
       const up = await uploadPdf(b.pdf, 'Nexus_Test.pdf');
       const results: { template: string; ok: boolean; error: string }[] = [];
@@ -408,6 +410,22 @@ Deno.serve(async (req) => {
       const items = due.slice(0, 15).map((x) => x.item + ' (qty ' + qty(x.q) + ', due ' + fd(x.d) + ')').join(', ') + (due.length > 15 ? ', +' + (due.length - 15) + ' more' : '');
       const v = await vendorOf(vname);
       msgs = [{ to: phone(v?.mobile), name: vname, template: 'vendor_delivery_due', params: [['1', safe(vname)], ['2', safe(items)], ['3', safe([...new Set(due.map((x) => x.po))].join(', '))], ['4', fd(due[0].d)]] }];
+    } else if (event === 'followup') {
+      // EA follow-up reminder: a short text to one user / vendor / contact, at the time set in Nexus
+      const f = await getDoc('followups', id); if (!f) return out({ error: 'Follow-up not found' }, 404);
+      if (f.status === 'Cancelled') return out({ error: 'Follow-up is cancelled' }, 409);
+      ref = f.no;
+      const people = [...users, ...(await all('vendors')), ...(await all('contacts'))];
+      const who = people.find((x) => norm(x.name) === norm(f.to_name) || (f.mobile && phone(x.mobile) === phone(f.mobile)));
+      if (!who) return out({ error: f.to_name + ' is not a Nexus user, vendor or contact' }, 400);
+      msgs = [{ to: phone(who.mobile), name: String(who.name || ''), template: 'nexus_followup', params: [['1', safe(who.name)], ['2', safe(f.text)], ['3', safe(f.by)]] }];
+    } else if (event === 'daily_brief') {
+      // morning brief to the Super Admins (and the EA): today's meetings, late tasks, pending decisions / follow-ups — text built in the app
+      ref = 'Daily brief ' + id; round = id;
+      const text = String(b.text || '').replace(/[\r\n\t]+/g, ' ').replace(/\s{2,}/g, ' ').trim().slice(0, 900);
+      if (!text) return out({ ok: true, skipped: 'nothing to brief' });
+      const eaUsers = users.filter((u) => /EXECUTIVE ASSISTANT/.test(norm(u.designation)));
+      msgs = [...superAdmins(), ...eaUsers].map((u) => ({ to: phone(u.mobile), name: String(u.name || ''), template: 'nexus_daily_brief', params: [['1', safe(String(u.name || '').split(/[\s(]/)[0])], ['2', text]] as [string, string][] }));
     } else return out({ error: 'Unknown event' }, 400);
     ctx = { event, rid: id, ref };
 

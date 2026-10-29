@@ -58,10 +58,10 @@ Deno.serve(async (req) => {
 
     // addresses Nexus may write to
     const docs = async (col: string) => ((await db.from('nx_docs').select('data').eq('collection', col)).data || []).map((r: { data: Doc }) => r.data);
-    const [settingsRow, users, vendors] = await Promise.all([db.from('nx_docs').select('data').eq('collection', 'settings').eq('id', 'main').maybeSingle(), docs('users'), docs('vendors')]);
+    const [settingsRow, users, vendors, contacts] = await Promise.all([db.from('nx_docs').select('data').eq('collection', 'settings').eq('id', 'main').maybeSingle(), docs('users'), docs('vendors'), docs('contacts')]);
     const allowed = new Set<string>();
     Object.values((settingsRow.data?.data || {}) as Doc).forEach((v) => { if (typeof v === 'string') list(v).filter((x) => EMAIL.test(x)).forEach((x) => allowed.add(x)); });
-    [...users, ...vendors].forEach((u) => list(u.email).filter((x) => EMAIL.test(x)).forEach((x) => allowed.add(x)));
+    [...users, ...vendors, ...contacts].forEach((u) => list(u.email).filter((x) => EMAIL.test(x)).forEach((x) => allowed.add(x)));
 
     const sendOne = async (row: Doc, pdf?: { b64: string; name: string }) => {
       const to = list(row.to), cc = list(row.cc);
@@ -89,6 +89,25 @@ Deno.serve(async (req) => {
       return { id: row.id, status, error };
     };
 
+    // Google Calendar for EA → Meetings (create / update / cancel / list), passed to the Apps Script
+    if (b.action === 'calendar') {
+      // Admin, or a user whose Access settings give EA = Edit (same rule the app uses)
+      const acc = ((settingsRow.data?.data || {}) as Doc).access || {};
+      const meUser = users.find((u) => String(u.email || '').toLowerCase() === String(me.email || '').toLowerCase()) || {};
+      const lv = (o: Doc | undefined) => (o && (o.ea || o['s:ea'])) || '';
+      const eaLevel = lv((acc.user || {})[meUser.id]) || lv((acc.desig || {})[(meUser.department || '') + '|' + (meUser.designation || '')]) || lv((acc.dept || {})[meUser.department || '']) || lv(acc.role_user) || 'none';
+      if (!isAdmin && eaLevel !== 'edit') return out({ error: 'Only Admin or a user with EA edit access can manage meetings' }, 403);
+      const op = String(b.op || '');
+      if (!['create', 'update', 'cancel', 'list'].includes(op)) return out({ error: 'Unknown calendar action' }, 400);
+      const guests = [...new Set((Array.isArray(b.guests) ? b.guests : []).map((x: unknown) => String(x).trim().toLowerCase()).filter((x: string) => EMAIL.test(x)))].slice(0, 30);
+      const payload: Doc = { secret, action: 'calendar', op, id: String(b.id || '').slice(0, 300), title: String(b.title || '').slice(0, 200), start: String(b.start || ''), end: String(b.end || ''), from: String(b.from || ''), to: String(b.to || ''), guests, location: String(b.location || '').slice(0, 300), description: String(b.description || '').slice(0, 5000), meet: b.meet === true };
+      try {
+        const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), redirect: 'follow' });
+        const j = await r.json().catch(() => ({}));
+        if (!j.ok) return out({ ok: false, error: String(j.error || 'Apps Script answered ' + r.status).slice(0, 300) });
+        return out(j);
+      } catch (e) { return out({ ok: false, error: String((e as Error).message || e).slice(0, 300) }); }
+    }
     // email check (vendor email IDs): domain takes mail → a short mail is sent → no bounce within ~35 s = OK
     if (b.action === 'verify') {
       const emails = [...new Set((Array.isArray(b.emails) ? b.emails : []).map((x: unknown) => String(x).trim().toLowerCase()))].filter(Boolean).slice(0, 10) as string[];

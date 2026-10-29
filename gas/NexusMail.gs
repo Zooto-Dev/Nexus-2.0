@@ -31,6 +31,9 @@ function doPost(e) {
       return json_({ ok: true, bounced: Object.keys(hit) });
     }
 
+    // Google Calendar for Nexus → EA → Meetings: create / update / cancel / list events, invites go to every guest
+    if (p.action === 'calendar') return calendar_(p);
+
     var to = cleanList_(p.to), cc = cleanList_(p.cc);
     if (!to) return json_({ ok: false, error: 'No valid recipient' });
     var subject = String(p.subject || 'Nexus').replace(/[\r\n]+/g, ' ').slice(0, 250);
@@ -75,6 +78,59 @@ function doPost(e) {
 }
 
 function doGet() { return json_({ ok: true, service: 'Nexus mail' }); }
+
+/* ---------- Calendar (EA → Meetings). Events live in this account's default Google Calendar; guests get the invite
+   in their own calendar. A Google Meet link is added when the "Calendar" advanced service is turned on in this
+   project (Services → + → Google Calendar API); without it the meeting is made without a Meet link. ---------- */
+function calendar_(p) {
+  var cal = CalendarApp.getDefaultCalendar();
+  var op = String(p.op || '');
+  var guests = cleanList_((p.guests || []).join ? p.guests.join(',') : p.guests);
+  var title = String(p.title || 'Meeting').replace(/[\r\n]+/g, ' ').slice(0, 200);
+  var desc = String(p.description || '').slice(0, 5000), loc = String(p.location || '').slice(0, 300);
+  if (op === 'list') {
+    var from = new Date(p.from), to = new Date(p.to);
+    if (isNaN(from) || isNaN(to)) return json_({ ok: false, error: 'Bad dates' });
+    var evs = cal.getEvents(from, to).slice(0, 200).map(function (ev) {
+      return { id: ev.getId(), title: ev.getTitle(), start: ev.getStartTime().toISOString(), end: ev.getEndTime().toISOString(), all_day: ev.isAllDayEvent(), location: ev.getLocation(),
+        guests: ev.getGuestList().map(function (g) { return g.getEmail(); }), description: String(ev.getDescription() || '').slice(0, 1000) };
+    });
+    return json_({ ok: true, events: evs });
+  }
+  if (op === 'cancel') {
+    var ev0 = cal.getEventById(String(p.id || '')); if (!ev0) return json_({ ok: false, error: 'Event not found in Google Calendar' });
+    ev0.deleteEvent(); return json_({ ok: true });
+  }
+  var start = new Date(p.start), end = new Date(p.end);
+  if (isNaN(start) || isNaN(end) || end <= start) return json_({ ok: false, error: 'Bad start / end time' });
+  if (op === 'update') {
+    var ev1 = cal.getEventById(String(p.id || '')); if (!ev1) return json_({ ok: false, error: 'Event not found in Google Calendar' });
+    ev1.setTitle(title).setTime(start, end).setDescription(desc).setLocation(loc);
+    var have = ev1.getGuestList().map(function (g) { return g.getEmail().toLowerCase(); }), want = guests ? guests.toLowerCase().split(',') : [];
+    want.forEach(function (g) { if (have.indexOf(g) < 0) ev1.addGuest(g); });
+    have.forEach(function (g) { if (want.indexOf(g) < 0) ev1.removeGuest(g); });
+    return json_({ ok: true, id: ev1.getId(), meet: meetLink_(ev1) });
+  }
+  // create
+  var meet = '';
+  if (p.meet === true && typeof Calendar !== 'undefined') {
+    try {   // advanced Calendar service: event with a Google Meet room
+      var body = { summary: title, description: desc, location: loc, start: { dateTime: start.toISOString() }, end: { dateTime: end.toISOString() },
+        attendees: (guests ? guests.split(',') : []).map(function (g) { return { email: g }; }),
+        conferenceData: { createRequest: { requestId: Utilities.getUuid(), conferenceSolutionKey: { type: 'hangoutsMeet' } } },
+        reminders: { useDefault: false, overrides: [{ method: 'popup', minutes: 10 }, { method: 'email', minutes: 60 }] } };
+      var made = Calendar.Events.insert(body, 'primary', { conferenceDataVersion: 1, sendUpdates: 'all' });
+      meet = made.hangoutLink || '';
+      return json_({ ok: true, id: made.id, link: made.htmlLink || '', meet: meet, via: 'api' });
+    } catch (x) { /* fall back to the plain event below */ }
+  }
+  var opts = { description: desc, location: loc, sendInvites: true };
+  if (guests) opts.guests = guests;
+  var ev = cal.createEvent(title, start, end, opts);
+  try { ev.removeAllReminders(); ev.addPopupReminder(10); ev.addEmailReminder(60); } catch (x) { }
+  return json_({ ok: true, id: ev.getId(), link: '', meet: meetLink_(ev), via: 'calendar' + (p.meet === true ? ' (no Meet link: turn on the Google Calendar API service in Apps Script → Services)' : '') });
+}
+function meetLink_(ev) { try { var m = /https:\/\/meet\.google\.com\/[a-z-]+/.exec(ev.getDescription() || ''); return m ? m[0] : ''; } catch (x) { return ''; } }
 
 // every mail is written to a "Nexus Mail Log" sheet in the owner's Drive (Date & Time, To, CC, Subject, Ref, Status, Error)
 function log_(row) {

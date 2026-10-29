@@ -25,11 +25,12 @@ const eaPointStatus = cl => { if (!cl) return { status: 'Pending', by: '', at: '
 
 VIEWS.ea = {
   mod: 'ea', render() {
-    const tabs = [{ v: 'delegation', l: 'Delegation' }, { v: 'mom', l: 'MOM' }, { v: 'decision', l: 'CEO Decision' }];
+    const tabs = [{ v: 'delegation', l: 'Delegation' }, { v: 'mom', l: 'MOM' }, { v: 'decision', l: 'CEO Decision' }, { v: 'meetings', l: 'Meetings' }, { v: 'followups', l: 'Follow-ups' }, { v: 'travel', l: 'Travel' }, { v: 'contacts', l: 'Contacts' }];
     let h = '<div class="toolbar noprint">' + seg('eaTab', tabs, EA_UI.tab) + '</div>';
-    h += EA_UI.tab === 'mom' ? eaMomHtml() : EA_UI.tab === 'decision' ? eaDecHtml() : eaDelHtml();
+    h += EA_UI.tab === 'mom' ? eaMomHtml() : EA_UI.tab === 'decision' ? eaDecHtml() : EA_UI.tab === 'meetings' ? eaMtgHtml() : EA_UI.tab === 'followups' ? eaFuHtml() : EA_UI.tab === 'travel' ? eaTrvHtml() : EA_UI.tab === 'contacts' ? eaCtHtml() : eaDelHtml();
     setMain(h);
-    onSeg(e => { const s = e.target.dataset.seg; if (s === 'eaTab') { EA_UI.tab = e.detail; EA_UI.form = false; EA_UI.open = null; } if (s === 'eaF') EA_UI.f = e.detail; if (s === 'eaTab' || s === 'eaF') VIEWS.ea.render(); });
+    onSeg(e => { const s = e.target.dataset.seg; if (s === 'eaTab') { EA_UI.tab = e.detail; EA_UI.form = false; EA_UI.open = null; EA_UI.f = 'open'; } if (s === 'eaF') EA_UI.f = e.detail; if (s === 'fuCh') EA_UI.fuCh = e.detail; if (s === 'mgWhere') { eaKeepMtg(); EA_UI.mtg.where = e.detail; } if (['eaTab', 'eaF', 'mgWhere'].includes(s)) VIEWS.ea.render(); });
+    const cq = $('#ctQ'); if (cq) cq.addEventListener('input', () => { EA_UI.cq = cq.value; clearTimeout(EA_UI.cqT); EA_UI.cqT = setTimeout(() => { const pos = cq.selectionStart; VIEWS.ea.render(); const n = $('#ctQ'); if (n) { n.focus(); n.setSelectionRange(pos, pos); } }, 250); });
   }
 };
 
@@ -102,6 +103,7 @@ ACTIONS['ea-mom-save'] = () => {
   const past = pts.find(p => p.due < todayYmd()); if (past) return msg('A due date cannot be in the past.');
   const m = { id: uid(), no: nextNo('moms', 'MOM'), title: U.title.trim(), at: new Date(U.at).toISOString(), attendees: U.att, notes: U.notes.trim(), points: [], by: ME.name, created_at: nowIso() };
   pts.forEach(p => { const cl = eaDelegate(p.task, p.doer, p.due, 'mom', m.no); m.points.push({ task: p.task.trim(), doer: p.doer, due: p.due, cl_id: cl.id }); });
+  if (U.momMtg) { const mt = Store.get('meetings', U.momMtg); if (mt) { mt.mom_id = m.id; mt.status = 'Held'; Store.put('meetings', mt); m.meeting_no = mt.no; } U.momMtg = null; }
   Store.put('moms', m); audit('mom.create', m.no, m.title + ' · ' + m.attendees.length + ' attendee(s) · ' + m.points.length + ' action point(s)');
   U.form = false; U.pts = []; U.open = m.id; flash(esc(m.no) + ' saved' + (m.points.length ? ', ' + m.points.length + ' action point(s) delegated.' : '.')); renderNav(); VIEWS.ea.render();
 };
@@ -150,3 +152,259 @@ ACTIONS['ea-dec-st'] = el => {
   const old = d.status; d.status = st; d.status_by = ME.name; d.status_at = nowIso(); d.log = (d.log || []).concat([{ at: d.status_at, by: ME.name, what: old + ' → ' + st }]);
   Store.put('decisions', d); audit('decision.status', d.no, old + ' → ' + st); VIEWS.ea.render();
 };
+
+/* ---------- Meetings: scheduled from here, kept in the company Google Calendar (invites to every attendee) ---------- */
+const eaMail = async body => { try { const { data, error } = await SB.functions.invoke('nx-mail', { body }); let msg = data && data.error; if (error) { msg = error.message; try { const j = await error.context.json(); msg = j.error || msg; } catch (e) { } } return { err: msg || '', data: data || {} }; } catch (e) { return { err: e.message, data: {} }; } };
+// people with an email: users, vendors, contacts
+function eaPeople() {
+  const out = [];
+  Store.all('users').filter(u => u.active !== false && u.email).forEach(u => out.push({ name: u.name, email: String(u.email).toLowerCase(), kind: 'User' }));
+  Store.all('vendors').filter(v => v.email).forEach(v => out.push({ name: v.name, email: String(v.email).toLowerCase().split(/[,;\s]+/)[0], kind: 'Vendor' }));
+  Store.all('contacts').filter(c => c.email).forEach(c => out.push({ name: c.name + (c.org ? ' (' + c.org + ')' : ''), email: String(c.email).toLowerCase(), kind: 'Contact' }));
+  return out.sort((a, b) => a.name.localeCompare(b.name));
+}
+const eaMtgStatus = m => m.status === 'Cancelled' ? 'Cancelled' : m.mom_id ? 'MOM done' : new Date(m.end) < new Date() ? 'Held' : 'Scheduled';
+function eaMtgHtml() {
+  const edit = eaEdit(); const now = Date.now();
+  const list = Store.all('meetings').filter(m => EA_UI.f === 'all' || (EA_UI.f === 'open' ? m.status !== 'Cancelled' && new Date(m.end) >= new Date(now - 864e5) : m.status === 'Cancelled' || new Date(m.end) < new Date(now - 864e5))).sort((a, b) => (a.start || '') < (b.start || '') ? (EA_UI.f === 'open' ? -1 : 1) : (EA_UI.f === 'open' ? 1 : -1));
+  let h = '<div class="toolbar noprint">' + seg('eaF', [{ v: 'open', l: 'Upcoming' }, { v: 'done', l: 'Past / Cancelled' }, { v: 'all', l: 'All' }], EA_UI.f) + '<span class="grow"></span><button class="btn" data-act="print">Print</button>' + (edit && CLOUD ? '<button class="btn" data-act="ea-mtg-sync">Refresh from Google Calendar</button>' : '') + (edit ? '<button class="btn primary" data-act="ea-mtg-new">+ Meeting</button>' : '') + '</div>';
+  if (EA_UI.form === 'mtg') {
+    const M = EA_UI.mtg || {}; const sel = new Set(M.emails || []);
+    h += '<div class="panel" id="mtgForm"><table class="jckv">' +
+      '<tr><td class="k">Title *</td><td class="v"><input id="mgTitle" value="' + esc(M.title || '') + '"></td></tr>' +
+      '<tr><td class="k">Date *</td><td class="v"><input id="mgDate" type="date" value="' + esc(M.date || todayYmd()) + '"></td></tr>' +
+      '<tr><td class="k">Time *</td><td class="v"><input id="mgFrom" type="time" value="' + esc(M.from || '11:00') + '"> to <input id="mgTo" type="time" value="' + esc(M.to || '12:00') + '"></td></tr>' +
+      '<tr><td class="k">Attendees *</td><td class="v"><div class="chips">' + eaPeople().map(p => '<label class="chip"><input type="checkbox" class="mgAtt" value="' + esc(p.email) + '"' + (sel.has(p.email) ? ' checked' : '') + '>' + esc(p.name) + ' <span class="muted small">' + esc(p.kind) + '</span></label>').join('') + '</div>' +
+      '<input id="mgExtra" placeholder="Other email IDs, comma separated" value="' + esc(M.extra || '') + '" style="margin-top:6px"></td></tr>' +
+      '<tr><td class="k">Where</td><td class="v">' + seg('mgWhere', [{ v: 'office', l: 'Office / place' }, { v: 'meet', l: 'Google Meet' }], M.where || 'office') + ' <input id="mgLoc" placeholder="Room / address" value="' + esc(M.location || '') + '"' + ((M.where || 'office') === 'meet' ? ' disabled' : '') + '></td></tr>' +
+      '<tr><td class="k">Agenda</td><td class="v"><textarea id="mgAgenda" rows="4">' + esc(M.agenda || '') + '</textarea></td></tr></table>' +
+      '<div class="toolbar"><button class="btn primary" data-act="ea-mtg-save">' + (M.id ? 'Save changes' : 'Schedule & send invites') + '</button><button class="btn" data-act="ea-cancel">Cancel</button><span id="eaMsg" class="small late-txt"></span></div></div>';
+  }
+  h += '<div class="tbl-wrap"><table class="bomflat"><tr><th>No</th><th>Date</th><th>Time</th><th>Title</th><th>Attendees</th><th>Where</th><th>Agenda</th><th>Status</th><th>Calendar</th><th>By</th>' + (edit ? '<th class="noprint"></th>' : '') + '</tr>' +
+    (list.length ? list.map(m => { const st = eaMtgStatus(m); return '<tr><td class="nowrap"><b>' + esc(m.no) + '</b></td><td class="nowrap">' + fmtD(m.start) + '</td><td class="nowrap">' + String(fmtDT(m.start)).slice(-5) + ' – ' + String(fmtDT(m.end)).slice(-5) + '</td><td>' + esc(m.title) + '</td><td>' + esc((m.attendees || []).map(a => a.name || a.email).join(', ')) + '</td><td>' + (m.meet_link ? '<a href="' + esc(m.meet_link) + '" target="_blank" rel="noopener">Google Meet</a>' : esc(m.location || '')) + '</td><td style="white-space:pre-wrap;max-width:260px">' + esc(m.agenda || '') + '</td>' +
+      '<td><span class="st ' + (st === 'Cancelled' ? 'Cancelled' : st === 'Scheduled' ? 'Pending' : 'Done') + '">' + st + '</span></td><td>' + (m.cal_id ? '<span class="ok-txt">Synced</span>' + (m.src === 'google' ? '<div class="small muted">from Google</div>' : '') : '<span class="late-txt">' + esc(m.cal_error || 'Not in calendar') + '</span>') + '</td><td>' + esc(m.by || '') + '</td>' +
+      (edit ? '<td class="noprint nowrap">' + (st === 'Scheduled' ? '<button class="btn sm" data-act="ea-mtg-edit" data-id="' + esc(m.id) + '">Reschedule</button> <button class="btn sm ghost danger" data-act="ea-mtg-cancel" data-id="' + esc(m.id) + '" data-confirm="Cancel this meeting for everyone?">Cancel</button>' : '') + (st === 'Held' ? '<button class="btn sm primary" data-act="ea-mtg-mom" data-id="' + esc(m.id) + '">Make MOM</button>' : st === 'MOM done' ? '<a class="small" data-act="ea-mtg-mom-open" data-id="' + esc(m.mom_id) + '">Open MOM</a>' : '') + '</td>' : '') + '</tr>'; }).join('')
+      : '<tr><td colspan="11" class="empty">No meetings</td></tr>') + '</table></div>';
+  return h;
+}
+function eaKeepMtg() { const M = EA_UI.mtg = EA_UI.mtg || {}; M.title = ($('#mgTitle') || {}).value || ''; M.date = ($('#mgDate') || {}).value || ''; M.from = ($('#mgFrom') || {}).value || ''; M.to = ($('#mgTo') || {}).value || ''; M.emails = $$('.mgAtt:checked').map(x => x.value); M.extra = ($('#mgExtra') || {}).value || ''; M.location = ($('#mgLoc') || {}).value || ''; M.agenda = ($('#mgAgenda') || {}).value || ''; }
+ACTIONS['ea-mtg-new'] = () => { EA_UI.form = 'mtg'; EA_UI.mtg = { where: 'office' }; VIEWS.ea.render(); };
+ACTIONS['ea-mtg-edit'] = el => { const m = Store.get('meetings', el.dataset.id); if (!m) return; EA_UI.form = 'mtg'; EA_UI.mtg = { id: m.id, title: m.title, date: ymdOf(new Date(m.start)), from: String(fmtDT(m.start)).slice(-5), to: String(fmtDT(m.end)).slice(-5), emails: (m.attendees || []).map(a => a.email), extra: '', where: m.meet_link || m.meet ? 'meet' : 'office', location: m.location || '', agenda: m.agenda || '' }; VIEWS.ea.render(); };
+ACTIONS['ea-mtg-save'] = async el => {
+  if (!requirePerm('ea', 'edit')) return;
+  eaKeepMtg(); const M = EA_UI.mtg; const msg = t => { const e = $('#eaMsg'); if (e) e.textContent = t; };
+  if (!M.title.trim()) return msg('Enter the title.'); if (!M.date || !M.from || !M.to) return msg('Enter date and time.');
+  const start = new Date(M.date + 'T' + M.from + ':00'), end = new Date(M.date + 'T' + M.to + ':00');
+  if (!(end > start)) return msg('End time must be after the start time.'); if (!M.id && start < new Date()) return msg('The meeting time is already past.');
+  const extra = M.extra.split(/[,;\s]+/).map(x => x.trim().toLowerCase()).filter(Boolean);
+  const badE = extra.find(x => !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(x)); if (badE) return msg(badE + ' is not an email ID.');
+  const emails = Array.from(new Set(M.emails.concat(extra))); if (!emails.length) return msg('Tick at least one attendee.');
+  const people = eaPeople(); const attendees = emails.map(e => ({ email: e, name: (people.find(p => p.email === e) || {}).name || e }));
+  const meet = M.where === 'meet';
+  el.disabled = true; msg(M.id ? 'Updating Google Calendar…' : 'Creating the calendar event and sending invites…');
+  const m = M.id ? Store.get('meetings', M.id) : { id: uid(), no: nextNo('meetings', 'MTG'), by: ME.name, created_at: nowIso(), status: 'Scheduled' };
+  Object.assign(m, { title: M.title.trim(), start: start.toISOString(), end: end.toISOString(), attendees, location: meet ? '' : M.location.trim(), meet, agenda: M.agenda.trim() });
+  if (CLOUD && SB) {
+    const r = await eaMail({ action: 'calendar', op: m.cal_id ? 'update' : 'create', id: m.cal_id || '', title: m.title, start: m.start, end: m.end, guests: emails, location: m.location, description: (m.agenda ? 'Agenda:\n' + m.agenda + '\n\n' : '') + 'Scheduled from Nexus 2.0 by ' + ME.name + ' (' + m.no + ')', meet });
+    if (r.err) { m.cal_error = r.err; flash('Saved in Nexus, but Google Calendar said: ' + esc(r.err), 'err'); }
+    else { m.cal_id = r.data.id || m.cal_id; m.cal_error = ''; if (r.data.meet) m.meet_link = r.data.meet; if (r.data.link) m.cal_link = r.data.link; if (meet && !m.meet_link && /no Meet link/.test(r.data.via || '')) flash('Meeting made without a Meet link — turn on the Google Calendar API service in Apps Script.', 'err'); }
+  } else m.cal_error = 'local mode';
+  Store.put('meetings', m); audit(M.id ? 'meeting.update' : 'meeting.create', m.no, m.title + ' · ' + fmtDT(m.start) + ' · ' + attendees.length + ' attendee(s)' + (m.cal_id ? ' · calendar' : ''));
+  EA_UI.form = false; EA_UI.mtg = null; if (!m.cal_error) flash(esc(m.no) + (M.id ? ' updated, attendees notified.' : ' scheduled, invites sent.')); VIEWS.ea.render();
+};
+ACTIONS['ea-mtg-cancel'] = async el => {
+  if (!requirePerm('ea', 'edit')) return; const m = Store.get('meetings', el.dataset.id); if (!m) return;
+  if (m.cal_id && CLOUD && SB) { const r = await eaMail({ action: 'calendar', op: 'cancel', id: m.cal_id }); if (r.err && !/not found/i.test(r.err)) { flash('Google Calendar said: ' + esc(r.err), 'err'); return; } }
+  m.status = 'Cancelled'; m.cancelled_by = ME.name; m.cancelled_at = nowIso(); Store.put('meetings', m); audit('meeting.cancel', m.no, m.title); flash(esc(m.no) + ' cancelled, attendees notified.'); VIEWS.ea.render();
+};
+ACTIONS['ea-mtg-mom'] = el => { const m = Store.get('meetings', el.dataset.id); if (!m) return; EA_UI.tab = 'mom'; EA_UI.form = 'mom'; EA_UI.pts = []; EA_UI.title = m.title; EA_UI.at = m.start.slice(0, 16); EA_UI.notes = m.agenda ? 'Agenda: ' + m.agenda + '\n' : ''; EA_UI.att = (m.attendees || []).map(a => a.name).filter(n => eaUsers().includes(n)); EA_UI.momMtg = m.id; VIEWS.ea.render(); };
+ACTIONS['ea-mtg-mom-open'] = el => { EA_UI.tab = 'mom'; EA_UI.open = el.dataset.id; VIEWS.ea.render(); };
+// events made straight in Google Calendar (next 30 days) come in as meetings too
+ACTIONS['ea-mtg-sync'] = async el => {
+  if (!requirePerm('ea', 'edit')) return; el.disabled = true;
+  const r = await eaMail({ action: 'calendar', op: 'list', from: new Date(Date.now() - 864e5).toISOString(), to: new Date(Date.now() + 30 * 864e5).toISOString() });
+  if (r.err) { flash('Google Calendar: ' + esc(r.err), 'err'); el.disabled = false; return; }
+  const have = new Set(Store.all('meetings').map(m => m.cal_id).filter(Boolean)); const people = eaPeople(); let n = 0;
+  (r.data.events || []).forEach(ev => {
+    if (have.has(ev.id) || ev.all_day) return;
+    const attendees = (ev.guests || []).map(e => ({ email: e, name: (people.find(p => p.email === e) || {}).name || e }));
+    const meetM = /https:\/\/meet\.google\.com\/[a-z-]+/.exec(ev.description || '');
+    Store.put('meetings', { id: uid(), no: nextNo('meetings', 'MTG'), title: ev.title || 'Meeting', start: ev.start, end: ev.end, attendees, location: ev.location || '', meet: !!meetM, meet_link: meetM ? meetM[0] : '', agenda: String(ev.description || '').replace(/Scheduled from Nexus.*$/s, '').trim(), status: 'Scheduled', cal_id: ev.id, src: 'google', by: 'Google Calendar', created_at: nowIso() }); n++;
+  });
+  if (n) audit('meeting.sync', 'Google Calendar', n + ' meeting(s) imported');
+  flash(n ? n + ' meeting(s) brought in from Google Calendar.' : 'Nothing new in Google Calendar.'); VIEWS.ea.render();
+};
+
+/* ---------- Follow-ups: a reminder to one person at a set time, by WhatsApp and / or mail ---------- */
+function eaFuPeople() {
+  const d10 = m => String(m || '').replace(/\D/g, '').slice(-10);
+  const out = [];
+  Store.all('users').filter(u => u.active !== false).forEach(u => out.push({ name: u.name, mobile: d10(u.mobile), email: String(u.email || '').toLowerCase(), kind: 'User' }));
+  Store.all('vendors').forEach(v => out.push({ name: v.name, mobile: d10(v.mobile), email: String(v.email || '').toLowerCase().split(/[,;\s]+/)[0], kind: 'Vendor' }));
+  Store.all('contacts').forEach(c => out.push({ name: c.name, mobile: d10(c.mobile), email: String(c.email || '').toLowerCase(), kind: 'Contact' }));
+  return out.sort((a, b) => a.name.localeCompare(b.name));
+}
+function eaFuHtml() {
+  const edit = eaEdit();
+  const list = Store.all('followups').filter(f => EA_UI.f === 'all' || (EA_UI.f === 'open' ? f.status === 'Scheduled' : f.status !== 'Scheduled')).sort((a, b) => (a.at || '') < (b.at || '') ? (EA_UI.f === 'open' ? -1 : 1) : (EA_UI.f === 'open' ? 1 : -1));
+  let h = '<div class="toolbar noprint">' + seg('eaF', [{ v: 'open', l: 'Scheduled' }, { v: 'done', l: 'Sent / Cancelled' }, { v: 'all', l: 'All' }], EA_UI.f) + '<span class="grow"></span><button class="btn" data-act="print">Print</button>' + (edit ? '<button class="btn primary" data-act="ea-fu-new">+ Follow-up</button>' : '') + '</div>';
+  if (EA_UI.form === 'fu') {
+    const P = eaFuPeople(); const labels = P.map(p => p.name + ' · ' + p.kind + (p.mobile ? ' · ' + p.mobile : '') + (p.email ? ' · ' + p.email : ''));
+    h += '<div class="panel" style="max-width:860px"><table class="jckv">' +
+      '<tr><td class="k">To *</td><td class="v"><select id="fuWho">' + selOpts(labels, '') + '</select></td></tr>' +
+      '<tr><td class="k">Send by *</td><td class="v">' + seg('fuCh', [{ v: 'WhatsApp', l: 'WhatsApp' }, { v: 'Mail', l: 'Mail' }, { v: 'Both', l: 'Both' }], EA_UI.fuCh || 'WhatsApp') + '</td></tr>' +
+      '<tr><td class="k">When *</td><td class="v"><input id="fuDate" type="date" value="' + todayYmd() + '"> <input id="fuTime" type="time" value="10:00"></td></tr>' +
+      '<tr><td class="k">Message *</td><td class="v"><textarea id="fuText" rows="3" maxlength="500"></textarea></td></tr></table>' +
+      '<div class="toolbar"><button class="btn primary" data-act="ea-fu-save">Schedule</button><button class="btn" data-act="ea-cancel">Cancel</button><span id="eaMsg" class="small late-txt"></span></div></div>';
+  }
+  h += '<div class="tbl-wrap"><table class="bomflat"><tr><th>No</th><th>When</th><th>To</th><th>Type</th><th>By</th><th>Message</th><th>Status</th><th>Sent on</th><th>Result</th><th>Set by</th>' + (edit ? '<th class="noprint"></th>' : '') + '</tr>' +
+    (list.length ? list.map(f => '<tr><td class="nowrap"><b>' + esc(f.no) + '</b></td><td class="nowrap">' + fmtDT(f.at) + '</td><td>' + esc(f.to_name) + '</td><td>' + esc(f.to_kind) + '</td><td>' + esc(f.channel) + '</td><td style="white-space:pre-wrap;max-width:320px">' + esc(f.text) + '</td><td><span class="st ' + (f.status === 'Sent' ? 'Done' : f.status === 'Cancelled' ? 'Cancelled' : f.status === 'Failed' ? 'Late' : 'Pending') + '">' + esc(f.status) + '</span></td><td class="nowrap">' + (f.sent_at ? fmtDT(f.sent_at) : '') + '</td><td class="small">' + esc(f.result || '') + '</td><td>' + esc(f.by) + '</td>' +
+      (edit ? '<td class="noprint">' + (f.status === 'Scheduled' ? '<button class="btn sm ghost danger" data-act="ea-fu-cancel" data-id="' + esc(f.id) + '" data-confirm="Cancel this follow-up?">Cancel</button>' : f.status === 'Failed' ? '<button class="btn sm" data-act="ea-fu-retry" data-id="' + esc(f.id) + '">Send again</button>' : '') + '</td>' : '') + '</tr>').join('')
+      : '<tr><td colspan="11" class="empty">No follow-ups</td></tr>') + '</table></div>';
+  return h;
+}
+ACTIONS['ea-fu-new'] = () => { EA_UI.form = 'fu'; VIEWS.ea.render(); };
+ACTIONS['ea-fu-save'] = () => {
+  if (!requirePerm('ea', 'edit')) return;
+  const P = eaFuPeople(); const labels = P.map(p => p.name + ' · ' + p.kind + (p.mobile ? ' · ' + p.mobile : '') + (p.email ? ' · ' + p.email : ''));
+  const who = P[labels.indexOf($('#fuWho').value)]; const ch = EA_UI.fuCh || 'WhatsApp'; const date = $('#fuDate').value, time = $('#fuTime').value, text = $('#fuText').value.trim();
+  const msg = t => { $('#eaMsg').textContent = t; };
+  if (!who) return msg('Pick who to follow up.'); if (!date || !time) return msg('Enter date and time.'); if (!text) return msg('Write the message.');
+  if ((ch === 'WhatsApp' || ch === 'Both') && !/^[6-9]\d{9}$/.test(who.mobile)) return msg(who.name + ' has no mobile number for WhatsApp.');
+  if ((ch === 'Mail' || ch === 'Both') && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(who.email)) return msg(who.name + ' has no email ID.');
+  const at = new Date(date + 'T' + time + ':00'); if (at < new Date(Date.now() - 60000)) return msg('The time is already past.');
+  const f = Store.put('followups', { id: uid(), no: nextNo('followups', 'FU'), to_name: who.name, to_kind: who.kind, mobile: who.mobile, email: who.email, channel: ch, at: at.toISOString(), text, status: 'Scheduled', by: ME.name, created_at: nowIso() });
+  audit('followup.create', f.no, who.name + ' · ' + ch + ' · ' + fmtDT(f.at) + ' · ' + text.slice(0, 60));
+  EA_UI.form = false; flash(esc(f.no) + ' scheduled for ' + fmtDT(f.at) + '.'); VIEWS.ea.render(); eaFuRun();
+};
+ACTIONS['ea-fu-cancel'] = el => { if (!requirePerm('ea', 'edit')) return; const f = Store.get('followups', el.dataset.id); if (!f || f.status !== 'Scheduled') return; f.status = 'Cancelled'; f.cancelled_by = ME.name; Store.put('followups', f); audit('followup.cancel', f.no, f.to_name); VIEWS.ea.render(); };
+ACTIONS['ea-fu-retry'] = el => { if (!requirePerm('ea', 'edit')) return; const f = Store.get('followups', el.dataset.id); if (!f || f.status !== 'Failed') return; f.status = 'Scheduled'; f.result = ''; Store.put('followups', f); eaFuRun(true); };
+// sends what is due: runs every minute in the browser of anyone with EA edit access (or Admin)
+let EA_FU_BUSY = false;
+async function eaFuRun(force) {
+  if (!CLOUD || !SB || !ME || EA_FU_BUSY) return; if (!(isAdminRole() || can('ea', 'edit'))) return;
+  const due = Store.all('followups').filter(f => f.status === 'Scheduled' && new Date(f.at) <= new Date()); if (!due.length) return;
+  EA_FU_BUSY = true;
+  try {
+    try { await jcFresh(); } catch (e) { }
+    for (const f0 of due) {
+      const f = Store.get('followups', f0.id); if (!f || f.status !== 'Scheduled') continue;
+      f.status = 'Sending'; f.sender = ME.name; Store.put('followups', f);   // claimed by this browser; another one sees it and leaves it
+      const res = [];
+      if (f.channel === 'Mail' || f.channel === 'Both') {
+        const mq = Store.put('mail_queue', { id: uid(), to: f.email, subject: 'Follow-up from ' + (settings().company || 'Zooto Fashion') + ' — ' + f.no, body: 'Dear ' + f.to_name + ',\n\n' + f.text + '\n\nRegards,\n' + f.by + '\n' + (settings().company || 'Zooto Fashion'), ref: f.no, name: 'Nexus EA', status: 'queued', at: nowIso(), by: f.by });
+        await mailSend(mq.id); const m2 = Store.get('mail_queue', mq.id); res.push('Mail: ' + ((m2 && m2.status) || 'queued') + (m2 && m2.error ? ' — ' + m2.error : ''));
+      }
+      if (f.channel === 'WhatsApp' || f.channel === 'Both') {
+        try { await waSynced(); const { data, error } = await SB.functions.invoke('nx-wa', { body: { event: 'followup', id: f.id, resend: true } }); let msg = data && data.error; if (error) { msg = error.message; try { const j = await error.context.json(); msg = j.error || msg; } catch (e) { } } res.push('WhatsApp: ' + (msg ? 'failed — ' + msg : data && data.failed ? 'failed' : 'sent')); } catch (e) { res.push('WhatsApp: failed — ' + e.message); }
+      }
+      f.result = res.join(' | '); f.status = res.some(x => /failed|no_recipient/.test(x)) ? 'Failed' : 'Sent'; f.sent_at = nowIso(); Store.put('followups', f);
+      audit('followup.' + (f.status === 'Sent' ? 'sent' : 'failed'), f.no, f.to_name + ' · ' + f.result);
+    }
+  } finally { EA_FU_BUSY = false; if (curView().v === 'ea') VIEWS.ea.render(); }
+}
+setInterval(() => { try { eaFuRun(); } catch (e) { } }, 60000);
+
+/* ---------- Daily brief: every morning the Super Admins (and the EA) get today's meetings, late tasks, pending decisions and follow-ups ---------- */
+function eaBriefText() {
+  const today = todayYmd(); const parts = [];
+  const mtgs = Store.all('meetings').filter(m => m.status !== 'Cancelled' && ymdOf(new Date(m.start)) === today).sort((a, b) => a.start < b.start ? -1 : 1);
+  parts.push('Meetings today: ' + (mtgs.length ? mtgs.map(m => String(fmtDT(m.start)).slice(-5) + ' ' + m.title).join('; ') : 'none'));
+  const late = allTasks().filter(t => !t.done && t.status === 'Delayed'); parts.push('Late tasks: ' + late.length + (late.length ? ' (' + Array.from(new Set(late.map(t => t.owner || t.doer))).slice(0, 5).join(', ') + ')' : ''));
+  parts.push('Decisions pending: ' + Store.all('decisions').filter(d => d.status === 'Decided').length);
+  const fu = Store.all('followups').filter(f => f.status === 'Scheduled' && ymdOf(new Date(f.at)) === today); parts.push('Follow-ups today: ' + fu.length);
+  const pos = Store.all('purchase_orders').filter(p => p.approval === 'Pending' && !p.cancelled).length; if (pos) parts.push('PO approvals waiting: ' + pos);
+  return parts.join(' | ');
+}
+function eaDailyBrief() {
+  if (!CLOUD || !SB || !ME || new Date().getHours() < 8) return;
+  if (!(isAdminRole() || can('ea', 'edit'))) return;
+  const day = todayYmd(); try { if (localStorage.getItem('nx_ea_brief') === day) return; localStorage.setItem('nx_ea_brief', day); } catch (e) { return; }
+  try {
+    const text = eaBriefText();
+    waSend('daily_brief', day, false, { text });
+    const to = Store.all('users').filter(u => u.active !== false && (u.role_id === 'r_admin' || /EXECUTIVE ASSISTANT/i.test(u.designation || '')) && u.email).map(u => u.email).join(',');
+    if (to) { const mq = Store.put('mail_queue', { id: uid(), to, subject: 'Daily brief — ' + fmtD(day), body: text.split(' | ').join('\n'), ref: 'Daily brief ' + day, name: 'Nexus EA', no_reply: true, status: 'queued', at: nowIso(), by: ME.name }); mailSend(mq.id); }
+    audit('ea.daily_brief', day, text.slice(0, 200));
+  } catch (e) { console.error(e); }
+}
+setInterval(() => { try { eaDailyBrief(); } catch (e) { } }, 15 * 60000);
+
+/* ---------- Travel / visit log ---------- */
+const TRV_ST = ['Planned', 'Done', 'Cancelled'];
+function eaTrvHtml() {
+  const edit = eaEdit();
+  const list = Store.all('travels').filter(t => EA_UI.f === 'all' || (EA_UI.f === 'open' ? t.status === 'Planned' : t.status !== 'Planned')).sort((a, b) => (b.from || '') < (a.from || '') ? -1 : 1);
+  let h = '<div class="toolbar noprint">' + seg('eaF', [{ v: 'open', l: 'Planned' }, { v: 'done', l: 'Done / Cancelled' }, { v: 'all', l: 'All' }], EA_UI.f) + '<span class="grow"></span><button class="btn" data-act="print">Print</button>' + (edit ? '<button class="btn primary" data-act="ea-trv-new">+ Travel</button>' : '') + '</div>';
+  if (EA_UI.form === 'trv') {
+    const T = EA_UI.trv || {};
+    h += '<div class="panel" style="max-width:860px"><table class="jckv">' +
+      '<tr><td class="k">Who *</td><td class="v"><select id="tvWho">' + selOpts(eaUsers(), T.person || '') + '</select></td></tr>' +
+      '<tr><td class="k">Purpose *</td><td class="v"><input id="tvWhy" value="' + esc(T.purpose || '') + '"></td></tr>' +
+      '<tr><td class="k">From *</td><td class="v"><input id="tvFrom" type="date" value="' + esc(T.from || todayYmd()) + '"> to <input id="tvTo" type="date" value="' + esc(T.to || todayYmd()) + '"></td></tr>' +
+      '<tr><td class="k">Places *</td><td class="v"><input id="tvPlaces" value="' + esc(T.places || '') + '"></td></tr>' +
+      '<tr><td class="k">Travel by</td><td class="v"><select id="tvMode">' + selOpts(['Flight', 'Train', 'Car', 'Bus', 'Other'], T.mode || '') + '</select></td></tr>' +
+      '<tr><td class="k">Ticket / PNR</td><td class="v"><input id="tvTicket" value="' + esc(T.ticket || '') + '"></td></tr>' +
+      '<tr><td class="k">Hotel</td><td class="v"><input id="tvHotel" value="' + esc(T.hotel || '') + '"></td></tr>' +
+      '<tr><td class="k">Estimated cost ₹</td><td class="v"><input id="tvCost" type="number" min="0" step="any" value="' + esc(T.cost || '') + '"></td></tr>' +
+      '<tr><td class="k">Notes</td><td class="v"><textarea id="tvNotes" rows="3">' + esc(T.notes || '') + '</textarea></td></tr></table>' +
+      '<div class="toolbar"><button class="btn primary" data-act="ea-trv-save">' + (T.id ? 'Save' : 'Add') + '</button><button class="btn" data-act="ea-cancel">Cancel</button><span id="eaMsg" class="small late-txt"></span></div></div>';
+  }
+  h += '<div class="tbl-wrap"><table class="bomflat"><tr><th>No</th><th>Who</th><th>Purpose</th><th>From</th><th>To</th><th>Places</th><th>By</th><th>Ticket / PNR</th><th>Hotel</th><th class="num">Cost ₹</th><th>Notes</th><th>Status</th><th>Added by</th>' + (edit ? '<th class="noprint"></th>' : '') + '</tr>' +
+    (list.length ? list.map(t => '<tr><td class="nowrap"><b>' + esc(t.no) + '</b></td><td>' + esc(t.person) + '</td><td>' + esc(t.purpose) + '</td><td class="nowrap">' + fmtD(t.from) + '</td><td class="nowrap">' + fmtD(t.to) + '</td><td>' + esc(t.places) + '</td><td>' + esc(t.mode || '') + '</td><td>' + esc(t.ticket || '') + '</td><td>' + esc(t.hotel || '') + '</td><td class="num">' + (t.cost ? money(t.cost) : '') + '</td><td style="white-space:pre-wrap">' + esc(t.notes || '') + '</td><td><span class="st ' + (t.status === 'Done' ? 'Done' : t.status === 'Cancelled' ? 'Cancelled' : 'Pending') + '">' + esc(t.status) + '</span></td><td>' + esc(t.by) + '</td>' +
+      (edit ? '<td class="noprint nowrap"><button class="btn sm" data-act="ea-trv-edit" data-id="' + esc(t.id) + '">Edit</button> ' + (t.status === 'Planned' ? '<button class="btn sm primary" data-act="ea-trv-st" data-id="' + esc(t.id) + '" data-st="Done">Done</button> <button class="btn sm ghost danger" data-act="ea-trv-st" data-id="' + esc(t.id) + '" data-st="Cancelled" data-confirm="Cancel this travel?">Cancel</button>' : '') + '</td>' : '') + '</tr>').join('')
+      : '<tr><td colspan="14" class="empty">No travel</td></tr>') + '</table></div>';
+  return h;
+}
+ACTIONS['ea-trv-new'] = () => { EA_UI.form = 'trv'; EA_UI.trv = {}; VIEWS.ea.render(); };
+ACTIONS['ea-trv-edit'] = el => { const t = Store.get('travels', el.dataset.id); if (!t) return; EA_UI.form = 'trv'; EA_UI.trv = Object.assign({}, t); VIEWS.ea.render(); };
+ACTIONS['ea-trv-save'] = () => {
+  if (!requirePerm('ea', 'edit')) return;
+  const g = id => ($('#' + id) || {}).value || ''; const msg = t => { $('#eaMsg').textContent = t; };
+  const v = { person: g('tvWho'), purpose: g('tvWhy').trim(), from: g('tvFrom'), to: g('tvTo'), places: g('tvPlaces').trim(), mode: g('tvMode'), ticket: g('tvTicket').trim(), hotel: g('tvHotel').trim(), cost: num(g('tvCost')), notes: g('tvNotes').trim() };
+  if (!v.person) return msg('Select who is travelling.'); if (!v.purpose) return msg('Enter the purpose.'); if (!v.from || !v.to) return msg('Enter the dates.'); if (v.to < v.from) return msg('The return date is before the start.'); if (!v.places) return msg('Enter the places.');
+  const T = EA_UI.trv || {}; const t = T.id ? Object.assign(Store.get('travels', T.id), v) : Object.assign({ id: uid(), no: nextNo('travels', 'TRV'), status: 'Planned', by: ME.name, created_at: nowIso() }, v);
+  Store.put('travels', t); audit(T.id ? 'travel.update' : 'travel.create', t.no, t.person + ' · ' + t.places + ' · ' + fmtD(t.from) + ' to ' + fmtD(t.to));
+  EA_UI.form = false; EA_UI.trv = null; flash(esc(t.no) + ' saved.'); VIEWS.ea.render();
+};
+ACTIONS['ea-trv-st'] = el => { if (!requirePerm('ea', 'edit')) return; const t = Store.get('travels', el.dataset.id); const st = el.dataset.st; if (!t || !TRV_ST.includes(st)) return; const old = t.status; t.status = st; t.status_by = ME.name; t.status_at = nowIso(); Store.put('travels', t); audit('travel.status', t.no, old + ' → ' + st); VIEWS.ea.render(); };
+
+/* ---------- Contacts book: people outside Nexus (bank, CA, buyers, government…) ---------- */
+const CT_KINDS = ['Buyer', 'Bank', 'CA / Auditor', 'Government', 'Transporter', 'Service', 'Other'];
+function eaCtHtml() {
+  const edit = eaEdit(); const q = norm(EA_UI.cq || '');
+  const list = Store.all('contacts').filter(c => !q || norm([c.name, c.org, c.kind, c.mobile, c.email, c.notes].join(' ')).includes(q)).sort((a, b) => a.name.localeCompare(b.name));
+  let h = '<div class="toolbar noprint"><input id="ctQ" placeholder="Search name, company, number…" value="' + esc(EA_UI.cq || '') + '"><span class="muted small">' + list.length + ' contact(s)</span><span class="grow"></span><button class="btn" data-act="print">Print</button>' + (edit ? '<button class="btn primary" data-act="ea-ct-new">+ Contact</button>' : '') + '</div>';
+  if (EA_UI.form === 'ct') {
+    const C = EA_UI.ct || {};
+    h += '<div class="panel" style="max-width:760px"><table class="jckv">' +
+      '<tr><td class="k">Name *</td><td class="v"><input id="ctName" value="' + esc(C.name || '') + '"></td></tr>' +
+      '<tr><td class="k">Company</td><td class="v"><input id="ctOrg" value="' + esc(C.org || '') + '"></td></tr>' +
+      '<tr><td class="k">Type *</td><td class="v"><select id="ctKind">' + selOpts(CT_KINDS, C.kind || '') + '</select></td></tr>' +
+      '<tr><td class="k">Mobile</td><td class="v"><input id="ctMob" value="' + esc(C.mobile || '') + '"></td></tr>' +
+      '<tr><td class="k">Email</td><td class="v"><input id="ctMail" value="' + esc(C.email || '') + '"></td></tr>' +
+      '<tr><td class="k">Address</td><td class="v"><input id="ctAddr" value="' + esc(C.address || '') + '"></td></tr>' +
+      '<tr><td class="k">Notes</td><td class="v"><textarea id="ctNotes" rows="2">' + esc(C.notes || '') + '</textarea></td></tr></table>' +
+      '<div class="toolbar"><button class="btn primary" data-act="ea-ct-save">' + (C.id ? 'Save' : 'Add') + '</button><button class="btn" data-act="ea-cancel">Cancel</button><span id="eaMsg" class="small late-txt"></span></div></div>';
+  }
+  h += '<div class="tbl-wrap"><table class="bomflat"><tr><th>Name</th><th>Company</th><th>Type</th><th>Mobile</th><th>Email</th><th>Address</th><th>Notes</th><th>Added by</th>' + (edit ? '<th class="noprint"></th>' : '') + '</tr>' +
+    (list.length ? list.map(c => '<tr><td><b>' + esc(c.name) + '</b></td><td>' + esc(c.org || '') + '</td><td>' + esc(c.kind || '') + '</td><td class="nowrap">' + (c.mobile ? '<a href="https://wa.me/91' + esc(c.mobile) + '" target="_blank" rel="noopener">' + esc(c.mobile) + '</a>' : '') + '</td><td>' + (c.email ? '<a href="mailto:' + esc(c.email) + '">' + esc(c.email) + '</a>' : '') + '</td><td>' + esc(c.address || '') + '</td><td>' + esc(c.notes || '') + '</td><td>' + esc(c.by || '') + '</td>' +
+      (edit ? '<td class="noprint nowrap"><button class="btn sm" data-act="ea-ct-edit" data-id="' + esc(c.id) + '">Edit</button> <button class="btn sm ghost danger" data-act="ea-ct-del" data-id="' + esc(c.id) + '" data-confirm="Remove this contact?">Remove</button></td>' : '') + '</tr>').join('')
+      : '<tr><td colspan="9" class="empty">No contacts</td></tr>') + '</table></div>';
+  return h;
+}
+ACTIONS['ea-ct-new'] = () => { EA_UI.form = 'ct'; EA_UI.ct = {}; VIEWS.ea.render(); };
+ACTIONS['ea-ct-edit'] = el => { const c = Store.get('contacts', el.dataset.id); if (!c) return; EA_UI.form = 'ct'; EA_UI.ct = Object.assign({}, c); VIEWS.ea.render(); };
+ACTIONS['ea-ct-save'] = () => {
+  if (!requirePerm('ea', 'edit')) return;
+  const g = id => ($('#' + id) || {}).value || ''; const msg = t => { $('#eaMsg').textContent = t; };
+  const v = { name: g('ctName').trim(), org: g('ctOrg').trim(), kind: g('ctKind'), mobile: g('ctMob').replace(/\D/g, '').slice(-10), email: g('ctMail').trim().toLowerCase(), address: g('ctAddr').trim(), notes: g('ctNotes').trim() };
+  if (!v.name) return msg('Enter the name.'); if (!v.kind) return msg('Select the type.');
+  if (v.mobile && !/^[6-9]\d{9}$/.test(v.mobile)) return msg('Mobile must be 10 digits.'); if (v.email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v.email)) return msg('Email ID is not valid.');
+  if (!v.mobile && !v.email) return msg('Enter a mobile number or an email ID.');
+  const C = EA_UI.ct || {}; if (Store.all('contacts').some(c => c.id !== C.id && norm(c.name) === norm(v.name) && norm(c.org || '') === norm(v.org))) return msg('This contact already exists.');
+  const c = C.id ? Object.assign(Store.get('contacts', C.id), v) : Object.assign({ id: uid(), by: ME.name, created_at: nowIso() }, v);
+  Store.put('contacts', c); audit(C.id ? 'contact.update' : 'contact.create', c.name, (c.org ? c.org + ' · ' : '') + c.kind + (c.mobile ? ' · ' + c.mobile : '') + (c.email ? ' · ' + c.email : ''));
+  EA_UI.form = false; EA_UI.ct = null; flash(esc(c.name) + ' saved.'); VIEWS.ea.render();
+};
+ACTIONS['ea-ct-del'] = el => { if (!requirePerm('ea', 'edit')) return; const c = Store.get('contacts', el.dataset.id); if (!c) return; Store.del('contacts', c.id); audit('contact.delete', c.name, c.org || ''); VIEWS.ea.render(); };
