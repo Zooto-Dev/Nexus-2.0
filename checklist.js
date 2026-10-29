@@ -264,7 +264,7 @@ function clNewHtml() {
   const u = clUserOf(F.clDoer || '');
   const freqSel = '<select id="clFreq">' + Object.keys(CL_FREQ).map(c => '<optgroup label="' + c + '">' + CL_FREQ[c].map(o => '<option' + (o[0] === CHK_UI.freq ? ' selected' : '') + '>' + esc(o[0]) + '</option>').join('') + '</optgroup>').join('') + '</select>';
   return '<div class="panel" id="clForm" style="max-width:760px"><table class="jckv">' +
-    '<tr><td class="k">Type *</td><td class="v">' + seg('clType', ['Checklist', 'Delegation'], CHK_UI.type) + '</td></tr>' +
+    '<tr><td class="k">Type *</td><td class="v">Checklist <span class="muted small">(one-time delegation: Operations → EA)</span></td></tr>' +
     '<tr><td class="k">Doer *</td><td class="v"><select id="clDoer">' + doerOpts(clDoerList(), F.clDoer) + '</select></td></tr>' +
     '<tr><td class="k">Department</td><td class="v"><input id="clDept" value="' + esc(u.department || '') + '" disabled></td></tr>' +
     '<tr><td class="k">Email</td><td class="v"><input id="clEmail" value="' + esc(u.email || '') + '" disabled></td></tr>' +
@@ -304,7 +304,7 @@ ACTIONS['cl-save'] = () => {
 
 /* ---------- Task List: the rules themselves ---------- */
 function clListHtml(all) {
-  const rows = Store.all('checklist').filter(t => !t.demo && (all || isMyDoer(t.doer))).map(t => ({ t, r: clRule(t) })).sort((a, b) => a.t.doer < b.t.doer ? -1 : 1);
+  const rows = Store.all('checklist').filter(t => !t.demo && (all || isMyDoer(t.doer))).map(t => ({ t, r: clRule(t) })).filter(x => x.r.type !== 'Delegation').sort((a, b) => a.t.doer < b.t.doer ? -1 : 1);
   const edit = clCanAdd();
   return '<div class="tbl-wrap"><table class="bomflat"><tr><th>Type</th><th>Name</th><th>Department</th><th>Task</th><th>Frequency</th><th>Schedule</th><th>Shift</th><th>Start Date</th><th>End Date</th><th>Skip Sunday</th><th>Skip Holidays</th><th>Created By</th><th>Status</th><th></th></tr>' +
     (rows.length ? rows.map(({ t, r }) => '<tr' + (t.active === false ? ' class="muted"' : '') + '><td>' + esc(r.type) + '</td><td>' + esc(t.doer) + '</td><td>' + esc(t.dept || clUserOf(t.doer).department || '') + '</td><td>' + esc(t.title) + '</td><td>' + esc(r.frequency || '') + '</td><td>' + esc(r.schedule || '') + '</td><td>' + esc(t.shift || 'G') + '</td>' +
