@@ -60,7 +60,7 @@ function saveLocal() {
     localStorage.setItem(DB_KEY, JSON.stringify(DB));
   } catch (e) { flash('Browser storage full — export a backup from Settings.', 'err'); }
 }
-const COLS = ['users', 'roles', 'customers', 'items', 'materials', 'processes', 'orders', 'samples', 'dispatches', 'purchase_orders', 'sourcing', 'grns', 'inwards', 'vendors', 'issues', 'rsjw', 'rtvs', 'boms', 'job_cards', 'requisitions', 'tickets', 'checklist', 'checklist_log', 'escalations', 'attributes', 'item_types', 'mail_queue', 'requirements', 'prod_reports', 'prod_plans', 'wa_log', 'opening_stock', 'price_requests', 'moms', 'decisions', 'meetings', 'followups', 'travels', 'contacts', 'audit'];
+const COLS = ['users', 'roles', 'customers', 'items', 'materials', 'processes', 'orders', 'samples', 'dispatches', 'purchase_orders', 'sourcing', 'grns', 'inwards', 'vendors', 'issues', 'rsjw', 'rtvs', 'boms', 'job_cards', 'requisitions', 'tickets', 'checklist', 'checklist_log', 'escalations', 'attributes', 'item_types', 'mail_queue', 'requirements', 'prod_reports', 'prod_plans', 'wa_log', 'opening_stock', 'price_requests', 'moms', 'decisions', 'meetings', 'followups', 'travels', 'contacts', 'leads', 'vendor_requests', 'audit'];
 let DB = null;
 const CFG = window.NEXUS_CONFIG || {};
 // demo shares one demo table (nx_demo) between all demo users; it can never reach the real table
@@ -656,7 +656,8 @@ const NAV = [
     { v: 'poapproval', l: 'PO Approval', mod: 'purchase' },
     { v: 'priceapproval', l: 'Price Approval', mod: 'purchase' },
     { v: 'invapproval', l: 'Invoice Approval', mod: 'purchase' },
-    { v: 'vendors', l: 'Vendors', mod: 'purchase' }] },
+    { v: 'vendors', l: 'Vendors', mod: 'purchase' },
+    { v: 'vendorreq', l: 'Vendor Requests', mod: 'purchase' }] },
   { menu: 'Merchant', items: [
     { v: 'merchantdash', l: 'Merchant Dashboard', mod: 'merchant' },
     { v: 'punch', l: 'Punch Order', mod: 'orders', edit: true },
@@ -664,7 +665,8 @@ const NAV = [
     { v: 'jobcards', l: 'Job Card', mod: 'merchant' },
     { v: 'swatch', l: 'Swatch Approval', mod: 'merchant' },
     { v: 'jccorrection', l: 'Job Card Correction', mod: 'merchant' },
-    { v: 'customers', l: 'CDB', mod: 'masters' }] },
+    { v: 'customers', l: 'CDB', mod: 'masters' },
+    { v: 'leads', l: 'Lead', mod: 'merchant' }] },
   { menu: 'Store', items: [
     { v: 'inward', l: 'Inwarding', mod: 'store' },
     { v: 'swatchmatch', l: 'QC Check', mod: 'store' },

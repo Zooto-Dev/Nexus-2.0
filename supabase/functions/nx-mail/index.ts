@@ -58,10 +58,10 @@ Deno.serve(async (req) => {
 
     // addresses Nexus may write to
     const docs = async (col: string) => ((await db.from('nx_docs').select('data').eq('collection', col)).data || []).map((r: { data: Doc }) => r.data);
-    const [settingsRow, users, vendors, contacts] = await Promise.all([db.from('nx_docs').select('data').eq('collection', 'settings').eq('id', 'main').maybeSingle(), docs('users'), docs('vendors'), docs('contacts')]);
+    const [settingsRow, users, vendors, contacts, leads, vreqs] = await Promise.all([db.from('nx_docs').select('data').eq('collection', 'settings').eq('id', 'main').maybeSingle(), docs('users'), docs('vendors'), docs('contacts'), docs('leads'), docs('vendor_requests')]);
     const allowed = new Set<string>();
     Object.values((settingsRow.data?.data || {}) as Doc).forEach((v) => { if (typeof v === 'string') list(v).filter((x) => EMAIL.test(x)).forEach((x) => allowed.add(x)); });
-    [...users, ...vendors, ...contacts].forEach((u) => list(u.email).filter((x) => EMAIL.test(x)).forEach((x) => allowed.add(x)));
+    [...users, ...vendors, ...contacts, ...leads, ...vreqs].forEach((u) => list(u.email).filter((x) => EMAIL.test(x)).forEach((x) => allowed.add(x)));
 
     const sendOne = async (row: Doc, pdf?: { b64: string; name: string }) => {
       const to = list(row.to), cc = list(row.cc);
