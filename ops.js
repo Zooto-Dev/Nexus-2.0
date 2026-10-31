@@ -9,18 +9,25 @@ function stepDoneBtn(o, s, def, spec) {
 ACTIONS['step-done'] = el => {
   const tr = el.closest('tr'); const note = tr && tr.querySelector('input[data-note]'); const nv = note ? note.value.trim() : '';
   const o = fmsGet(el.dataset.o); const r = o && resolveOrder(o); const def = r && r.spec.steps.find(x => x.id === el.dataset.s);
-  if (!def || !def.capture) { markStepDone(el.dataset.o, el.dataset.s, nv); route(); return; }
-  const f = (r.spec.fields || []).find(x => x.key === def.capture.field) || { label: def.capture.field, type: 'date' };
+  const need = def && needAny(def.need) ? def.need : null;
+  if (!def || (!def.capture && !need)) { markStepDone(el.dataset.o, el.dataset.s, nv); route(); return; }
+  const f = def.capture ? ((r.spec.fields || []).find(x => x.key === def.capture.field) || { label: def.capture.field, type: 'date' }) : null;
+  const bag = { photos: [], files: [], remark: '', date: '' };
   const old = $('#capDlg'); if (old) old.remove();
   const d = document.createElement('div'); d.id = 'capDlg'; d.className = 'dlg-back';
-  d.innerHTML = '<div class="dlg"><div class="dlg-h">' + esc(o.no) + ' · ' + esc(def.name) + '</div><table class="jckv"><tr><td class="k">' + esc(f.label) + ' *</td><td class="v">' + (f.options ? '<select id="capVal"><option value=""></option>' + f.options.filter(Boolean).map(x => '<option>' + esc(x) + '</option>').join('') + '</select>' : '<input id="capVal" type="' + (f.type === 'datetime' ? 'datetime-local' : f.type === 'date' ? 'date' : 'text') + '" value="' + esc((o.extra || {})[def.capture.field] || '') + '">') + '</td></tr></table>' +
+  d.innerHTML = '<div class="dlg"><div class="dlg-h">' + esc(o.no) + ' · ' + esc(def.name) + '</div><table class="jckv">' +
+    (f ? '<tr><td class="k">' + esc(f.label) + ' *</td><td class="v">' + (f.options ? '<select id="capVal"><option value=""></option>' + f.options.filter(Boolean).map(x => '<option>' + esc(x) + '</option>').join('') + '</select>' : '<input id="capVal" type="' + (f.type === 'datetime' ? 'datetime-local' : f.type === 'date' ? 'date' : 'text') + '" value="' + esc((o.extra || {})[def.capture.field] || '') + '">') + '</td></tr>' : '') +
+    (need ? needRows(need, !!need.attach, !!need.remark) : '') + '</table>' +
     '<div class="dlg-f"><span id="capMsg" class="small late-txt"></span><span class="grow"></span><button class="btn" data-cap-x>Cancel</button><button class="btn primary" data-cap-ok>Done</button></div></div>';
-  document.body.appendChild(d); $('#capVal').focus();
+  document.body.appendChild(d); if (f) $('#capVal').focus();
+  if (need) needWire(d, bag);
   d.addEventListener('click', ev => {
     if (ev.target.closest('[data-cap-x]')) { d.remove(); return; }
     if (!ev.target.closest('[data-cap-ok]')) return;
-    const v = $('#capVal').value.trim(); if (!v) { $('#capMsg').textContent = 'Enter ' + f.label + '.'; return; }
-    d.remove(); markStepDone(el.dataset.o, el.dataset.s, nv, v); route();
+    const v = f ? $('#capVal').value.trim() : '';
+    if (f && !v) { $('#capMsg').textContent = 'Enter ' + f.label + '.'; return; }
+    if (need) { const bad = needCheck(d, need, bag, !!need.attach, !!need.remark); if (bad) { $('#capMsg').textContent = bad; return; } }
+    d.remove(); markStepDone(el.dataset.o, el.dataset.s, nv || bag.remark, v, need ? bag : null); route();
   });
 };
 function dueToday(s) { const d = s.planned; return d && ymdOf(d) === todayYmd(); }
@@ -494,6 +501,7 @@ ACTIONS['punch-save'] = async () => {
   if (!P.id) await jcUniqueCheck(o);
   audit(P.id ? 'order.edit' : 'order.create', o.no, cu.name + ' · PO ' + P.buyer_po + ' · ' + qtyFmt(orderTotals(o).qty) + ' qty');
   if (P.id) { PUNCH = null; flash('Saved ' + esc(o.no) + '.'); go('order', o.id); return; }
+  try { pptRaise(o); } catch (e) { console.error(e); }   // packaging PPT task on the brand merchant for every new article
   if (mergedNote) flash('Rows with the same article/colour/packing were merged.');
   newPunch(); VIEWS.punch.render();
   flash('Saved <b>' + esc(o.no) + '</b> — FMS started. <a href="#/order/' + esc(o.id) + '">Open</a> · punch the next order below.');
@@ -567,7 +575,8 @@ VIEWS.order = {
           const act = s.status === 'Pending' || s.status === 'Late' ? stepDoneBtn(o, s, def, r.spec) :
             (s.status === 'Done' && !isDispatchStep(def, r.spec) && (can('tracker', 'edit')) ? '<button class="btn sm ghost" data-act="undo-step" data-o="' + esc(o.id) + '" data-s="' + esc(sid) + '" data-confirm="Undo?">Undo</button>' : '');
           const note = (o.notes || {})[sid]; const by = (o.done_by || {})[sid];
-          return '<tr class="' + (st.cur && st.cur.id === sid ? 'cur' : '') + '"><td>' + esc(s.name) + '</td><td>' + esc(s.doer || '') + '</td><td>' + (by && by !== 'seed' ? esc(by) : '') + '</td><td>' + esc(note || '') + '</td><td class="nowrap">' + fmtDT(s.planned) + '</td><td class="nowrap">' + fmtDT(s.actual) + '</td><td>' + stHtml(s.status) + '</td><td class="num late-txt">' + fmtDelay(s.delayMinutes) + '</td><td class="right">' + act + '</td></tr>';
+          const pf = (o.proof || {})[sid] ? Store.get('task_proof', (o.proof || {})[sid]) : null;
+          return '<tr class="' + (st.cur && st.cur.id === sid ? 'cur' : '') + '"><td>' + esc(s.name) + '</td><td>' + esc(s.doer || '') + '</td><td>' + (by && by !== 'seed' ? esc(by) : '') + '</td><td>' + esc(note || '') + (pf ? '<div class="small">' + proofHtml(pf) + (pf.date ? ' · ' + esc((def && def.need && def.need.date_label) || 'Date') + ' ' + fmtD(pf.date) : '') + '</div>' : '') + '</td><td class="nowrap">' + fmtDT(s.planned) + '</td><td class="nowrap">' + fmtDT(s.actual) + '</td><td>' + stHtml(s.status) + '</td><td class="num late-txt">' + fmtDelay(s.delayMinutes) + '</td><td class="right">' + act + '</td></tr>';
         }).join('') + '</table></div>';
     }
     h += '</div></div>';

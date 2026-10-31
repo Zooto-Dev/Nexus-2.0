@@ -60,7 +60,7 @@ function saveLocal() {
     localStorage.setItem(DB_KEY, JSON.stringify(DB));
   } catch (e) { flash('Browser storage full — export a backup from Settings.', 'err'); }
 }
-const COLS = ['users', 'roles', 'customers', 'items', 'materials', 'processes', 'orders', 'samples', 'dispatches', 'purchase_orders', 'sourcing', 'grns', 'inwards', 'vendors', 'issues', 'rsjw', 'rtvs', 'boms', 'job_cards', 'requisitions', 'tickets', 'checklist', 'checklist_log', 'escalations', 'attributes', 'item_types', 'mail_queue', 'requirements', 'prod_reports', 'prod_plans', 'wa_log', 'opening_stock', 'price_requests', 'moms', 'decisions', 'meetings', 'followups', 'travels', 'contacts', 'leads', 'vendor_requests', 'audit'];
+const COLS = ['users', 'roles', 'customers', 'items', 'materials', 'processes', 'orders', 'samples', 'dispatches', 'purchase_orders', 'sourcing', 'grns', 'inwards', 'vendors', 'issues', 'rsjw', 'rtvs', 'boms', 'job_cards', 'requisitions', 'tickets', 'checklist', 'checklist_log', 'escalations', 'attributes', 'item_types', 'mail_queue', 'requirements', 'prod_reports', 'prod_plans', 'wa_log', 'opening_stock', 'price_requests', 'moms', 'decisions', 'meetings', 'followups', 'travels', 'contacts', 'leads', 'vendor_requests', 'task_proof', 'art_ppt', 'audit'];
 let DB = null;
 const CFG = window.NEXUS_CONFIG || {};
 // demo shares one demo table (nx_demo) between all demo users; it can never reach the real table
@@ -539,18 +539,28 @@ function canMarkStep(def, s, spec) {
   if (can('tracker', 'edit')) return true;
   return can('tasks', 'edit') && isMyDoer(s.doer);
 }
-function markStepDone(orderId, stepId, note, capVal) {
+function markStepDone(orderId, stepId, note, capVal, proof) {
   const o = fmsGet(orderId); if (!o) return;
   const r = resolveOrder(o); const s = r && r.steps[stepId]; const def = r && r.spec.steps.find(x => x.id === stepId);
   if (!s || !(s.status === 'Pending' || s.status === 'Late')) { flash('This step is not open.', 'err'); return; }
   if (!canMarkStep(def, s, r.spec)) { flash('Only ' + esc(s.doer) + ' (or a tracker editor) can close this step.', 'err'); return; }
   if (def && def.capture && !capVal) { flash('Enter ' + esc(fieldLabelOf(r.spec, def.capture.field)) + ' to close this step.', 'err'); return; }
   if (def && def.capture) { o.extra = o.extra || {}; o.extra[def.capture.field] = capVal; }
+  // what the step asks for before it can be closed (attachment / remark / date)
+  if (def && typeof needAny === 'function' && needAny(def.need)) {
+    const p = proof || {};
+    if (def.need.attach && !((p.photos || []).length + (p.files || []).length)) { flash('This step needs an attachment.', 'err'); return; }
+    if (def.need.remark && !String(p.remark || '').trim()) { flash('This step needs a remark.', 'err'); return; }
+    if (def.need.date && !p.date) { flash('This step needs the ' + esc(def.need.date_label || 'date') + '.', 'err'); return; }
+    const pid = uid();
+    Store.put('task_proof', { id: pid, src: 'fms', ref: o.no, order_id: o.id, step: stepId, step_name: s.name, photos: p.photos || [], files: p.files || [], remark: String(p.remark || '').trim(), date: p.date || '', by: ME.name, at: nowIso() });
+    o.proof = o.proof || {}; o.proof[stepId] = pid;
+  }
   o.actuals = o.actuals || {}; o.actuals[stepId] = nowIso();
   if (note) { o.notes = o.notes || {}; o.notes[stepId] = note; }
   o.done_by = o.done_by || {}; o.done_by[stepId] = ME.name;
   fmsPut(o);
-  audit('step.done', o.no, s.name + (s.delayMinutes ? ' (late ' + fmtDelay(s.delayMinutes) + ')' : '') + (note ? ' — ' + note : ''));
+  audit('step.done', o.no, s.name + (s.delayMinutes ? ' (late ' + fmtDelay(s.delayMinutes) + ')' : '') + (proof && proof.date ? ' · ' + ((def.need && def.need.date_label) || 'date') + ' ' + fmtD(proof.date) : '') + (note ? ' — ' + note : ''));
   flash(esc(s.name) + ' marked done for ' + esc(o.no) + '. <a data-act="undo-step" data-o="' + esc(o.id) + '" data-s="' + esc(stepId) + '">Undo</a>');
 }
 function fieldLabelOf(spec, key) { const f = ((spec && spec.fields) || []).find(x => x.key === key); return f ? f.label : key; }
@@ -666,7 +676,8 @@ const NAV = [
     { v: 'swatch', l: 'Swatch Approval', mod: 'merchant' },
     { v: 'jccorrection', l: 'Job Card Correction', mod: 'merchant' },
     { v: 'customers', l: 'CDB', mod: 'masters' },
-    { v: 'leads', l: 'Lead', mod: 'merchant' }] },
+    { v: 'leads', l: 'Lead', mod: 'merchant' },
+    { v: 'packaging', l: 'Packaging PPT', mod: 'merchant' }] },
   { menu: 'Store', items: [
     { v: 'inward', l: 'Inwarding', mod: 'store' },
     { v: 'swatchmatch', l: 'QC Check', mod: 'store' },

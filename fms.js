@@ -263,6 +263,7 @@ function bldChart(spec, order) {
     if (st.applies) chips.push({ t: 'IF', bg: '#fdf3e2', fg: C.amber });
     if (auto) chips.push({ t: 'AUTO', bg: '#e6f4ee', fg: C.green });
     if (st.capture) chips.push({ t: 'ASKS DATE', bg: '#efeafb', fg: C.date });
+    if (needAny(st.need)) chips.push({ t: 'NEEDS ' + needText(st.need).toUpperCase(), bg: '#fff4e5', fg: '#b45309' });
     let cx = p.x + 14, chipSvg = '';
     chips.forEach(c => { const w = Math.round(c.t.length * 6.1 + 14); if (cx + w > p.x + W - 8) return; chipSvg += '<rect x="' + cx + '" y="' + (p.y + H - 26) + '" width="' + w + '" height="18" rx="9" fill="' + c.bg + '"/><text x="' + (cx + w / 2) + '" y="' + (p.y + H - 13.5) + '" text-anchor="middle" fill="' + c.fg + '" class="fc-chip">' + esc(c.t) + '</text>'; cx += w + 5; });
     s += '<g data-act="bld-sel" data-s="' + esc(id) + '" class="fc-node" opacity="' + (applies ? 1 : .45) + '">' +
@@ -378,7 +379,8 @@ function bldEditor() {
   h += '<div class="q"><div class="qh">' + (onDate ? '5' : '6') + '. How does it finish?</div><select data-k="statusType"><option value="manual">Doer clicks Done</option><option value="auto"' + (stt.type === 'auto' ? ' selected' : '') + '>Finishes by itself</option></select>' +
     (stt.type === 'auto' ? '<div class="qline"><span>When</span><select data-k="stRule">' + FMS_RULES.map(r => '<option value="' + r.id + '"' + (r.id === rule.id ? ' selected' : '') + '>' + esc(r.label) + '</option>').join('') + '</select>' +
       (rule.param ? '<select data-k="stField"><option value="">— choose —</option>' + bldFields().map(f => '<option value="' + esc(f.key) + '"' + (f.key === stt.field ? ' selected' : '') + '>' + esc(f.label) + '</option>').join('') + '</select>' : '') + '</div>'
-      : '<div class="qline"><span>On Done, ask for</span><select data-k="capField"><option value="">Nothing</option>' + capFields.map(f => '<option value="' + esc(f.key) + '"' + (s.capture && s.capture.field === f.key ? ' selected' : '') + '>' + esc(f.label) + '</option>').join('') + '</select></div>') + '</div>';
+      : '<div class="qline"><span>On Done, ask for</span><select data-k="capField"><option value="">Nothing</option>' + capFields.map(f => '<option value="' + esc(f.key) + '"' + (s.capture && s.capture.field === f.key ? ' selected' : '') + '>' + esc(f.label) + '</option>').join('') + '</select></div>' +
+      '<div class="qline"><span>Before Done, ask the doer for</span>' + needChips('bld', s.need) + '</div>') + '</div>';
   if (edit) h += '<div class="toolbar"><button class="btn sm" data-act="bld-move" data-d="-1">↑ Up</button><button class="btn sm" data-act="bld-move" data-d="1">↓ Down</button><span class="grow"></span><button class="btn sm danger" data-act="bld-del" data-confirm="Confirm delete">Delete step</button></div>';
   el.innerHTML = h;
   if (!edit) $$('input,select,textarea', el).forEach(x => { x.disabled = true; });
@@ -418,7 +420,7 @@ function bldCollect() {
   s.trigger = cands.length === 1 ? cands[0] : cands;
   if ($('[data-k="tatv"]', el)) { const tu = val('tatu'); s.tat = { value: num(val('tatv')), unit: val('tatUnit') || 'days' }; if (tu !== '' && tu != null) s.tat.urgent = num(tu); else if (tu == null && s.tat.urgent != null) delete s.tat.urgent; }
   if (val('statusType') === 'auto') { s.status = { type: 'auto', rule: val('stRule') || (s.status && s.status.rule) || autoRuleFor(s) }; const sf = val('stField'); if (sf) s.status.field = sf; delete s.capture; }
-  else { delete s.status; const cf = val('capField'); if (cf) s.capture = { field: cf }; else delete s.capture; }
+  else { delete s.status; const cf = val('capField'); if (cf) s.capture = { field: cf }; else delete s.capture; if ($('.nd-bld')) { const nd = needRead('bld'); if (nd) s.need = nd; else delete s.need; } }
 }
 // "Finishes by itself": pick the rule that fits the step name; never start on a rule that still needs a field
 function autoRuleFor(st) {

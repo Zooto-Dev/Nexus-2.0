@@ -745,7 +745,9 @@ function jcDetail(j) {
     h += '<h2>Material Status</h2><table style="max-width:860px;margin:4px 0"><tr><th>Item</th><th>Code</th><th class="num">Req.Qty</th><th class="num">PO raised</th><th class="num">Transit</th><th class="num">Reserved</th><th class="num">Issued (net)</th><th class="num">Balance to issue</th></tr>' +
       L.map(l => { const issd = issuedToJc(j.no, l.material); const pen = Math.max(0, num(l.required) - issd); const m = matBy(l.material) || {}; return '<tr><td>' + esc(m.name || l.material) + '</td><td>' + esc(l.material) + '</td><td class="num">' + qtyFmt(l.required) + '</td><td class="num">' + qtyFmt(l.po_raised) + '</td><td class="num muted">' + qtyFmt(transitOf(l.material)) + '</td><td class="num">' + qtyFmt(reservedOf(l.material, j.no)) + '</td><td class="num">' + qtyFmt(issd) + '</td><td class="num ' + (pen ? 'late-txt' : '') + '">' + (pen ? qtyFmt(pen) : '—') + '</td></tr>'; }).join('') + '</table>';
   }
-  h += '<div class="toolbar noprint" style="margin:8px 0 2px"><button class="btn sm primary" data-act="print-jc" data-id="' + esc(j.id) + '">Print Job Card</button></div>';
+  const pp = pptOf(j.brand, j.article);
+  h += '<div class="toolbar noprint" style="margin:8px 0 2px"><button class="btn sm primary" data-act="print-jc" data-id="' + esc(j.id) + '">Print Job Card</button>' +
+    (pp ? '<button class="btn sm" data-act="ppt-open" data-p="' + esc(pp.path) + '">Packaging PPT</button>' : '<span class="small late-txt">Packaging PPT missing</span>') + '</div>';
   return h;
 }
 function jcForm() {
@@ -789,6 +791,9 @@ function jcfDecorate() {
   if (!$('#jfSizes')) return;
   const o = Store.all('orders').find(x => norm(x.no) === norm(($('#jfOrd') || {}).value || '')) || {};
   const li = num(($('#jfLine') || {}).value); const l = o.lines ? jcOrderLine(o, li) : {};
+  // the packaging PPT of this article must be there before the job card can be made
+  const msg = $('#njMsg');
+  if (msg && l && l.article) { const pp = pptOf(o.customer_name, l.article); msg.innerHTML = pp ? '<span class="ok-txt">Packaging PPT: ' + esc(pp.name) + '</span>' : '<span class="late-txt">Packaging PPT for ' + esc(l.article) + ' is not uploaded yet — the job card cannot be saved until it is (Merchant → Packaging PPT).</span>'; }
   $$('#jfSizes tr[data-szrow]').forEach((tr, i) => {
     const c0 = $('[data-c0]', tr), c1 = $('[data-c1]', tr);
     c1.textContent = ''; c0.classList.remove('hl'); c1.classList.remove('hl');
@@ -923,6 +928,8 @@ ACTIONS['jc-save'] = () => {
   const o = Store.all('orders').find(x => norm(x.no) === norm($('#jfOrd').value));
   if (!o || $('#jfLine').value === '') { $('#njMsg').innerHTML = '<span class="late-txt">Select a JC No in the JOB CARD field first.</span>'; return; }
   const l = jcOrderLine(o, num($('#jfLine').value));
+  // a job card needs the article's packaging PPT
+  if (!pptOf(o.customer_name, l.article)) { $('#njMsg').innerHTML = '<span class="late-txt">Packaging PPT for ' + esc(l.article) + ' is not uploaded yet — Merchant → Packaging PPT. The job card can be made once it is there.</span>'; return; }
   const { act, ext } = jcfRecalc();
   if (act !== num(l.qty)) { $('#njMsg').innerHTML = '<span class="late-txt">Act.Ord total (' + qtyFmt(act) + ') must equal order qty (' + qtyFmt(l.qty) + ').</span>'; return; }
   const acts = $$('#jfSizes tr[data-szrow]').map(tr => num($('[data-sz="act"]', tr).value)); const exs = jcExtraSplit(acts);
@@ -948,6 +955,7 @@ ACTIONS['jc-save'] = () => {
   // WhatsApp: job card PDF to the merchandiser, reservation to Store, short items to Purchase
   const shortTxt = lines.map(x => ({ x, s: num(x.required) - stockOf(x.material) })).filter(y => y.s > 1e-9).map(y => ((matBy(y.x.material) || {}).name || y.x.material) + ' short ' + qtyFmt(y.s) + ' ' + (y.x.uom || '')).join('; ');
   waSend('jc_created', j.id, false, { short: shortTxt });
+  pptJcMail(j);   // the job card PDF and the packaging PPT go to the brand merchant together
   JC_UI.form = false; JCF = null;
   flash(esc(j.no) + ' created — material requirement generated (' + lines.length + ' items, extra +2%). Swatch approval pending.');
   VIEWS.jobcards.render();

@@ -122,7 +122,7 @@ function clRows(from, to, filter) {
       const p = clPlanned(t, ymd); const dn = clDoneOf(t, ymd); const a = dn && dn.at ? new Date(dn.at) : null;
       const status = a ? 'Done' : p < now ? 'Overdue' : ymd === today ? 'Pending' : 'Upcoming';
       out.push({ t, ymd, type: r.type, doer: t.doer, dept: t.dept || u.department || '', freq: r.type === 'Delegation' ? '' : r.frequency, sched: r.schedule || '', task: t.title, planned: p, actual: a, status,
-        delay: a ? clDelayMin(p, a) : status === 'Overdue' ? clDelayMin(p, now) : 0, by: dn ? dn.by : '', remark: dn ? dn.remark || '' : '', photos: dn ? dn.photos || 0 : 0, log: dn ? dn.log || '' : '' });
+        delay: a ? clDelayMin(p, a) : status === 'Overdue' ? clDelayMin(p, now) : 0, by: dn ? dn.by : '', remark: dn ? dn.remark || '' : '', photos: dn ? dn.photos || 0 : 0, files: dn ? dn.files || 0 : 0, date: dn ? dn.date || '' : '', log: dn ? dn.log || '' : '', need: t.need || null });
     });
   });
   return out.sort((a, b) => a.planned - b.planned);
@@ -141,27 +141,30 @@ ACTIONS['cl-done'] = el => {
   const ymd = el.dataset.d || todayYmd();
   const isDN = t.kind === 'debit_note' || /^Debit Note/i.test(t.title || '');
   const needPhoto = !isDN && !/account/i.test(clUserOf(t.doer).department || t.dept || ''); let dnPdf = '';
+  // what this task asks for before it can be closed; with nothing set, a picture is asked for as before
+  const need = t.need && needAny(t.need) ? t.need : null;
+  const attachReq = need ? !!need.attach : needPhoto, remarkReq = need ? !!need.remark : false;
+  const bag = { photos: [], files: [], remark: '', date: '' };
   const old = $('#clDlg'); if (old) old.remove();
-  const d = document.createElement('div'); d.id = 'clDlg'; d.className = 'dlg-back'; const photos = [];
+  const d = document.createElement('div'); d.id = 'clDlg'; d.className = 'dlg-back';
   d.innerHTML = '<div class="dlg"><div class="dlg-h">' + esc(t.title) + ' · ' + fmtD(ymd) + '</div><table class="jckv">' +
     (isDN ? '<tr><td class="k">Debit Note PDF *</td><td class="v"><input id="clDn" type="file" accept="application/pdf"></td></tr>' : '') +
-    '<tr><td class="k">Photo' + (needPhoto ? ' *' : '') + '</td><td class="v"><input id="clPh" type="file" accept="image/*" multiple> <span id="clPhN" class="small muted"></span></td></tr>' +
-    '<tr><td class="k">Remark</td><td class="v"><textarea id="clRem" rows="2"></textarea></td></tr></table>' +
+    needRows(need, attachReq, remarkReq) + '</table>' +
     '<div class="dlg-f"><span id="clMsg" class="small late-txt"></span><span class="grow"></span><button class="btn" data-x>Cancel</button><button class="btn primary" data-ok>Done</button></div></div>';
   document.body.appendChild(d);
   if (isDN) $('#clDn', d).addEventListener('change', e => { const f = e.target.files[0]; if (!f) { dnPdf = ''; return; } if (f.size > 5 * 1024 * 1024) { $('#clMsg', d).textContent = 'PDF must be under 5 MB.'; e.target.value = ''; return; } const fr = new FileReader(); fr.onload = () => { dnPdf = String(fr.result).split('base64,')[1] || ''; }; fr.readAsDataURL(f); });
-  $('#clPh', d).addEventListener('change', e => { Array.from(e.target.files || []).forEach(f => readImg(f, src => { if (src) photos.push(src); $('#clPhN', d).textContent = photos.length + ' photo(s)'; })); });
+  needWire(d, bag);
   d.addEventListener('click', ev => {
     if (ev.target.closest('[data-x]')) { d.remove(); return; }
     if (!ev.target.closest('[data-ok]')) return;
-    if (needPhoto && !photos.length) { $('#clMsg', d).textContent = 'Attach a photo.'; return; }
+    const bad = needCheck(d, need, bag, attachReq, remarkReq); if (bad) { $('#clMsg', d).textContent = bad; return; }
     if (isDN && !dnPdf) { $('#clMsg', d).textContent = 'Attach the debit note PDF.'; return; }
-    const rem = $('#clRem', d).value.trim(); const at = nowIso();
+    const rem = bag.remark; const at = nowIso();
     let log = '';
-    if (photos.length) { log = uid(); Store.put('checklist_log', { id: log, task_id: t.id, ymd, doer: t.doer, task: t.title, photos, remark: rem, at, by: ME.name }); }
-    t.done = t.done || {}; t.done[clDoneKey(t, ymd)] = { at, by: ME.name, remark: rem, photos: photos.length, log };
+    if (bag.photos.length || bag.files.length) { log = uid(); Store.put('checklist_log', { id: log, task_id: t.id, ymd, doer: t.doer, task: t.title, photos: bag.photos, files: bag.files, remark: rem, at, by: ME.name }); }
+    t.done = t.done || {}; t.done[clDoneKey(t, ymd)] = { at, by: ME.name, remark: rem, photos: bag.photos.length, files: bag.files.length, date: bag.date, log };
     t.done_at = at; clPin(t); Store.put('checklist', t);
-    audit('checklist.done', t.title, t.doer + ' · ' + ymd + (rem ? ' — ' + rem : '')); d.remove(); renderNav(); route();
+    audit('checklist.done', t.title, t.doer + ' · ' + ymd + (bag.date ? ' · ' + ((need && need.date_label) || 'date') + ' ' + fmtD(bag.date) : '') + (rem ? ' — ' + rem : '')); d.remove(); renderNav(); route();
     if (isDN) { waSend('debit_note', t.id + '|' + ymd, false, { pdf: dnPdf }); clDnMail(t, dnPdf); }   // the debit note goes to the vendor on WhatsApp and email
   });
 };
@@ -231,7 +234,7 @@ function clTasksHtml(all) {
   h += '<div class="tbl-wrap"><table class="bomflat"><tr><th>Type</th><th>Name</th><th>Department</th><th>Frequency</th><th>Task</th><th>Planned</th><th>Actual</th><th class="num">Time Delay</th><th>Status</th><th>Done By</th><th>Remark</th><th>Photo</th><th></th></tr>' +
     (rows.length ? rows.map(r => '<tr><td>' + esc(r.type) + '</td><td>' + esc(r.doer) + '</td><td>' + esc(r.dept) + '</td><td>' + esc(r.freq) + '</td><td>' + esc(r.task) + '</td><td class="nowrap">' + fmtDT(r.planned) + '</td><td class="nowrap">' + (r.actual ? fmtDT(r.actual) : '') + '</td>' +
       '<td class="num' + (r.delay ? ' late-txt' : '') + '">' + (r.delay ? fmtDelay(r.delay) : r.actual ? 'No Delay' : '') + '</td><td><span class="st ' + (r.status === 'Done' ? 'Done' : r.status === 'Overdue' ? 'Late' : r.status === 'Pending' ? 'Pending' : 'Waiting') + '">' + r.status + '</span></td><td>' + esc(r.by) + '</td><td>' + esc(r.remark) + '</td>' +
-      '<td>' + (r.log ? '<a data-act="cl-photo" data-log="' + esc(r.log) + '">' + r.photos + ' photo</a>' : '') + '</td><td class="nowrap">' + (r.status === 'Done' ? (can('tracker', 'edit') || r.by === ME.name ? '<a class="small" data-act="cl-undo" data-id="' + esc(r.t.id) + '" data-d="' + esc(r.ymd) + '">Undo</a>' : '') : r.status === 'Upcoming' ? '' : clDoneBtn(r.t, r.ymd)) + '</td></tr>').join('')
+      '<td>' + (r.log ? proofHtml(Object.assign({ id: r.log }, Store.get('checklist_log', r.log) || {})) : '') + (r.date ? '<div class="small">' + esc((r.need && r.need.date_label) || 'Date') + ': ' + fmtD(r.date) + '</div>' : '') + '</td><td class="nowrap">' + (r.status === 'Done' ? (can('tracker', 'edit') || r.by === ME.name ? '<a class="small" data-act="cl-undo" data-id="' + esc(r.t.id) + '" data-d="' + esc(r.ymd) + '">Undo</a>' : '') : r.status === 'Upcoming' ? '' : clDoneBtn(r.t, r.ymd)) + '</td></tr>').join('')
       : '<tr><td colspan="13" class="empty">No tasks</td></tr>') + '</table></div>';
   return h;
 }
@@ -271,6 +274,7 @@ function clNewHtml() {
     '<tr><td class="k">Task *</td><td class="v"><input id="clTask" value="' + esc(F.clTask || '') + '"></td></tr>' +
     (del ? '' : '<tr><td class="k">Frequency *</td><td class="v">' + freqSel + '</td></tr>' + clSchedHtml(info.detail)) +
     '<tr><td class="k">Shift *</td><td class="v"><select id="clShift">' + Object.keys(CL_SHIFTS).map(k => '<option value="' + k + '">' + k + ' (' + CL_SHIFTS[k] + ')</option>').join('') + '</select></td></tr>' +
+    '<tr><td class="k">To mark it done, ask for</td><td class="v">' + needChips('cl', CL_FORM.need) + '</td></tr>' +
     '<tr><td class="k">' + (del ? 'Date *' : 'Start Date *') + '</td><td class="v"><input id="clStart" type="date" value="' + esc(F.clStart || todayYmd()) + '"></td></tr>' +
     (del ? '' : '<tr><td class="k">End Date</td><td class="v"><input id="clEnd" type="date" value="' + esc(F.clEnd || '') + '"></td></tr>' +
       '<tr><td class="k">Skip</td><td class="v"><label class="chip"><input type="checkbox" id="clSkipSun"' + (F.clSkipSun === false ? '' : ' checked') + '>Sunday</label><label class="chip"><input type="checkbox" id="clSkipHol"' + (F.clSkipHol ? ' checked' : '') + '>Holidays</label></td></tr>') +
@@ -282,6 +286,7 @@ ACTIONS['cl-save'] = () => {
   if (!F.clDoer) return msg('Select the doer.'); if (!F.clTask || !F.clTask.trim()) return msg('Enter the task.'); if (!F.clStart) return msg('Select the date.');
   const u = clUserOf(F.clDoer);
   const r = { id: uid(), type: CHK_UI.type, title: F.clTask.trim(), doer: F.clDoer, dept: u.department || '', email: u.email || '', shift: F.clShift || 'G', start: F.clStart, active: true, by: ME.name, done: {} };
+  const need = needRead('cl'); if (need) r.need = need;
   if (del) Object.assign(r, { freq: 'Once', due: F.clStart, frequency: '' });
   else {
     const d = (CL_FREQ_MAP[CHK_UI.freq] || {}).detail; let s = '';
@@ -298,7 +303,7 @@ ACTIONS['cl-save'] = () => {
     if (!n) return msg('No date comes out of this frequency / start / end.');
   }
   Store.put('checklist', r);
-  audit('checklist.create', r.title, r.doer + ' · ' + (del ? 'Delegation ' + r.start : r.frequency + (r.schedule ? ' ' + r.schedule : '')));
+  audit('checklist.create', r.title, r.doer + ' · ' + (del ? 'Delegation ' + r.start : r.frequency + (r.schedule ? ' ' + r.schedule : '')) + (r.need ? ' · needs ' + needText(r.need) : ''));
   CL_FORM = { clDoer: F.clDoer }; CHK_UI.tab = 'list'; flash('Task assigned to ' + esc(r.doer) + '.'); renderNav(); VIEWS.checklist.render();
 };
 
@@ -306,12 +311,23 @@ ACTIONS['cl-save'] = () => {
 function clListHtml(all) {
   const rows = Store.all('checklist').filter(t => !t.demo && (all || isMyDoer(t.doer))).map(t => ({ t, r: clRule(t) })).filter(x => x.r.type !== 'Delegation').sort((a, b) => a.t.doer < b.t.doer ? -1 : 1);
   const edit = clCanAdd();
-  return '<div class="tbl-wrap"><table class="bomflat"><tr><th>Type</th><th>Name</th><th>Department</th><th>Task</th><th>Frequency</th><th>Schedule</th><th>Shift</th><th>Start Date</th><th>End Date</th><th>Skip Sunday</th><th>Skip Holidays</th><th>Created By</th><th>Status</th><th></th></tr>' +
+  return '<div class="tbl-wrap"><table class="bomflat"><tr><th>Type</th><th>Name</th><th>Department</th><th>Task</th><th>Frequency</th><th>Schedule</th><th>Shift</th><th>Start Date</th><th>End Date</th><th>Skip Sunday</th><th>Skip Holidays</th><th>Needs to close</th><th>Created By</th><th>Status</th><th></th></tr>' +
     (rows.length ? rows.map(({ t, r }) => '<tr' + (t.active === false ? ' class="muted"' : '') + '><td>' + esc(r.type) + '</td><td>' + esc(t.doer) + '</td><td>' + esc(t.dept || clUserOf(t.doer).department || '') + '</td><td>' + esc(t.title) + '</td><td>' + esc(r.frequency || '') + '</td><td>' + esc(r.schedule || '') + '</td><td>' + esc(t.shift || 'G') + '</td>' +
       '<td class="nowrap">' + (r.start ? fmtD(r.start) : '') + '</td><td class="nowrap">' + (r.end ? fmtD(r.end) : '') + '</td><td>' + (r.type === 'Delegation' ? '' : r.skip_sun === false ? 'No' : 'Yes') + '</td><td>' + (r.type === 'Delegation' ? '' : r.skip_hol ? 'Yes' : 'No') + '</td><td>' + esc(t.by || '') + '</td><td>' + (t.active === false ? 'Paused' : 'Active') + '</td>' +
+      '<td>' + (needAny(t.need) ? esc(needText(t.need)) : '<span class="muted">Picture</span>') + (edit ? ' <a class="small" data-act="cl-need" data-id="' + esc(t.id) + '">Change</a>' : '') + '</td>' +
       '<td class="nowrap">' + (edit ? '<button class="btn sm" data-act="cl-pause" data-id="' + esc(t.id) + '">' + (t.active === false ? 'Resume' : 'Pause') + '</button> <button class="btn ghost sm danger" data-act="cl-del" data-id="' + esc(t.id) + '" data-confirm="Delete this task and its history?">×</button>' : '') + '</td></tr>').join('')
-      : '<tr><td colspan="14" class="empty">No tasks</td></tr>') + '</table></div>';
+      : '<tr><td colspan="15" class="empty">No tasks</td></tr>') + '</table></div>';
 }
+ACTIONS['cl-need'] = el => {
+  if (!clCanAdd()) { flash('Only Admin or MIS can change this.', 'err'); return; }
+  const t = Store.get('checklist', el.dataset.id); if (!t) return;
+  needEditDialog('What is needed to close · ' + t.title, t.need, need => {
+    const was = needAny(t.need) ? needText(t.need) : 'picture';
+    if (need) t.need = need; else delete t.need;
+    Store.put('checklist', t); audit('checklist.need', t.title, was + ' → ' + (need ? needText(need) : 'picture'));
+    flash('Saved.'); VIEWS.checklist.render();
+  });
+};
 ACTIONS['cl-pause'] = el => { if (!clCanAdd()) return; const t = Store.get('checklist', el.dataset.id); t.active = t.active === false; clPin(t); Store.put('checklist', t); audit(t.active ? 'checklist.resume' : 'checklist.pause', t.title, t.doer); VIEWS.checklist.render(); };
 ACTIONS['cl-del'] = el => {
   if (!clCanAdd()) return; const t = Store.get('checklist', el.dataset.id); if (!t) return;

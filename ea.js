@@ -14,9 +14,10 @@ function eaDelegations() {
 }
 function eaStatusHtml(r) { return '<span class="st ' + (r.status === 'Done' ? 'Done' : r.status === 'Overdue' ? 'Late' : 'Pending') + '">' + (r.status === 'Overdue' ? 'Late' : r.status) + '</span>'; }
 // make one delegation task; returns the checklist record
-function eaDelegate(task, doer, date, src, ref) {
+function eaDelegate(task, doer, date, src, ref, need) {
   const u = clUserOf(doer);
   const r = { id: uid(), type: 'Delegation', title: task.trim(), doer, dept: u.department || '', email: u.email || '', shift: 'G', start: date, due: date, freq: 'Once', frequency: '', active: true, by: ME.name, done: {}, src: src || 'ea', ref: ref || '' };
+  if (needAny(need)) r.need = need;
   Store.put('checklist', r);
   audit('delegation.create', r.title, r.doer + ' · ' + fmtD(date) + (ref ? ' · ' + ref : ''));
   return r;
@@ -41,12 +42,13 @@ function eaDelHtml() {
   if (EA_UI.form === 'del') h += '<div class="panel" style="max-width:760px"><table class="jckv">' +
     '<tr><td class="k">Doer *</td><td class="v">' + eaDoerSel('edDoer', EA_UI.doer) + '</td></tr>' +
     '<tr><td class="k">Task *</td><td class="v"><input id="edTask" value="' + esc(EA_UI.task || '') + '"></td></tr>' +
-    '<tr><td class="k">Date *</td><td class="v"><input id="edDate" type="date" value="' + esc(EA_UI.date || todayYmd()) + '"></td></tr></table>' +
+    '<tr><td class="k">Date *</td><td class="v"><input id="edDate" type="date" value="' + esc(EA_UI.date || todayYmd()) + '"></td></tr>' +
+    '<tr><td class="k">To mark it done, ask for</td><td class="v">' + needChips('ea', EA_UI.need) + '</td></tr></table>' +
     '<div class="toolbar"><button class="btn primary" data-act="ea-del-save">Assign</button><button class="btn" data-act="ea-cancel">Cancel</button><span id="eaMsg" class="small late-txt"></span></div></div>';
-  h += '<div class="tbl-wrap"><table class="bomflat"><tr><th>Date</th><th>Task</th><th>Doer</th><th>Department</th><th>From</th><th>Delegated by</th><th>Status</th><th>Done on</th><th class="num">Delay</th><th>Remark</th>' + (eaEdit() ? '<th class="noprint"></th>' : '') + '</tr>' +
-    (rows.length ? rows.map(r => '<tr><td class="nowrap">' + fmtD(r.ymd) + '</td><td>' + esc(r.task) + '</td><td>' + esc(r.doer) + '</td><td>' + esc(r.dept) + '</td><td>' + esc(r.t.ref || '') + '</td><td>' + esc(r.t.by || '') + '</td><td>' + eaStatusHtml(r) + '</td><td class="nowrap">' + (r.actual ? fmtDT(r.actual) : '') + '</td><td class="num' + (r.delay ? ' late-txt' : '') + '">' + (r.delay ? fmtDelay(r.delay) : '') + '</td><td>' + esc(r.remark || '') + '</td>' +
+  h += '<div class="tbl-wrap"><table class="bomflat"><tr><th>Date</th><th>Task</th><th>Doer</th><th>Department</th><th>From</th><th>Delegated by</th><th>Needs</th><th>Status</th><th>Done on</th><th class="num">Delay</th><th>Remark</th>' + (eaEdit() ? '<th class="noprint"></th>' : '') + '</tr>' +
+    (rows.length ? rows.map(r => '<tr><td class="nowrap">' + fmtD(r.ymd) + '</td><td>' + esc(r.task) + '</td><td>' + esc(r.doer) + '</td><td>' + esc(r.dept) + '</td><td>' + esc(r.t.ref || '') + '</td><td>' + esc(r.t.by || '') + '</td><td class="small">' + (needAny(r.t.need) ? esc(needText(r.t.need)) : '') + '</td><td>' + eaStatusHtml(r) + '</td><td class="nowrap">' + (r.actual ? fmtDT(r.actual) : '') + '</td><td class="num' + (r.delay ? ' late-txt' : '') + '">' + (r.delay ? fmtDelay(r.delay) : '') + '</td><td>' + esc(r.remark || '') + '</td>' +
       (eaEdit() ? '<td class="noprint nowrap">' + (r.status === 'Done' || r.t.src === 'mom' || r.t.src === 'decision' ? '' : '<button class="btn ghost sm danger" data-act="ea-del-rm" data-id="' + esc(r.t.id) + '" data-confirm="Remove this delegation?">Remove</button>') + '</td>' : '') + '</tr>').join('')
-      : '<tr><td colspan="11" class="empty">No delegations</td></tr>') + '</table></div>';
+      : '<tr><td colspan="12" class="empty">No delegations</td></tr>') + '</table></div>';
   return h;
 }
 ACTIONS['ea-del-new'] = () => { EA_UI.form = 'del'; VIEWS.ea.render(); };
@@ -57,7 +59,7 @@ ACTIONS['ea-del-save'] = () => {
   const msg = t => { $('#eaMsg').textContent = t; };
   if (!doer) return msg('Select the doer.'); if (!task) return msg('Enter the task.'); if (!date) return msg('Select the date.');
   if (date < todayYmd()) return msg('The date cannot be in the past.');
-  eaDelegate(task, doer, date, 'ea', ''); EA_UI.form = false; EA_UI.task = ''; flash('Task delegated to ' + esc(doer) + '.'); renderNav(); VIEWS.ea.render();
+  eaDelegate(task, doer, date, 'ea', '', needRead('ea')); EA_UI.form = false; EA_UI.task = ''; flash('Task delegated to ' + esc(doer) + '.'); renderNav(); VIEWS.ea.render();
 };
 ACTIONS['ea-del-rm'] = el => { if (!requirePerm('ea', 'edit')) return; const t = Store.get('checklist', el.dataset.id); if (!t) return; Store.del('checklist', t.id); audit('delegation.remove', t.title, t.doer); renderNav(); VIEWS.ea.render(); };
 
