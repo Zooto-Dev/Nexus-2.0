@@ -20,7 +20,6 @@ function isMyMerchant(name) { if (!ME || !name) return false; const n = norm(nam
 const billKey = s => norm(s).replace(/[^a-z0-9]/g, '');
 function sameBill(vendor, billNo, exceptId) { return Store.all('inwards').some(x => x.id !== exceptId && norm(x.vendor) === norm(vendor) && billKey(x.bill_no) === billKey(billNo) && x.inv_status !== 'Rejected'); }
 // invoice value of the invoiced lines at PO rates (with GST) — compared with the invoice value entered at the gate
-function inwPoValue(i) { const p = Store.all('purchase_orders').find(x => norm(x.no) === norm(i.po_no)); if (!p || !(i.lines || []).length) return null; return i.lines.reduce((a, x) => { const l = p.lines[x.po_line] || (p.lines || []).find(y => norm(y.material) === norm(x.material)) || {}; return a + num(x.inv_qty) * num(l.rate) * (1 + num(l.gst) / 100); }, 0); }
 function pendingInwardOf(poNo) { return Store.all('inwards').find(i => i.status === 'Pending GRN' && norm(i.po_no) === norm(poNo)); }
 // a PO with a gate entry still waiting for GRN cannot take another gate entry
 function inwardPOs(vendor) { return openPOs().filter(p => (!vendor || norm(p.vendor) === norm(vendor)) && !pendingInwardOf(p.no)); }
@@ -365,14 +364,10 @@ VIEWS.inward = {
         [U.bt + ' Date *', inp('bill_date', 'date')],
         ['Inwarding Date', '<input value="' + fmtD(todayYmd()) + '" readonly>']
       ];
-      const po = U.po ? Store.all('purchase_orders').find(x => norm(x.no) === norm(U.po)) : null;
-      const lineRows = po ? po.lines.map((l, k) => ({ l, k, pen: poLinePending(po, l, k) })).filter(x => x.pen > 0) : [];
-      const right = [[U.bt + ' Qty *', inp('qty', 'number')], [U.bt + ' Value ₹ *', inp('inv_value', 'number')]]
+      const right = [[U.bt + ' Qty *', inp('qty', 'number')]]
         .concat(qc ? [['QC No *', inp('qc_no')], ['QC Report *', attachBox('id="inwQc" accept="image/*,application/pdf"', U.qcDoc, 'Attach QC report')]] : [])
         .concat([['Invoice Photo *', attachBox('id="inwPhoto" accept="image/*"', U.photo, 'Attach invoice photo')], ['Remark', inp('remark')]]);
       h += '<div class="card"><div class="card-b"><div class="inwform">' + kvTable(left) + kvTable(right) + '</div>' +
-        (po ? '<div class="tbl-wrap" style="margin-top:10px"><table class="nopage nofilter"><tr><th>Item Code</th><th>Item Name</th><th>UOM</th><th class="num">PO Qty</th><th class="num">PO Pending</th></tr>' +
-          (lineRows.length ? lineRows.map(x => '<tr><td><b>' + esc(x.l.material) + '</b></td><td>' + esc((matBy(x.l.material) || {}).name || '') + '</td><td>' + esc(x.l.uom || '') + '</td><td class="num">' + qtyFmt(x.l.qty) + '</td><td class="num">' + qtyFmt(x.pen) + '</td></tr>').join('') : '<tr><td colspan="5" class="empty">Nothing pending on this PO</td></tr>') + '</table></div>' : '') +
         '</div><div class="card-f"><button class="btn primary" data-act="inw-save">Save</button><span id="niMsg" class="small"></span></div></div>';
     }
     const am = Store.all('inwards').filter(i => i.inv_status === 'Amend');
@@ -405,7 +400,7 @@ function inwEditDialog(i, title, okLabel, noteLabel, onSave) {
   const lines = null;   // the gate entry carries one invoice qty, as before
   d.innerHTML = '<div class="dlg hx-dlg"><div class="dlg-h">' + esc(title) + '</div><table class="jckv">' +
     '<tr><td class="k">' + esc(bt) + ' No *</td><td class="v"><input data-ie="bill_no" value="' + esc(i.bill_no || '') + '"></td><td class="k">' + esc(bt) + ' Date *</td><td class="v"><input data-ie="bill_date" type="date" value="' + esc(i.bill_date || '') + '"></td></tr>' +
-    '<tr><td class="k">' + esc(bt) + ' Value ₹</td><td class="v"><input data-ie="inv_value" type="number" min="0" step="any" value="' + esc(i.inv_value != null ? i.inv_value : '') + '"></td><td class="k">Remark</td><td class="v"><input data-ie="remark" value="' + esc(i.remark || '') + '"></td></tr>' +
+    '<tr><td class="k">Remark</td><td class="v" colspan="3"><input data-ie="remark" value="' + esc(i.remark || '') + '"></td></tr>' +
     (lines ? '' : '<tr><td class="k">' + esc(bt) + ' Qty *</td><td class="v"><input data-ie="qty" type="number" min="0" step="any" value="' + esc(i.qty) + '"></td><td></td><td></td></tr>') +
     '<tr><td class="k">' + esc(noteLabel) + ' *</td><td class="v" colspan="3"><textarea data-ie="note" rows="2"></textarea></td></tr></table>' +
     (lines ? '<div class="tbl-wrap hx-wrap"><table class="nopage nofilter"><tr><th>Item Code</th><th>Item Name</th><th>UOM</th><th class="num">PO Qty</th><th class="num">' + esc(bt) + ' Qty *</th></tr>' +
@@ -416,7 +411,7 @@ function inwEditDialog(i, title, okLabel, noteLabel, onSave) {
     if (ev.target.closest('[data-ie-x]')) { d.remove(); return; }
     if (!ev.target.closest('[data-ie-ok]')) return;
     const g = k => ($('[data-ie="' + k + '"]', d) || { value: '' }).value.trim();
-    const v = { bill_no: g('bill_no'), bill_date: g('bill_date'), inv_value: num(g('inv_value')), remark: g('remark'), note: g('note') };
+    const v = { bill_no: g('bill_no'), bill_date: g('bill_date'), remark: g('remark'), note: g('note') };
     const msg = t => { $('#ieMsg', d).textContent = t; };
     if (!v.bill_no) return msg(bt + ' No is required.'); if (!v.bill_date) return msg(bt + ' Date is required.'); if (!v.note) return msg(noteLabel + ' is required.');
     if (sameBill(i.vendor, v.bill_no, i.id)) return msg(i.vendor + ' already has ' + v.bill_no + '.');
@@ -430,7 +425,7 @@ ACTIONS['inw-fix'] = el => {
   if (!requirePerm('store', 'edit')) return;
   const i = Store.get('inwards', el.dataset.id); if (!i || i.inv_status !== 'Amend') return;
   inwEditDialog(i, 'Correct ' + i.no, 'Resend for approval', 'What was corrected', v => {
-    Object.assign(i, { bill_no: v.bill_no, bill_date: v.bill_date, qty: v.qty, inv_value: v.inv_value, remark: v.remark, inv_status: '' }); if (v.lines) i.lines = v.lines;
+    Object.assign(i, { bill_no: v.bill_no, bill_date: v.bill_date, qty: v.qty, remark: v.remark, inv_status: '' }); if (v.lines) i.lines = v.lines;
     i.amend_log = (i.amend_log || []).concat([{ at: nowIso(), by: ME.name, remark: v.note, stage: 'Corrected' }]);
     Store.put('inwards', i); audit('inward.corrected', i.no, v.note); flash(esc(i.no) + ' corrected and sent back for invoice approval.'); VIEWS.inward.render();
   });
@@ -444,7 +439,6 @@ ACTIONS['inw-save'] = () => {
     : (qc && !String(F.qc_no || '').trim()) ? 'QC No is required for this vendor.' : (qc && !U.qcDoc) ? 'Attach the QC report.'
       : !U.photo ? 'Attach the invoice photo.' : '';
   if (!err && !(num(F.qty) > 0)) err = U.bt + ' Qty is required.';
-  if (!err && !(num(F.inv_value) > 0)) err = U.bt + ' Value is required.';
   F.qty = r3(num(F.qty));
   if (err) { $('#niMsg').innerHTML = '<span class="late-txt">' + esc(err) + '</span>'; return; }
   if (sameBill(U.ven, billNo)) { $('#niMsg').innerHTML = '<span class="late-txt">' + esc(U.ven) + ' already has ' + esc(billNo) + '.</span>'; return; }
@@ -459,7 +453,7 @@ ACTIONS['inw-save'] = () => {
   });
   qcl.forEach(q => { q.merchants = Array.from(new Set(q.brands.map(brandMerchant).filter(Boolean))); });
   const grnNo = reserveGrnNo();
-  const i = Store.put('inwards', { id: uid(), no: nextNo('inwards', 'INW'), grn_no: grnNo, at: nowIso(), date: todayYmd(), bill_type: U.bt, vendor: U.ven, po_no: U.po, bill_no: billNo, bill_date: F.bill_date, qty: num(F.qty), inv_value: num(F.inv_value),
+  const i = Store.put('inwards', { id: uid(), no: nextNo('inwards', 'INW'), grn_no: grnNo, at: nowIso(), date: todayYmd(), bill_type: U.bt, vendor: U.ven, po_no: U.po, bill_no: billNo, bill_date: F.bill_date, qty: num(F.qty),
     qc_no: String(F.qc_no || '').trim(), qc_report: U.qcDoc || '', photo: U.photo, remark: String(F.remark || '').trim(), status: 'Pending GRN', inv_status: '', qc: qcl, by: ME.name });
   audit('inward.create', i.no, U.bt + ' · ' + U.ven + ' · ' + U.po + ' · ' + billNo + ' · ' + grnNo); waSend('gate_entry', i.id);
   Object.assign(U, { form: false, ven: '', po: '', f: {}, photo: '', qcDoc: '' });
@@ -489,11 +483,8 @@ VIEWS.invapproval = {
     h += '</div>';
     h += '<div class="grid2"><div>' + kvTable([['Gate Entry', esc(i.no)], ['GRN No', esc(i.grn_no || '')], ['Bill Type', esc(i.bill_type || 'Invoice')], ['Vendor', '<b>' + esc(i.vendor) + '</b>'], ['PO Number', esc(i.po_no)], ['Invoice No', esc(i.bill_no)], ['Invoice Date', fmtD(i.bill_date)], ['Invoice Qty', qtyFmt(i.qty)], ['Inwarding', fmtDT(i.at)], ['Remark', esc(i.remark || '')]].concat(i.inv_status === 'Hold' ? [['Hold Reason', esc(i.inv_hold_reason || '')]] : [])) + '</div>' +
       '<div class="ia-photo">' + (i.photo ? '<img src="' + i.photo + '" data-act="img-view" data-src="' + esc(i.photo) + '">' : '') + '</div></div>';
-    const poVal = inwPoValue(i); const iw = (i.lines || []).length; const il = k => (i.lines || []).find(x => x.po_line === k);
-    h += '<h2>PO items</h2><div class="tbl-wrap"><table><tr><th class="num">Sr</th><th>Item Code</th><th>Item Name</th><th>UOM</th><th class="num">PO Qty</th><th class="num">Received</th><th class="num">Pending</th>' + (iw ? '<th class="num">' + esc(i.bill_type || 'Invoice') + ' Qty</th>' : '') + '<th class="num">PO Rate</th><th class="num">Value at PO rate</th></tr>' +
-      p.lines.map((l, k) => { const x = il(k); const q = x ? num(x.inv_qty) : 0; return '<tr' + (iw && !x ? ' class="muted"' : '') + '><td class="num">' + (k + 1) + '</td><td>' + esc(l.material) + '</td><td>' + esc((matBy(l.material) || {}).name || '') + '</td><td>' + esc(l.uom || '') + '</td><td class="num">' + qtyFmt(l.qty) + '</td><td class="num">' + qtyFmt(recvOf(p, l, k)) + '</td><td class="num">' + qtyFmt(poLinePending(p, l, k)) + '</td>' + (iw ? '<td class="num"><b>' + (x ? qtyFmt(q) : '') + '</b></td>' : '') + '<td class="num">' + money(l.rate) + '</td><td class="num">' + (iw ? (x ? money(q * num(l.rate) * (1 + num(l.gst) / 100)) : '') : money(poLinePending(p, l, k) * num(l.rate) * (1 + num(l.gst) / 100))) + '</td></tr>'; }).join('') +
-      (poVal != null ? '<tr class="tt"><td colspan="' + (iw ? 9 : 8) + '" class="right"><b>Value at PO rate (with GST)</b></td><td class="num"><b>' + money(poVal) + '</b></td></tr><tr class="tt"><td colspan="' + (iw ? 9 : 8) + '" class="right"><b>' + esc(i.bill_type || 'Invoice') + ' value entered</b></td><td class="num"><b>' + money(i.inv_value) + '</b></td></tr>' +
-        (Math.abs(num(i.inv_value) - poVal) > Math.max(1, poVal * 0.005) ? '<tr><td colspan="' + (iw ? 10 : 9) + '" class="late-txt"><b>Difference ' + money(num(i.inv_value) - poVal) + '</b> — the invoice value does not match the PO rates. Check before approving.</td></tr>' : '') : '') + '</table></div>';
+    h += '<h2>PO items</h2><div class="tbl-wrap"><table><tr><th class="num">Sr</th><th>Item Code</th><th>Item Name</th><th>UOM</th><th class="num">PO Qty</th><th class="num">Received</th><th class="num">Pending</th></tr>' +
+      p.lines.map((l, k) => '<tr><td class="num">' + (k + 1) + '</td><td>' + esc(l.material) + '</td><td>' + esc((matBy(l.material) || {}).name || '') + '</td><td>' + esc(l.uom || '') + '</td><td class="num">' + qtyFmt(l.qty) + '</td><td class="num">' + qtyFmt(recvOf(p, l, k)) + '</td><td class="num">' + qtyFmt(poLinePending(p, l, k)) + '</td></tr>').join('') + '</table></div>';
     h += '<h2>GRN notes</h2><div class="tbl-wrap"><table id="iaNotes"><tr><th class="num">Sr</th><th>Item name on invoice</th><th>Item Code</th><th>Item Name</th><th>Note</th><th></th></tr>' +
       IA_UI.notes.map((n, k) => '<tr data-ian="' + k + '"><td class="num">' + (k + 1) + '</td><td><input data-ia="inv_item" value="' + esc(n.inv_item) + '" style="min-width:220px"' + (edit ? '' : ' disabled') + '></td><td><select data-ia="code"' + (edit ? '' : ' disabled') + '><option value="">Select…</option>' + codes.map(c => '<option' + (norm(c) === norm(n.code) ? ' selected' : '') + '>' + esc(c) + '</option>').join('') + '</select></td><td>' + esc((matBy(n.code) || {}).name || '') + '</td><td><input data-ia="note" value="' + esc(n.note) + '" style="min-width:220px"' + (edit ? '' : ' disabled') + '></td><td>' + (edit ? '<button class="btn ghost sm danger" data-act="ia-del" data-k="' + k + '">×</button>' : '') + '</td></tr>').join('') + '</table></div>' +
       (edit ? '<a class="small" data-act="ia-add">+ add item</a>' : '');
@@ -508,8 +499,8 @@ ACTIONS['ia-amend'] = el => {
   const i = Store.get('inwards', el.dataset.id); if (!i) return;
   // the approver corrects it here; it stays with him for approval (it does not go back to Store)
   inwEditDialog(i, 'Amend ' + i.no, 'Save amendment', 'What was amended', v => {
-    const was = (i.bill_no || '') + ' · ' + (i.bill_date || '') + ' · ' + qtyFmt(i.qty) + ' · ₹' + money(i.inv_value);
-    Object.assign(i, { bill_no: v.bill_no, bill_date: v.bill_date, qty: v.qty, inv_value: v.inv_value, remark: v.remark }); if (v.lines) i.lines = v.lines;
+    const was = (i.bill_no || '') + ' · ' + (i.bill_date || '') + ' · ' + qtyFmt(i.qty);
+    Object.assign(i, { bill_no: v.bill_no, bill_date: v.bill_date, qty: v.qty, remark: v.remark }); if (v.lines) i.lines = v.lines;
     i.amend_log = (i.amend_log || []).concat([{ at: nowIso(), by: ME.name, remark: v.note + ' (was ' + was + ')', stage: 'Amended at invoice approval' }]);
     Store.put('inwards', i); audit('inward.invoice_amend', i.no, v.note + ' — was ' + was); flash(esc(i.no) + ' amended — approve it now.'); VIEWS.invapproval.render();
   });
