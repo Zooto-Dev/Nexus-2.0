@@ -143,6 +143,7 @@ function poJcRaise(p, sign) { (p.lines || []).forEach(l => { if (!l.jc_no) retur
 function poMarkApproved(p, how) {
   p.approval = 'Approved'; p.approved_by = ME.name; p.approved_at = nowIso(); Store.put('purchase_orders', p);
   poJcRaise(p, 1); audit(how || 'po.approve', p.no, p.vendor + (p.revised_from ? ' · replaces ' + p.revised_from : '')); waSend('po_approved', p.id);
+  try { poInwSync(p); } catch (e) { console.error(e); }
 }
 ACTIONS['pa-open'] = el => { PA_UI.id = el.dataset.id; PA_UI.act = el.dataset.a; VIEWS.poapproval.render(); };
 ACTIONS['pa-cancel'] = () => { PA_UI.id = null; PA_UI.act = null; VIEWS.poapproval.render(); };
@@ -756,6 +757,7 @@ ACTIONS['grn-save'] = async el => {
   audit('grn.create', g.no, iw.no + ' · ' + p.no + ' · inv ' + iw.bill_no + ' · GRN ' + qtyFmt(calc.reduce((x, c) => x + c.grn, 0)) + (totRej ? ' / rej ' + qtyFmt(totRej) : '') + (totShort ? ' / short ' + qtyFmt(totShort) : '') + (totEx ? ' / excess ' + qtyFmt(totEx) : '') + (totOver ? ' / no invoice ' + qtyFmt(totOver) : ''));
   Object.assign(U, { ven: '', po: '', inw: '', rows: [], why: '' });
   VIEWS.grn.render();
+  try { poInwSync(Store.get('purchase_orders', p.id)); } catch (e) { console.error(e); }
   waSend(totEx > 0 ? 'excess_pending' : 'grn_final', g.id);
   if (totEx > 0) {
     const to = String(settings().alert_excess_email || '').trim();

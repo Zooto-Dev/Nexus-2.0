@@ -571,6 +571,7 @@ ACTIONS['po-save'] = async el => {
   if (dup) { $('#npMsg').innerHTML = '<span class="late-txt">An identical PO ' + esc(dup.no) + ' was just created (double-submit guard).</span>'; return; }
   const po = Store.put('purchase_orders', { id: uid(), no: fyNo('purchase_orders', 'PO', 3), date: $('#npDate').value || todayYmd(), vendor: vm.name, expected: exp, remarks: $('#npRem').value.trim(), lines, moq_log: moqLog, followups: [], approval: 'Pending', created_by: ME.name, created_by_id: ME.id, at: nowIso(), _sig: sig });
   audit('po.create', po.no, ven + ' · ' + qtyFmt(lines.reduce((s, l) => s + l.qty, 0)) + ' qty'); poUniqueCheck(po).then(() => waSend('po_submitted', po.id));
+  try { poInwSync(po); } catch (e) { console.error(e); }   // material inwarding task on whoever raised the PO
   if (typeof reqLinkPo === 'function') reqLinkPo(po);
   let mailNote = '';
   if (moqLog.length) {
@@ -626,6 +627,7 @@ ACTIONS['po-revise'] = el => {
     Store.put('purchase_orders', cur); poJcRaise(cur, -1);
     audit('po.price_revised', cur.no, 'replaced by ' + np.no + ' · ' + changes.map(x => x.material + ' ' + x.from + '→' + x.to).join(', ') + ' · ' + why);
     audit('po.create', np.no, 'price revision of ' + cur.no + ' — waiting for CEO approval');
+    try { poInwSync(cur); poInwSync(np); } catch (e) { console.error(e); }
     waSend('po_submitted', np.id); d.remove(); flash(esc(cur.no) + ' cancelled — ' + esc(np.no) + ' sent to the CEO for approval. The vendor is told when it is approved.'); VIEWS.po.render();
   });
 };
@@ -637,6 +639,7 @@ ACTIONS['po-cancel'] = el => {
   if (pendingInwardOf(p.no)) { flash('A gate entry is waiting on this PO — finish or correct it first.', 'err'); return; }
   formDialog('Cancel ' + p.no + ' · ' + p.vendor, [{ k: 'why', l: 'Reason', type: 'textarea', req: true }], 'Cancel PO', v => {
     p.cancelled = true; p.cancel_reason = v.why; p.cancelled_by = ME.name; p.cancelled_at = nowIso(); Store.put('purchase_orders', p);
+    try { poInwSync(p); } catch (e) { console.error(e); }
     if (p.approval === 'Approved') poJcRaise(p, -1);
     audit('po.cancel', p.no, v.why + (p.approval === 'Approved' ? ' · was approved — inform ' + p.vendor : '')); flash(esc(p.no) + ' cancelled.' + (p.approval === 'Approved' ? ' Inform the vendor.' : '')); VIEWS.po.render();
   }, true);

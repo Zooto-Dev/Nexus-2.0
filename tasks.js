@@ -52,7 +52,7 @@ function allTasks(force) {
   // Checklist / Delegation (last 90 days up to next 7)
   clRows(ymdOf(new Date(Date.now() - 90 * 86400000)), ymdOf(new Date(Date.now() + 7 * 86400000))).forEach(r => {
     push({ key: 'cl|' + r.t.id + '|' + r.ymd, src: r.type, task: r.task, ref: r.type === 'Delegation' ? '' : r.freq, party: r.t.party || '', doer: String(r.doer || '').toUpperCase(), owner: String(r.doer || '').toUpperCase(),
-      planned: r.planned, actual: r.actual, link: '#/checklist', demo: !!r.t.demo });
+      planned: r.planned, actual: r.actual, link: '#/checklist', demo: !!r.t.demo, tid: r.t.id });
   });
   // Nexus activities
   paRows().forEach(r => {
@@ -193,7 +193,7 @@ VIEWS.alltasks = {
         '<input id="atFrom" type="date" value="' + esc(AT_UI.from) + '"><input id="atTo" type="date" value="' + esc(AT_UI.to) + '"><input id="atQ" placeholder="Search…" value="' + esc(AT_UI.q) + '"><span class="muted small">' + rows.length + ' task(s)</span><span class="grow"></span><button class="btn" data-act="at-csv">Export CSV</button></div>';
       h += '<div class="tbl-wrap"><table class="bomflat"><tr><th>Source</th><th>Task</th><th>Reference</th><th>Party</th><th>Doer</th><th>Department</th><th>Planned</th><th>Actual</th><th>Status</th><th class="num">Delay</th><th>Escalation</th><th></th></tr>' +
         (rows.length ? rows.map(x => { const e = escBy.get(x.key);
-          return '<tr><td>' + esc(x.src) + '</td><td>' + esc(x.task) + '</td><td><b>' + esc(x.ref) + '</b></td><td>' + esc(x.party) + '</td><td>' + (x.doer ? esc(x.doer) : '<span class="late-txt">Not set</span>') + '</td><td>' + esc(x.dept) + '</td>' +
+          return '<tr><td>' + esc(x.src) + '</td><td>' + esc(x.task) + taskExtraHtml(x.tid) + '</td><td><b>' + esc(x.ref) + '</b></td><td>' + esc(x.party) + '</td><td>' + (x.doer ? esc(x.doer) : '<span class="late-txt">Not set</span>') + '</td><td>' + esc(x.dept) + '</td>' +
             '<td class="nowrap">' + (x.planned ? fmtDT(x.planned) : '') + '</td><td class="nowrap">' + (x.actual ? fmtDT(x.actual) : '') + '</td><td><span class="st ' + (x.status === 'Done on time' ? 'Done' : x.status === 'Done late' ? 'Pending' : x.status === 'Delayed' ? 'Late' : x.status === 'Pending' ? 'Pending' : 'Waiting') + '">' + x.status + '</span></td>' +
             '<td class="num' + (x.delay ? ' late-txt' : '') + '">' + (x.delay ? fmtDelay(x.delay) : '') + '</td><td>' + (e ? '<a href="#/escalations">' + esc(e.no) + ' · L' + e.level + (e.status === 'Open' ? '' : ' ✓') + '</a>' : '') + '</td><td><a href="' + esc(x.link) + '">Open</a></td></tr>'; }).join('')
           : '<tr><td colspan="12" class="empty">No tasks</td></tr>') + '</table></div>';
