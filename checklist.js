@@ -120,16 +120,17 @@ function clRows(from, to, filter) {
     const r = clRule(t); const u = clUserOf(t.doer);
     clDates(t, from, to).forEach(ymd => {
       const p = clPlanned(t, ymd); const dn = clDoneOf(t, ymd); const a = dn && dn.at ? new Date(dn.at) : null;
-      const status = a ? 'Done' : p < now ? 'Overdue' : ymd === today ? 'Pending' : 'Upcoming';
+      const bl = !!(dn && dn.kind === 'blocked');
+      const status = a ? (bl ? (dn.ok ? 'Excused' : 'Not done') : 'Done') : p < now ? 'Overdue' : ymd === today ? 'Pending' : 'Upcoming';
       out.push({ t, ymd, type: r.type, doer: t.doer, dept: t.dept || u.department || '', freq: r.type === 'Delegation' ? '' : r.frequency, sched: r.schedule || '', task: t.title, planned: p, actual: a, status,
-        delay: a ? clDelayMin(p, a) : status === 'Overdue' ? clDelayMin(p, now) : 0, by: dn ? dn.by : '', remark: dn ? dn.remark || '' : '', photos: dn ? dn.photos || 0 : 0, files: dn ? dn.files || 0 : 0, date: dn ? dn.date || '' : '', log: dn ? dn.log || '' : '', need: t.need || null });
+        delay: bl && dn.ok ? 0 : a ? clDelayMin(p, a) : status === 'Overdue' ? clDelayMin(p, now) : 0, by: dn ? dn.by : '', kind: bl ? 'blocked' : '', ok: !!(dn && dn.ok === true), ok_by: (dn && dn.ok_by) || '', remark: dn ? dn.remark || '' : '', photos: dn ? dn.photos || 0 : 0, files: dn ? dn.files || 0 : 0, date: dn ? dn.date || '' : '', log: dn ? dn.log || '' : '', need: t.need || null });
     });
   });
   return out.sort((a, b) => a.planned - b.planned);
 }
 // kept for Home / nav counts
 function checklistDueToday(t) { const today = todayYmd(); return clDates(t, ymdOf(new Date(Date.now() - 60 * CL_DAY)), today).some(y => !clDoneOf(t, y)); }
-function myChecklistDue() { const today = todayYmd(); return clRows(ymdOf(new Date(Date.now() - 60 * CL_DAY)), today, t => isMyDoer(t.doer)).filter(r => r.status !== 'Done'); }
+function myChecklistDue() { const today = todayYmd(); return clRows(ymdOf(new Date(Date.now() - 60 * CL_DAY)), today, t => isMyDoer(t.doer)).filter(r => !r.actual); }
 function clCanAdd() { return can('checklist', 'edit') && (isSuperAdmin() || isAdminRole() || norm(ME.department || '') === 'mis'); }
 function clCanMark(t) { return isMyDoer(t.doer) || can('tracker', 'edit'); }
 function clDoneBtn(t, ymd) { return clCanMark(t) ? '<button class="btn sm primary" data-act="cl-done" data-id="' + esc(t.id) + '" data-d="' + esc(ymd) + '">Done</button>' : ''; }
@@ -150,12 +151,24 @@ ACTIONS['cl-done'] = el => {
   d.innerHTML = '<div class="dlg"><div class="dlg-h">' + esc(t.title) + ' · ' + fmtD(ymd) + '</div><table class="jckv">' +
     (isDN ? '<tr><td class="k">Debit Note PDF *</td><td class="v"><input id="clDn" type="file" accept="application/pdf"></td></tr>' : '') +
     needRows(need, attachReq, remarkReq) + '</table>' +
-    '<div class="dlg-f"><span id="clMsg" class="small late-txt"></span><span class="grow"></span><button class="btn" data-x>Cancel</button><button class="btn primary" data-ok>Done</button></div></div>';
+    '<div class="small muted" style="margin-top:6px">If the work could not be done at all (machine down, shop closed, no material), use <b>Could not do</b> and write why. It is not counted as done until Admin / MIS accept the reason.</div>' +
+    '<div class="dlg-f"><span id="clMsg" class="small late-txt"></span><span class="grow"></span><button class="btn" data-x>Cancel</button><button class="btn" data-no>Could not do</button><button class="btn primary" data-ok>Done</button></div></div>';
   document.body.appendChild(d);
   if (isDN) $('#clDn', d).addEventListener('change', e => { const f = e.target.files[0]; if (!f) { dnPdf = ''; return; } if (f.size > 5 * 1024 * 1024) { $('#clMsg', d).textContent = 'PDF must be under 5 MB.'; e.target.value = ''; return; } const fr = new FileReader(); fr.onload = () => { dnPdf = String(fr.result).split('base64,')[1] || ''; }; fr.readAsDataURL(f); });
   needWire(d, bag);
   d.addEventListener('click', ev => {
     if (ev.target.closest('[data-x]')) { d.remove(); return; }
+    // could not be done at all: the reason is the record, and it waits for Admin / MIS to accept it
+    if (ev.target.closest('[data-no]')) {
+      const why = (($('#ndRem', d) || {}).value || '').trim();
+      if (!why) { $('#clMsg', d).textContent = 'Write why it could not be done.'; return; }
+      const at = nowIso(); let log = '';
+      if (bag.photos.length || bag.files.length) { log = uid(); Store.put('checklist_log', { id: log, task_id: t.id, ymd, doer: t.doer, task: t.title, photos: bag.photos, files: bag.files, remark: why, at, by: ME.name }); }
+      t.done = t.done || {}; t.done[clDoneKey(t, ymd)] = { at, by: ME.name, remark: why, photos: bag.photos.length, files: bag.files.length, log, kind: 'blocked', ok: null };
+      t.done_at = at; clPin(t); Store.put('checklist', t);
+      audit('checklist.not_done', t.title, t.doer + ' · ' + ymd + ' — ' + why);
+      d.remove(); flash('Recorded as not done — waiting for Admin / MIS to accept the reason.'); renderNav(); route(); return;
+    }
     if (!ev.target.closest('[data-ok]')) return;
     const bad = needCheck(d, need, bag, attachReq, remarkReq); if (bad) { $('#clMsg', d).textContent = bad; return; }
     if (isDN && !dnPdf) { $('#clMsg', d).textContent = 'Attach the debit note PDF.'; return; }
@@ -188,6 +201,23 @@ function clDnMail(t, pdf) {
   if (real(to)) mailSend(mq.id, false, { pdf, pdf_name: 'Debit_Note_' + String(invoice || 'DN').replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 30) + '.pdf' });
   else flash('Debit note mail not sent — add the email of ' + esc(vendor || 'the vendor') + ' in the vendor master.', 'err');
 }
+ACTIONS['cl-excuse'] = el => {
+  if (!clCanAdd()) { flash('Only Admin or MIS can accept a reason.', 'err'); return; }
+  const t = Store.get('checklist', el.dataset.id); if (!t) return; const k = clDoneKey(t, el.dataset.d); const dn = (t.done || {})[k];
+  if (!dn || dn.kind !== 'blocked' || dn.ok) return;
+  dn.ok = true; dn.ok_by = ME.name; dn.ok_at = nowIso(); Store.put('checklist', t);
+  audit('checklist.excused', t.title, t.doer + ' · ' + el.dataset.d + ' — ' + (dn.remark || '')); flash('Reason accepted.'); route();
+};
+ACTIONS['cl-reopen'] = el => {
+  if (!clCanAdd()) { flash('Only Admin or MIS can reject a reason.', 'err'); return; }
+  const t = Store.get('checklist', el.dataset.id); if (!t) return; const k = clDoneKey(t, el.dataset.d); const dn = (t.done || {})[k];
+  if (!dn || dn.kind !== 'blocked') return;
+  reasonDialog('Reject the reason · ' + t.title, 'Reject and reopen', why => {
+    delete t.done[k]; t.reopen_log = (t.reopen_log || []).concat([{ at: nowIso(), by: ME.name, ymd: el.dataset.d, was: dn.remark || '', why }]);
+    clPin(t); Store.put('checklist', t);
+    audit('checklist.reopen', t.title, t.doer + ' · ' + el.dataset.d + ' — ' + why); flash('Task is open again for ' + esc(t.doer) + '.'); renderNav(); route();
+  }, true);
+};
 ACTIONS['cl-photo'] = el => { const l = Store.get('checklist_log', el.dataset.log); if (!l) return; const w = window.open(''); w.document.write(l.photos.map(p => '<img src="' + p + '" style="max-width:100%;margin:4px">').join('')); };
 ACTIONS['cl-undo'] = el => {
   const t = Store.get('checklist', el.dataset.id); if (!t) return; const k = clDoneKey(t, el.dataset.d); const dn = clDoneOf(t, el.dataset.d);
@@ -228,13 +258,14 @@ function clTasksHtml(all) {
   const rows = clRows(CHK_UI.from, CHK_UI.to, t => !CHK_UI.who || norm(t.doer) === norm(CHK_UI.who)).filter(r =>
     CHK_UI.st === 'all' || (CHK_UI.st === 'open' ? r.status === 'Overdue' || r.status === 'Pending' : r.status.toLowerCase() === CHK_UI.st));
   VIEWS.checklist.rows = rows;
-  let h = '<div class="toolbar">' + seg('clSt', [{ v: 'open', l: 'Open' }, { v: 'overdue', l: 'Overdue' }, { v: 'upcoming', l: 'Upcoming' }, { v: 'done', l: 'Done' }, { v: 'all', l: 'All' }], CHK_UI.st) +
+  const nNot = clRows(CHK_UI.from, CHK_UI.to, t => !CHK_UI.who || norm(t.doer) === norm(CHK_UI.who)).filter(r => r.kind === 'blocked' && !r.ok).length;
+  let h = '<div class="toolbar">' + seg('clSt', [{ v: 'open', l: 'Open' }, { v: 'overdue', l: 'Overdue' }, { v: 'upcoming', l: 'Upcoming' }, { v: 'not done', l: 'Not done' + (nNot ? ' (' + nNot + ')' : '') }, { v: 'excused', l: 'Excused' }, { v: 'done', l: 'Done' }, { v: 'all', l: 'All' }], CHK_UI.st) +
     (all ? '<select id="clWho">' + doerOpts(clDoerList(), CHK_UI.who, 'All doers') + '</select>' : '') +
     '<input id="clFrom" type="date" value="' + esc(CHK_UI.from) + '"><input id="clTo" type="date" value="' + esc(CHK_UI.to) + '"><span class="muted small">' + rows.length + ' task(s)</span><span class="grow"></span><button class="btn" data-act="cl-csv">Export CSV</button></div>';
   h += '<div class="tbl-wrap"><table class="bomflat"><tr><th>Type</th><th>Name</th><th>Department</th><th>Frequency</th><th>Task</th><th>Planned</th><th>Actual</th><th class="num">Time Delay</th><th>Status</th><th>Done By</th><th>Remark</th><th>Photo</th><th></th></tr>' +
     (rows.length ? rows.map(r => '<tr><td>' + esc(r.type) + '</td><td>' + esc(r.doer) + '</td><td>' + esc(r.dept) + '</td><td>' + esc(r.freq) + '</td><td>' + esc(r.task) + taskExtraHtml(r.t.id) + '</td><td class="nowrap">' + fmtDT(r.planned) + '</td><td class="nowrap">' + (r.actual ? fmtDT(r.actual) : '') + '</td>' +
-      '<td class="num' + (r.delay ? ' late-txt' : '') + '">' + (r.delay ? fmtDelay(r.delay) : r.actual ? 'No Delay' : '') + '</td><td><span class="st ' + (r.status === 'Done' ? 'Done' : r.status === 'Overdue' ? 'Late' : r.status === 'Pending' ? 'Pending' : 'Waiting') + '">' + r.status + '</span></td><td>' + esc(r.by) + '</td><td>' + esc(r.remark) + '</td>' +
-      '<td>' + (r.log ? proofHtml(Object.assign({ id: r.log }, Store.get('checklist_log', r.log) || {})) : '') + (r.date ? '<div class="small">' + esc((r.need && r.need.date_label) || 'Date') + ': ' + fmtD(r.date) + '</div>' : '') + '</td><td class="nowrap">' + (r.status === 'Done' ? (can('tracker', 'edit') || r.by === ME.name ? '<a class="small" data-act="cl-undo" data-id="' + esc(r.t.id) + '" data-d="' + esc(r.ymd) + '">Undo</a>' : '') : r.status === 'Upcoming' ? '' : clDoneBtn(r.t, r.ymd)) + '</td></tr>').join('')
+      '<td class="num' + (r.delay ? ' late-txt' : '') + '">' + (r.delay ? fmtDelay(r.delay) : r.actual ? 'No Delay' : '') + '</td><td><span class="st ' + (r.status === 'Done' ? 'Done' : r.status === 'Overdue' || r.status === 'Not done' ? 'Late' : r.status === 'Excused' ? 'Cancelled' : r.status === 'Pending' ? 'Pending' : 'Waiting') + '">' + r.status + '</span>' + (r.kind === 'blocked' && r.ok ? '<div class="small muted">accepted by ' + esc(r.ok_by) + '</div>' : '') + '</td><td>' + esc(r.by) + '</td><td>' + esc(r.remark) + '</td>' +
+      '<td>' + (r.log ? proofHtml(Object.assign({ id: r.log }, Store.get('checklist_log', r.log) || {})) : '') + (r.date ? '<div class="small">' + esc((r.need && r.need.date_label) || 'Date') + ': ' + fmtD(r.date) + '</div>' : '') + '</td><td class="nowrap">' + (r.kind === 'blocked' && !r.ok && clCanAdd() ? '<button class="btn sm primary" data-act="cl-excuse" data-id="' + esc(r.t.id) + '" data-d="' + esc(r.ymd) + '">Accept reason</button> <button class="btn sm danger" data-act="cl-reopen" data-id="' + esc(r.t.id) + '" data-d="' + esc(r.ymd) + '">Reject</button> ' : '') + (r.actual ? (can('tracker', 'edit') || r.by === ME.name ? '<a class="small" data-act="cl-undo" data-id="' + esc(r.t.id) + '" data-d="' + esc(r.ymd) + '">Undo</a>' : '') : r.status === 'Upcoming' ? '' : clDoneBtn(r.t, r.ymd)) + '</td></tr>').join('')
       : '<tr><td colspan="13" class="empty">No tasks</td></tr>') + '</table></div>';
   return h;
 }
@@ -308,15 +339,33 @@ ACTIONS['cl-save'] = () => {
 };
 
 /* ---------- Task List: the rules themselves ---------- */
+const CL_SRC = { po_inw: 'PO inwarding', ppt: 'Packaging PPT', mom: 'MOM action', decision: 'CEO decision', ea: 'EA delegation' };
+const clSrcLabel = t => CL_SRC[t.src] || (t.src ? t.src : 'Checklist');
+ACTIONS['cl-edit'] = el => {
+  if (!clCanAdd()) { flash('Only Admin or MIS can change a task.', 'err'); return; }
+  const t = Store.get('checklist', el.dataset.id); if (!t) return;
+  const del = clRule(t).type === 'Delegation';
+  formDialog('Edit task', [{ k: 'title', l: 'Task', value: t.title, req: true }, { k: 'doer', l: 'Doer', type: 'select', options: clDoerList(), value: t.doer, req: true },
+    { k: 'start', l: del ? 'Date' : 'Start date', type: 'date', value: t.start || '', req: true }], 'Save', v => {
+    const was = t.doer + ' · ' + fmtD(t.start) + ' · ' + t.title;
+    const u = clUserOf(v.doer);
+    Object.assign(t, { title: String(v.title).trim(), doer: v.doer, dept: u.department || t.dept || '', email: u.email || t.email || '', start: v.start });
+    if (del) t.due = v.start;
+    t.date_fixed = true;   // set by hand: an automatic task stops following its record's date
+    clPin(t); Store.put('checklist', t);
+    audit('checklist.edit', t.title, was + ' → ' + t.doer + ' · ' + fmtD(t.start) + ' · ' + t.title);
+    flash('Saved.'); renderNav(); VIEWS.checklist.render();
+  });
+};
 function clListHtml(all) {
   const rows = Store.all('checklist').filter(t => !t.demo && (all || isMyDoer(t.doer))).map(t => ({ t, r: clRule(t) })).filter(x => x.r.type !== 'Delegation').sort((a, b) => a.t.doer < b.t.doer ? -1 : 1);
   const edit = clCanAdd();
-  return '<div class="tbl-wrap"><table class="bomflat"><tr><th>Type</th><th>Name</th><th>Department</th><th>Task</th><th>Frequency</th><th>Schedule</th><th>Shift</th><th>Start Date</th><th>End Date</th><th>Skip Sunday</th><th>Skip Holidays</th><th>Needs to close</th><th>Created By</th><th>Status</th><th></th></tr>' +
-    (rows.length ? rows.map(({ t, r }) => '<tr' + (t.active === false ? ' class="muted"' : '') + '><td>' + esc(r.type) + '</td><td>' + esc(t.doer) + '</td><td>' + esc(t.dept || clUserOf(t.doer).department || '') + '</td><td>' + esc(t.title) + '</td><td>' + esc(r.frequency || '') + '</td><td>' + esc(r.schedule || '') + '</td><td>' + esc(t.shift || 'G') + '</td>' +
+  return '<div class="tbl-wrap"><table class="bomflat"><tr><th>Type</th><th>Source</th><th>Name</th><th>Department</th><th>Task</th><th>Frequency</th><th>Schedule</th><th>Shift</th><th>Start Date</th><th>End Date</th><th>Skip Sunday</th><th>Skip Holidays</th><th>Needs to close</th><th>Created By</th><th>Status</th><th></th></tr>' +
+    (rows.length ? rows.map(({ t, r }) => '<tr' + (t.active === false ? ' class="muted"' : '') + '><td>' + esc(r.type) + '</td><td>' + esc(clSrcLabel(t)) + (t.ref ? '<div class="small muted">' + esc(t.po_no || t.article || t.ref) + '</div>' : '') + '</td><td>' + esc(t.doer) + '</td><td>' + esc(t.dept || clUserOf(t.doer).department || '') + '</td><td>' + esc(t.title) + '</td><td>' + esc(r.frequency || '') + '</td><td>' + esc(r.schedule || '') + '</td><td>' + esc(t.shift || 'G') + '</td>' +
       '<td class="nowrap">' + (r.start ? fmtD(r.start) : '') + '</td><td class="nowrap">' + (r.end ? fmtD(r.end) : '') + '</td><td>' + (r.type === 'Delegation' ? '' : r.skip_sun === false ? 'No' : 'Yes') + '</td><td>' + (r.type === 'Delegation' ? '' : r.skip_hol ? 'Yes' : 'No') + '</td><td>' + esc(t.by || '') + '</td><td>' + (t.active === false ? 'Paused' : 'Active') + '</td>' +
       '<td>' + (needAny(t.need) ? esc(needText(t.need)) : '<span class="muted">Picture</span>') + (edit ? ' <a class="small" data-act="cl-need" data-id="' + esc(t.id) + '">Change</a>' : '') + '</td>' +
-      '<td class="nowrap">' + (edit ? '<button class="btn sm" data-act="cl-pause" data-id="' + esc(t.id) + '">' + (t.active === false ? 'Resume' : 'Pause') + '</button> <button class="btn ghost sm danger" data-act="cl-del" data-id="' + esc(t.id) + '" data-confirm="Delete this task and its history?">×</button>' : '') + '</td></tr>').join('')
-      : '<tr><td colspan="15" class="empty">No tasks</td></tr>') + '</table></div>';
+      '<td class="nowrap">' + (edit ? '<button class="btn sm" data-act="cl-edit" data-id="' + esc(t.id) + '">Edit</button> <button class="btn sm" data-act="cl-pause" data-id="' + esc(t.id) + '">' + (t.active === false ? 'Resume' : 'Pause') + '</button> <button class="btn ghost sm danger" data-act="cl-del" data-id="' + esc(t.id) + '" data-confirm="Delete this task and its history?">×</button>' : '') + '</td></tr>').join('')
+      : '<tr><td colspan="16" class="empty">No tasks</td></tr>') + '</table></div>';
 }
 ACTIONS['cl-need'] = el => {
   if (!clCanAdd()) { flash('Only Admin or MIS can change this.', 'err'); return; }

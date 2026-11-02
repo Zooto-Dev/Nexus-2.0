@@ -27,7 +27,7 @@ function poInwSync(p) {
       t.done = t.done || {}; t.done[clDoneKey(t, t.start)] = { at: nowIso(), by: 'System', remark: 'All material received', photos: 0, files: 0, log: '' };
       t.done_at = nowIso(); clPin(t); Store.put('checklist', t);
       audit('po.inw_task', p.no, 'closed — all material received'); renderNav();
-    } else if (p.expected && t.start !== p.expected) {   // the expected date moved
+    } else if (p.expected && t.start !== p.expected && !t.date_fixed) {   // the expected date moved
       t.start = p.expected; t.due = p.expected; clPin(t); Store.put('checklist', t);
     }
     return;
