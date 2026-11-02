@@ -52,7 +52,7 @@ function personTasks(doer) {
   });
   clRows(ymdOf(since), ymdOf(new Date(Date.now() + 7 * 86400000)), t => norm(t.doer) === norm(doer)).forEach(r => {
     const base = { task: r.task, ref: r.t.ref || (r.type === 'Delegation' ? '' : r.freq), party: r.t.party || '', src: r.t.demo ? 'Demo' : r.type, id: r.t.id, planned: r.planned };
-    if (r.status === 'Done') { if (r.actual >= since) out.push(Object.assign(base, { status: 'Completed', done: r.actual, delay: r.delay })); return; }
+    if (r.actual) { if (r.actual >= since) out.push(Object.assign(base, { status: r.kind === 'blocked' ? (r.ok ? 'Excused' : 'Not done') : 'Completed', done: r.actual, delay: r.delay, why: r.remark || '' })); return; }
     const st = r.status === 'Overdue' ? 'Delayed' : r.status;
     out.push(Object.assign(base, { status: st, delay: r.status === 'Overdue' ? r.delay : 0, btn: r.status === 'Upcoming' ? '' : clDoneBtn(r.t, r.ymd) }));
   });
@@ -108,16 +108,16 @@ function homeData(who) {
   return { tasks, done, doneN, onTime, score: sc ? Math.round(sc.quality) : null, sc, held, tickets, escs, escToMe, open: paMine.filter(r => r.status === 'Pending').sort((a, b) => a.planned - b.planned) };
 }
 function homeTaskTable(tasks) {
-  const order = { Delayed: 0, Pending: 1, Upcoming: 2, Completed: 3 };
+  const order = { Delayed: 0, 'Not done': 1, Pending: 2, Upcoming: 3, Completed: 4, Excused: 5 };
   const list = tasks.filter(t => HT_UI.f === 'all' || t.status === HT_UI.f).sort((a, b) => order[a.status] - order[b.status] ||
     (a.status === 'Delayed' ? b.delay - a.delay : a.status === 'Completed' ? b.done - a.done : (a.planned || 0) - (b.planned || 0)));
-  const cls = { Delayed: 'Late', Pending: 'Pending', Upcoming: 'Waiting', Completed: 'Done' };
+  const cls = { Delayed: 'Late', Pending: 'Pending', Upcoming: 'Waiting', Completed: 'Done', 'Not done': 'Late', Excused: 'Cancelled' };
   const n = k => k === 'all' ? tasks.length : tasks.filter(t => t.status === k).length;
   return '<div class="dcard"><div class="dh3">My tasks<span class="grow"></span>' +
     seg('htf', ['all', 'Delayed', 'Pending', 'Upcoming', 'Completed'].map(k => ({ v: k, l: (k === 'all' ? 'All' : k) + ' ' + n(k) })), HT_UI.f) + '</div>' +
     '<div class="tbl-wrap"><table data-pg="home_tasks"><tr><th class="num">#</th><th>Task</th><th>Reference</th><th>Party</th><th>Planned</th><th>Completed</th><th>Status</th><th class="num">Delay</th><th></th></tr>' +
     (list.length ? list.map((t, i) => '<tr><td class="num">' + (i + 1) + '</td><td>' + esc(t.task) + '<div class="muted small">' + esc(t.src) + '</div>' + taskExtraHtml(t.id) + ((t.photos || []).length ? '<div class="tphotos">' + t.photos.map(photoThumb).join(' ') + '</div>' : '') + '</td><td><b>' + esc(t.ref || '') + '</b></td><td>' + esc(t.party || '') + '</td><td class="nowrap">' + (t.planned ? fmtDT(t.planned) : '') + '</td><td class="nowrap">' + (t.done ? fmtDT(t.done) : '') + '</td>' +
-      '<td><span class="st ' + cls[t.status] + '">' + t.status + '</span></td><td class="num' + (t.delay ? ' late-txt' : '') + '">' + (t.delay ? fmtDelay(t.delay) : '') + '</td><td class="right">' + (t.btn || '') + '</td></tr>').join('')
+      '<td><span class="st ' + (cls[t.status] || 'Waiting') + '">' + t.status + '</span>' + (t.why ? '<div class="small muted">' + esc(t.why) + '</div>' : '') + '</td><td class="num' + (t.delay ? ' late-txt' : '') + '">' + (t.delay ? fmtDelay(t.delay) : '') + '</td><td class="right">' + (t.btn || '') + '</td></tr>').join('')
       : '<tr><td colspan="9" class="empty">No tasks</td></tr>') + '</table></div></div>';
 }
 VIEWS.home = {
