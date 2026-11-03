@@ -80,3 +80,13 @@ select cron.schedule('nexus-due', '* * * * *',
       body := '{}'::jsonb,
       headers := jsonb_build_object('Content-Type','application/json','x-nx-key',(select token from public.nx_cron where id = 1)),
       timeout_milliseconds := 20000)$$);
+
+-- which records have already been announced. The browser tries at once and the minute-by-minute
+-- scheduler tries again; whichever claims the row first sends, so the person gets exactly one.
+create table if not exists public.nx_push_seen (
+  id text primary key,
+  at timestamptz default now()
+);
+alter table public.nx_push_seen enable row level security;
+grant select, insert, update, delete on public.nx_push_seen to service_role;
+create index if not exists nx_push_seen_at on public.nx_push_seen (at);

@@ -58,6 +58,37 @@ async function doerMap(): Promise<Record<string, string[]>> {
   return map;
 }
 const doneKey = (t: Doc, ymd: string) => (t.freq === 'Once' || t.type === 'Delegation') ? 'once' : ymd;
+// claim a record: the first caller to get it announces it, everyone else stays quiet.
+// This is what keeps the browser and the scheduler from both ringing the same task.
+async function claim(key: string): Promise<boolean> {
+  const { data } = await db.from('nx_push_seen').upsert({ id: key }, { onConflict: 'id', ignoreDuplicates: true }).select('id');
+  return !!(data && data.length);
+}
+// anything given out in the last half hour that nobody has been told about yet
+async function announceNew(map: Record<string, string[]>): Promise<number> {
+  const since = new Date(Date.now() - 30 * 60e3);
+  let told = 0;
+  for (const col of ['checklist', 'todos'] as const) {
+    const { data } = await db.from('nx_docs').select('id, data').eq('collection', col).gte('updated_at', since.toISOString()).limit(300);
+    for (const row of data || []) {
+      const t = row.data as Doc;
+      if (!t || t.active === false) continue;
+      if (col === 'checklist' && t.done && Object.keys(t.done).length) continue;
+      if (col === 'todos' && t.status === 'Done') continue;
+      const made = Date.parse(String(t.created_at || ''));
+      if (!made || made < since.getTime()) continue;              // only genuinely new ones
+      if (!(await claim('new:' + col + ':' + row.id))) continue;  // somebody already announced it
+      const ids = map[norm(t.doer)] || [];
+      const r = await pushTo(ids, {
+        title: col === 'todos' ? 'New to-do for you' : 'New task for you',
+        body: clean(t.title, 120), url: APP_URL + (col === 'todos' ? '#/mytodo' : '#/mytasks'), tag: 'nx-new-' + String(row.id).slice(-14)
+      });
+      if (r.sent) told++;
+      logIt({ action: 'new:' + col, doer: String(t.doer || ''), sent: r.sent, gone: r.gone, recipients: ids.length, err: ids.length ? (r.sent ? null : 'no phone registered for this doer') : 'no login found for this doer' });
+    }
+  }
+  return told;
+}
 
 Deno.serve(async (req) => {
   if (req.method !== 'POST') return out({ error: 'Method not allowed' }, 405);
@@ -68,13 +99,14 @@ Deno.serve(async (req) => {
       return out({ error: 'Not allowed', header: (req.headers.get('x-nx-key') || '').length, stored: (ck?.token || '').length }, 401);
     }
 
+    const map = await doerMap();
+    const told = await announceNew(map);
+
     // everything that has come due in the last three hours and has not rung yet
     const { data: due } = await db.from('nx_alarms').select('*')
       .is('fired_at', null).lte('at', new Date().toISOString()).gte('at', new Date(Date.now() - 3 * 3600e3).toISOString())
       .order('at').limit(200);
-    if (!due || !due.length) return out({ ok: true, due: 0 });
-
-    const map = await doerMap();
+    if (!due || !due.length) return out({ ok: true, due: 0, told });
     let rang = 0, skipped = 0;
     for (const a of due) {
       const col = a.kind === 'todo' ? 'todos' : 'checklist';
@@ -94,7 +126,7 @@ Deno.serve(async (req) => {
       if (r.sent) rang++;
       logIt({ action: 'due:' + a.kind, doer, sent: r.sent, gone: r.gone, recipients: ids.length, err: ids.length ? (r.sent ? null : 'no phone registered for this doer') : 'no login found for this doer' });
     }
-    return out({ ok: true, due: due.length, rang, skipped });
+    return out({ ok: true, due: due.length, rang, skipped, told });
   } catch (e) {
     const msg = String((e as Error).message || e);
     logIt({ action: 'due:error', err: msg });

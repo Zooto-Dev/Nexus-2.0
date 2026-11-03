@@ -108,6 +108,9 @@ Deno.serve(async (req) => {
       const t = rec?.data as Doc | undefined;
       if (!t) { logIt({ action: 'task', user_id: uid, err: 'task not found: ' + String(b.id || '') }); return out({ error: 'Task not found' }, 404); }
       if (t.active === false || (t.done && Object.keys(t.done).length)) { logIt({ action: 'task', user_id: uid, doer: clean(t.doer, 60), err: 'task not open' }); return out({ ok: true, skipped: 'not open' }); }
+      // claim it, so the minute-by-minute scheduler does not announce the same task again
+      const { data: claimed } = await db.from('nx_push_seen').upsert({ id: 'new:checklist:' + String(b.id) }, { onConflict: 'id', ignoreDuplicates: true }).select('id');
+      if (!claimed || !claimed.length) return out({ ok: true, skipped: 'already announced' });
       const ids = await usersOfDoer(String(t.doer || ''));
       const due = fmtD(t.start || t.due);
       const r = await pushTo(ids, { title: 'New task for you', body: clean(t.title, 120) + (due ? '\nBy ' + due : ''), url: APP_URL + '#/mytasks', tag: 'nx-task-' + String(b.id).slice(-12) });
