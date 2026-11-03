@@ -175,6 +175,37 @@ function beep(times) {
     }
   } catch (e) { /* a browser that will not make a sound is not a reason to fail */ }
 }
+
+/* ---- the ring: with Nexus open it keeps sounding until the person stops it ---- */
+const RING = { t: null, ack: '', what: '' };
+function ringStop(ack) {
+  if (!RING.t) return;
+  clearInterval(RING.t); RING.t = null;
+  const was = RING.ack; RING.ack = ''; RING.what = '';
+  const bar = document.getElementById('nxRing'); if (bar) bar.remove();
+  if (ack && was && CLOUD && !DEMO) pushCall({ action: 'ack', id: was }).catch(e => console.error('ack', e.message));
+}
+function ringStart(what, ack) {
+  if (RING.t && RING.ack === ack) return;        // already ringing for this one
+  ringStop(false);
+  RING.ack = ack || ''; RING.what = what || '';
+  beep(3); RING.t = setInterval(() => beep(3), 4000);
+  const bar = document.createElement('div'); bar.id = 'nxRing';
+  bar.innerHTML = '<span><b>Due now</b> · ' + esc(what || '') + '</span>' +
+    '<button class="btn sm" data-ring="open">Open</button>' +
+    '<button class="btn sm" data-ring="stop">Stop reminding</button>';
+  document.body.appendChild(bar);
+  bar.addEventListener('click', ev => {
+    const b = ev.target.closest('[data-ring]'); if (!b) return;
+    if (b.dataset.ring === 'open') { ringStop(false); go(window.NX_APP === 'mobile' ? 'mytasks' : 'tasks'); return; }
+    ringStop(true);   // "Stop reminding" also tells the server to let this one rest
+  });
+}
+// the service worker rings the page whenever a reminder goes out
+if ('serviceWorker' in navigator) navigator.serviceWorker.addEventListener('message', e => {
+  const m = e.data || {}; if (m.nx === 'ring') ringStart(m.body || m.title || 'A task is due', m.ack || '');
+});
+
 const RANG_KEY = 'nexus2_rang';
 const rangLoad = () => { try { return new Set(JSON.parse(localStorage.getItem(RANG_KEY) || '[]')); } catch (e) { return new Set(); } };
 const rangSave = s => { try { localStorage.setItem(RANG_KEY, JSON.stringify(Array.from(s).slice(-400))); } catch (e) { } };
@@ -196,8 +227,8 @@ function alarmWatch() {
     Store.all('todos').filter(t => t.active !== false && t.status !== 'Done' && norm(t.doer) === norm(ME.doer)).forEach(t => check('todo:' + t.id, tdRemindAt(t), t.title));
   } catch (e) { console.error(e); }
   if (!n) return;
-  rangSave(rang); beep(3);
-  flash('<b>Due now:</b> ' + esc(hit) + (n > 1 ? ' and ' + (n - 1) + ' more' : '') + ' — <a href="#/' + (window.NX_APP === 'mobile' ? 'mytasks' : 'tasks') + '">open</a>', 'warn');
+  rangSave(rang);
+  ringStart(hit + (n > 1 ? ' and ' + (n - 1) + ' more' : ''), '');
 }
 // start the watch and the alarm upload once the data is in
 if (!DEMO) setTimeout(() => { try { alarmSync(); } catch (e) { console.error(e); } alarmWatch(); setInterval(alarmWatch, 60000); setInterval(alarmSync, 1800000); }, 6000);

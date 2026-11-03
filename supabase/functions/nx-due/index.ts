@@ -58,7 +58,7 @@ async function doerMap(): Promise<Record<string, string[]>> {
   return map;
 }
 const doneKey = (t: Doc, ymd: string) => (t.freq === 'Once' || t.type === 'Delegation') ? 'once' : ymd;
-const REPEAT_MIN = 5;          // how often an unanswered reminder comes back
+const REPEAT_MIN = 2;          // how often an unanswered reminder comes back
 const QUIET_FROM = 8, QUIET_TO = 22;   // repeats only between these hours, India time
 // claim a record: the first caller to get it announces it, everyone else stays quiet.
 // This is what keeps the browser and the scheduler from both ringing the same task.

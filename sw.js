@@ -18,14 +18,29 @@ self.addEventListener('push', e => {
   try { p = e.data ? e.data.json() : {}; } catch (_e) { p = { body: e.data ? e.data.text() : '' }; }
   const body = String(p.body || '');
   const ack = p.ack ? String(p.ack) : '';
-  e.waitUntil(self.registration.showNotification(String(p.title || 'Nexus'), {
-    body, tag: String(p.tag || 'nexus'), renotify: true, silent: false, icon: 'app-192.png', badge: 'app-badge.png',
-    vibrate: [200, 100, 200, 100, 200],
-    // a reminder stays on the screen and keeps coming back until the person presses Stop
-    requireInteraction: !!p.keep,
-    actions: ack ? [{ action: 'stop', title: 'Stop reminding' }, { action: 'open', title: 'Open' }] : [],
-    data: { url: String(p.url || 'app.html#/mytasks'), ack: ack }
-  }));
+  // Android only makes a sound for a NEW notification. Re-using one tag replaces the old one quietly,
+  // so each repeat gets its own tag and the one before it is closed first: it sounds every time,
+  // and only one reminder is left sitting in the shade.
+  const tag = String(p.tag || 'nexus') + (p.keep ? '-' + Date.now() : '');
+  e.waitUntil((async () => {
+    if (ack) {
+      const old = await self.registration.getNotifications();
+      old.forEach(n => { if (n.data && n.data.ack === ack) n.close(); });
+    }
+    await self.registration.showNotification(String(p.title || 'Nexus'), {
+      body, tag, renotify: true, silent: false, icon: 'app-192.png', badge: 'app-badge.png',
+      vibrate: [400, 150, 400, 150, 400, 150, 400],
+      // a reminder stays on the screen until the person answers it
+      requireInteraction: !!p.keep,
+      actions: ack ? [{ action: 'stop', title: 'Stop reminding' }, { action: 'open', title: 'Open' }] : [],
+      data: { url: String(p.url || 'app.html#/mytasks'), ack: ack }
+    });
+    // a page that is open rings properly, for as long as it takes
+    if (ack) {
+      const cl = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+      cl.forEach(c => c.postMessage({ nx: 'ring', ack: ack, title: String(p.title || ''), body: body }));
+    }
+  })());
 });
 
 self.addEventListener('notificationclick', e => {
