@@ -140,11 +140,11 @@ ACTIONS['cl-done'] = el => {
   const t = Store.get('checklist', el.dataset.id); if (!t) return;
   if (!clCanMark(t)) { flash('Only ' + esc(t.doer) + ' can mark this done.', 'err'); return; }
   const ymd = el.dataset.d || todayYmd();
-  const isDN = t.kind === 'debit_note' || /^Debit Note/i.test(t.title || '');
-  const needPhoto = !isDN && !/account/i.test(clUserOf(t.doer).department || t.dept || ''); let dnPdf = '';
-  // what this task asks for before it can be closed; with nothing set, a picture is asked for as before
+  const isDN = t.kind === 'debit_note' || /^Debit Note/i.test(t.title || ''); let dnPdf = '';
+  // a task asks for exactly what was set on it and nothing else. Attachment and remark boxes are
+  // always there to use, but only what the task actually requires is insisted on.
   const need = t.need && needAny(t.need) ? t.need : null;
-  const attachReq = need ? !!need.attach : needPhoto, remarkReq = need ? !!need.remark : false;
+  const attachReq = !!(need && need.attach), remarkReq = !!(need && need.remark);
   const bag = { photos: [], files: [], remark: '', date: '' };
   const old = $('#clDlg'); if (old) old.remove();
   const d = document.createElement('div'); d.id = 'clDlg'; d.className = 'dlg-back';

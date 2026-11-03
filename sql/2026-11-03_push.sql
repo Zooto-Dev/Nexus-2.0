@@ -90,3 +90,9 @@ create table if not exists public.nx_push_seen (
 alter table public.nx_push_seen enable row level security;
 grant select, insert, update, delete on public.nx_push_seen to service_role;
 create index if not exists nx_push_seen_at on public.nx_push_seen (at);
+
+-- a reminder keeps coming back every few minutes until it is stopped or the work is finished
+alter table public.nx_alarms add column if not exists last_at timestamptz;
+alter table public.nx_alarms add column if not exists repeats int default 0;
+-- the scheduler looks only at what changed recently
+create index if not exists nx_docs_recent on public.nx_docs (collection, updated_at desc);

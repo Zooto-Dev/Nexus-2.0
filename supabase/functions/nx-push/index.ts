@@ -127,6 +127,16 @@ Deno.serve(async (req) => {
       logIt({ action: 'step', user_id: uid, doer: clean(b.doer, 60), sent: r.sent, gone: r.gone, recipients: ids.length, err: ids.length ? (r.sent ? null : 'no phone registered for this doer') : 'no login found for this doer' });
       return out({ ok: true, ...r, to: ids.length });
     }
+    // the person pressed "Stop reminding": that alarm rests, and only its own doer may do it
+    if (b.action === 'ack') {
+      const { data: al } = await db.from('nx_alarms').select('id, doer').eq('id', String(b.id || '')).maybeSingle();
+      if (!al) return out({ ok: true, skipped: 'no such reminder' });
+      const mine = await usersOfDoer(String(al.doer || ''));
+      if (!mine.includes(uid)) return out({ error: 'This reminder is not yours' }, 403);
+      await db.from('nx_alarms').update({ fired_at: new Date().toISOString() }).eq('id', al.id);
+      logIt({ action: 'ack', user_id: uid, doer: String(al.doer || '') });
+      return out({ ok: true });
+    }
     // the app tells the server WHEN each open task or to-do has to ring.
     // The row carries only the record's id and date: the doer and the words are taken from the record here.
     if (b.action === 'alarms') {

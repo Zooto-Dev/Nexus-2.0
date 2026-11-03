@@ -58,6 +58,8 @@ async function doerMap(): Promise<Record<string, string[]>> {
   return map;
 }
 const doneKey = (t: Doc, ymd: string) => (t.freq === 'Once' || t.type === 'Delegation') ? 'once' : ymd;
+const REPEAT_MIN = 5;          // how often an unanswered reminder comes back
+const QUIET_FROM = 8, QUIET_TO = 22;   // repeats only between these hours, India time
 // claim a record: the first caller to get it announces it, everyone else stays quiet.
 // This is what keeps the browser and the scheduler from both ringing the same task.
 async function claim(key: string): Promise<boolean> {
@@ -65,7 +67,7 @@ async function claim(key: string): Promise<boolean> {
   return !!(data && data.length);
 }
 // anything given out in the last half hour that nobody has been told about yet
-async function announceNew(map: Record<string, string[]>): Promise<number> {
+async function announceNew(getMap: () => Promise<Record<string, string[]>>): Promise<number> {
   const since = new Date(Date.now() - 30 * 60e3);
   let told = 0;
   for (const col of ['checklist', 'todos'] as const) {
@@ -78,7 +80,7 @@ async function announceNew(map: Record<string, string[]>): Promise<number> {
       const made = Date.parse(String(t.created_at || ''));
       if (!made || made < since.getTime()) continue;              // only genuinely new ones
       if (!(await claim('new:' + col + ':' + row.id))) continue;  // somebody already announced it
-      const ids = map[norm(t.doer)] || [];
+      const ids = (await getMap())[norm(t.doer)] || [];
       const r = await pushTo(ids, {
         title: col === 'todos' ? 'New to-do for you' : 'New task for you',
         body: clean(t.title, 120), url: APP_URL + (col === 'todos' ? '#/mytodo' : '#/mytasks'), tag: 'nx-new-' + String(row.id).slice(-14)
@@ -99,15 +101,24 @@ Deno.serve(async (req) => {
       return out({ error: 'Not allowed', header: (req.headers.get('x-nx-key') || '').length, stored: (ck?.token || '').length }, 401);
     }
 
-    const map = await doerMap();
-    const told = await announceNew(map);
+    // most minutes there is nothing to do; the user list is read only when something is actually sent
+    let MAP: Record<string, string[]> | null = null;
+    const getMap = async () => (MAP || (MAP = await doerMap()));
+    const told = await announceNew(getMap);
 
-    // everything that has come due in the last three hours and has not rung yet
+    // A reminder does not go quiet by itself: it comes back every REPEAT_MIN minutes until the person
+    // presses Stop on it, or finishes the work. fired_at is the "stopped" mark.
+    const now = Date.now();
+    const again = new Date(now - REPEAT_MIN * 60e3).toISOString();
     const { data: due } = await db.from('nx_alarms').select('*')
-      .is('fired_at', null).lte('at', new Date().toISOString()).gte('at', new Date(Date.now() - 3 * 3600e3).toISOString())
+      .is('fired_at', null).lte('at', new Date(now).toISOString()).gte('at', new Date(now - 7 * 86400e3).toISOString())
+      .or('last_at.is.null,last_at.lte.' + again)
       .order('at').limit(200);
     if (!due || !due.length) return out({ ok: true, due: 0, told });
-    let rang = 0, skipped = 0;
+    // at night a repeat waits for the morning; the very first ring always goes out
+    const istHour = new Date(now + 5.5 * 3600e3).getUTCHours();
+    const quiet = istHour < QUIET_FROM || istHour >= QUIET_TO;
+    let rang = 0, skipped = 0, held = 0;
     for (const a of due) {
       const col = a.kind === 'todo' ? 'todos' : 'checklist';
       const { data: rec } = await db.from('nx_docs').select('data').eq('collection', col).eq('id', String(a.ref_id)).maybeSingle();
@@ -115,18 +126,23 @@ Deno.serve(async (req) => {
       const open = !!t && t.active !== false && (a.kind === 'todo'
         ? t.status !== 'Done'
         : !((t.done || {})[doneKey(t, String(a.ref_date || ''))]));
+      // the work is finished (or gone): the reminder stops on its own
       if (!open) { await db.from('nx_alarms').update({ fired_at: new Date().toISOString() }).eq('id', a.id); skipped++; continue; }
+      if (quiet && a.repeats > 0) { held++; continue; }
       const doer = String(t!.doer || a.doer || '');
-      const ids = map[norm(doer)] || [];
+      const ids = (await getMap())[norm(doer)] || [];
+      const n = (a.repeats || 0) + 1;
       const r = await pushTo(ids, {
         title: a.kind === 'todo' ? 'To-do reminder' : 'Task due now',
-        body: clean(t!.title, 120), url: APP_URL + (a.kind === 'todo' ? '#/mytodo' : '#/mytasks'), tag: 'nx-due-' + String(a.id).slice(-16)
+        body: clean(t!.title, 120) + (n > 1 ? '\nStill open — reminder ' + n : ''),
+        url: APP_URL + (a.kind === 'todo' ? '#/mytodo' : '#/mytasks'),
+        tag: 'nx-due-' + String(a.id).slice(-16), keep: true, ack: String(a.id)
       });
-      await db.from('nx_alarms').update({ fired_at: new Date().toISOString() }).eq('id', a.id);
+      await db.from('nx_alarms').update({ last_at: new Date().toISOString(), repeats: n }).eq('id', a.id);
       if (r.sent) rang++;
-      logIt({ action: 'due:' + a.kind, doer, sent: r.sent, gone: r.gone, recipients: ids.length, err: ids.length ? (r.sent ? null : 'no phone registered for this doer') : 'no login found for this doer' });
+      logIt({ action: 'due:' + a.kind + (n > 1 ? ':again' : ''), doer, sent: r.sent, gone: r.gone, recipients: ids.length, err: ids.length ? (r.sent ? null : 'no phone registered for this doer') : 'no login found for this doer' });
     }
-    return out({ ok: true, due: due.length, rang, skipped, told });
+    return out({ ok: true, due: due.length, rang, skipped, held, told });
   } catch (e) {
     const msg = String((e as Error).message || e);
     logIt({ action: 'due:error', err: msg });

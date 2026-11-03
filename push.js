@@ -79,6 +79,17 @@ function pushStep(col, id, doer, step) {
   setTimeout(() => { pushCall({ action: 'step', col: col, id: String(id), doer: doer, step: step }).catch(e => console.error('push', e.message)); }, 1200);
 }
 
+// "Stop reminding" sends the app here with the alarm named; tell the server and tidy the address
+function ackFromUrl() {
+  let id = '';
+  try { id = new URLSearchParams(location.search).get('ack') || ''; } catch (e) { }
+  if (!id || !CLOUD || DEMO) return;
+  pushCall({ action: 'ack', id: id }).then(() => flash('That reminder has been stopped.'))
+    .catch(e => console.error('ack', e.message));
+  try { history.replaceState(null, '', location.pathname + location.hash); } catch (e) { }
+}
+if (!DEMO) setTimeout(ackFromUrl, 4000);
+
 /* ---- the bell in the full Nexus header: the same switch, where most people actually sit ---- */
 async function bellPaint() {
   const b = document.getElementById('bellBtn'); if (!b) return;

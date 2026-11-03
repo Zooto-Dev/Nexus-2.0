@@ -17,15 +17,23 @@ self.addEventListener('push', e => {
   let p = {};
   try { p = e.data ? e.data.json() : {}; } catch (_e) { p = { body: e.data ? e.data.text() : '' }; }
   const body = String(p.body || '');
+  const ack = p.ack ? String(p.ack) : '';
   e.waitUntil(self.registration.showNotification(String(p.title || 'Nexus'), {
     body, tag: String(p.tag || 'nexus'), renotify: true, silent: false, icon: 'app-192.png', badge: 'app-badge.png',
-    vibrate: [120, 60, 120], requireInteraction: false, data: { url: String(p.url || 'app.html#/mytasks') }
+    vibrate: [200, 100, 200, 100, 200],
+    // a reminder stays on the screen and keeps coming back until the person presses Stop
+    requireInteraction: !!p.keep,
+    actions: ack ? [{ action: 'stop', title: 'Stop reminding' }, { action: 'open', title: 'Open' }] : [],
+    data: { url: String(p.url || 'app.html#/mytasks'), ack: ack }
   }));
 });
 
 self.addEventListener('notificationclick', e => {
   e.notification.close();
-  const url = new URL((e.notification.data && e.notification.data.url) || 'app.html#/mytasks', self.location.href).href;
+  const d = e.notification.data || {};
+  // "Stop reminding" opens Nexus with the alarm named, and the app tells the server to let it rest
+  const base = (e.action === 'stop' && d.ack) ? 'app.html?ack=' + encodeURIComponent(d.ack) + '#/mytasks' : (d.url || 'app.html#/mytasks');
+  const url = new URL(base, self.location.href).href;
   e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(list => {
     for (const c of list) if (c.url.indexOf(self.registration.scope) === 0 && 'focus' in c) { c.navigate(url).catch(() => { }); return c.focus(); }
     return self.clients.openWindow(url);
