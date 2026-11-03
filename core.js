@@ -60,7 +60,7 @@ function saveLocal() {
     localStorage.setItem(DB_KEY, JSON.stringify(DB));
   } catch (e) { flash('Browser storage full — export a backup from Settings.', 'err'); }
 }
-const COLS = ['users', 'roles', 'customers', 'items', 'materials', 'processes', 'orders', 'samples', 'dispatches', 'purchase_orders', 'sourcing', 'grns', 'inwards', 'vendors', 'issues', 'rsjw', 'rtvs', 'boms', 'job_cards', 'requisitions', 'tickets', 'checklist', 'checklist_log', 'escalations', 'attributes', 'item_types', 'mail_queue', 'requirements', 'prod_reports', 'prod_plans', 'wa_log', 'opening_stock', 'price_requests', 'moms', 'decisions', 'meetings', 'followups', 'travels', 'contacts', 'leads', 'vendor_requests', 'task_proof', 'art_ppt', 'audit'];
+const COLS = ['users', 'roles', 'customers', 'items', 'materials', 'processes', 'orders', 'samples', 'dispatches', 'purchase_orders', 'sourcing', 'grns', 'inwards', 'vendors', 'issues', 'rsjw', 'rtvs', 'boms', 'job_cards', 'requisitions', 'tickets', 'checklist', 'checklist_log', 'escalations', 'attributes', 'item_types', 'mail_queue', 'requirements', 'prod_reports', 'prod_plans', 'wa_log', 'opening_stock', 'price_requests', 'moms', 'decisions', 'meetings', 'followups', 'travels', 'contacts', 'leads', 'vendor_requests', 'task_proof', 'art_ppt', 'todos', 'audit'];
 let DB = null;
 const CFG = window.NEXUS_CONFIG || {};
 // demo shares one demo table (nx_demo) between all demo users; it can never reach the real table
@@ -739,6 +739,7 @@ const NAV = [
     { v: 'dispatch', p: 'history', l: 'Dispatch History', mod: 'dispatch' }] },
   { menu: 'Task', cnt: 'tasks', items: [
     { v: 'tasks', l: 'My Tasks', mod: 'tasks' },
+    { v: 'todo', l: 'To-do List', mod: 'tasks' },
     { v: 'checklist', l: 'Checklist', mod: 'checklist', sa: true },
     { v: 'builder', l: 'FMS Builder', mod: 'builder' },
     { dyn: 'fms' }] }

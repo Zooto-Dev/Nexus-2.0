@@ -39,3 +39,44 @@ create table if not exists public.nx_push_log (
 );
 alter table public.nx_push_log enable row level security;
 create index if not exists nx_push_log_at on public.nx_push_log (at desc);
+
+-- the grants that were missing: the edge functions run as service_role, and without these every
+-- read and write above was refused, so nothing was ever stored and no notification went out.
+-- anon and authenticated are left with nothing on purpose: a browser must never touch these tables.
+grant select, insert, update, delete on
+  public.nx_push_keys, public.nx_push_subs, public.nx_push_log, public.nx_alarms, public.nx_cron
+  to service_role;
+grant usage, select on sequence public.nx_push_log_id_seq to service_role;
+
+-- when something has to ring. A row holds only WHICH record and WHICH date; the words are read
+-- from the record at ringing time, so a browser can never dictate them.
+create table if not exists public.nx_alarms (
+  id text primary key,
+  at timestamptz not null,
+  kind text not null,
+  ref_id text not null,
+  ref_date text,
+  doer text,
+  title text,
+  fired_at timestamptz,
+  created_at timestamptz default now()
+);
+alter table public.nx_alarms enable row level security;
+create index if not exists nx_alarms_due on public.nx_alarms (at) where fired_at is null;
+
+-- the key the scheduler uses to call nx-due. Made in the database, never leaves the server.
+create table if not exists public.nx_cron (id int primary key default 1, token text not null, check (id = 1));
+alter table public.nx_cron enable row level security;
+insert into public.nx_cron (id, token)
+select 1, encode(extensions.gen_random_bytes(32), 'hex')
+where not exists (select 1 from public.nx_cron where id = 1);
+
+-- once a minute: ring whatever has come due. The key is read at run time, so it is not stored in the job.
+create extension if not exists pg_net with schema extensions;
+create extension if not exists pg_cron;
+select cron.schedule('nexus-due', '* * * * *',
+  $$select net.http_post(
+      url := 'https://nvpdncpvqwcalibpttdx.supabase.co/functions/v1/nx-due',
+      body := '{}'::jsonb,
+      headers := jsonb_build_object('Content-Type','application/json','x-nx-key',(select token from public.nx_cron where id = 1)),
+      timeout_milliseconds := 20000)$$);

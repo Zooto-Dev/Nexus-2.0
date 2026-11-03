@@ -124,6 +124,38 @@ Deno.serve(async (req) => {
       logIt({ action: 'step', user_id: uid, doer: clean(b.doer, 60), sent: r.sent, gone: r.gone, recipients: ids.length, err: ids.length ? (r.sent ? null : 'no phone registered for this doer') : 'no login found for this doer' });
       return out({ ok: true, ...r, to: ids.length });
     }
+    // the app tells the server WHEN each open task or to-do has to ring.
+    // The row carries only the record's id and date: the doer and the words are taken from the record here.
+    if (b.action === 'alarms') {
+      const rows = (Array.isArray(b.rows) ? b.rows : []).slice(0, 400);
+      if (!rows.length) return out({ ok: true, kept: 0 });
+      const ids = { checklist: [] as string[], todos: [] as string[] };
+      rows.forEach((r: Doc) => { const c = r.kind === 'todo' ? 'todos' : 'checklist'; const id = String(r.ref_id || ''); if (id && !ids[c].includes(id)) ids[c].push(id); });
+      const found: Record<string, Doc> = {};
+      for (const col of ['checklist', 'todos'] as const) {
+        if (!ids[col].length) continue;
+        const { data } = await db.from('nx_docs').select('id, data').eq('collection', col).in('id', ids[col]);
+        (data || []).forEach((r: Doc) => { found[col + ':' + r.id] = r.data as Doc; });
+      }
+      const keep: Doc[] = [];
+      const horizon = Date.now() + 400 * 86400e3;
+      rows.forEach((r: Doc) => {
+        const kind = r.kind === 'todo' ? 'todo' : 'task';
+        const doc = found[(kind === 'todo' ? 'todos' : 'checklist') + ':' + String(r.ref_id || '')];
+        if (!doc || doc.active === false) return;                       // no record, no alarm
+        const at = new Date(String(r.at || ''));
+        if (isNaN(at.getTime()) || at.getTime() > horizon) return;
+        keep.push({ id: String(r.id || '').slice(0, 120), at: at.toISOString(), kind, ref_id: String(r.ref_id), ref_date: String(r.ref_date || '').slice(0, 10), doer: clean(doc.doer, 60), title: clean(doc.title, 160) });
+      });
+      if (!keep.length) return out({ ok: true, kept: 0 });
+      // clear the not-yet-rung alarms of these records first, so a task that moved cannot ring at its old
+      // time; the ones that already rang stay, and the upsert below leaves their fired_at alone
+      const refs = ids.checklist.concat(ids.todos);
+      if (refs.length) await db.from('nx_alarms').delete().in('ref_id', refs).is('fired_at', null);
+      const { error } = await db.from('nx_alarms').upsert(keep, { onConflict: 'id' });
+      if (error) { logIt({ action: 'alarms', user_id: uid, err: error.message }); return out({ error: error.message }, 500); }
+      return out({ ok: true, kept: keep.length });
+    }
     return out({ error: 'Unknown action' }, 400);
   } catch (e) {
     const msg = String((e as Error).message || e);

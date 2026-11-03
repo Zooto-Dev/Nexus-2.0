@@ -3,7 +3,7 @@
 'use strict';
 if (window.NX_APP === 'mobile') (function () {
   const MOB = { f: 'open', push: '' };
-  const MOB_VIEWS = { mytasks: 1, myscore: 1 };
+  const MOB_VIEWS = { mytasks: 1, myscore: 1, mytodo: 1, todo: 1 };
   const stCls = { Delayed: 'Late', Pending: 'Pending', Upcoming: 'Waiting', Completed: 'Done', 'Not done': 'Late', Excused: 'Cancelled' };
   // the Nexus activity links open the full Nexus in a browser tab
   const fixBtn = t => t.src === 'Nexus' && t.btn ? t.btn.replace(/href="#\//, 'href="index.html#/').replace('<a ', '<a target="_blank" rel="noopener" ') : (t.btn || '');
@@ -82,12 +82,40 @@ if (window.NX_APP === 'mobile') (function () {
         myScoreCard(ME.doer) + (typeof teamCard === 'function' ? teamCard(ME.doer) : '') + mobPushCard());
     }
   };
+  // my own to-do list, as cards
+  VIEWS.mytodo = {
+    mod: 'tasks', render() {
+      const who = ME.doer || '';
+      const tabs = [['today', 'Today'], ['overdue', 'Overdue'], ['upcoming', 'Later'], ['done', 'Done']];
+      const chip = (v, l) => '<a class="mb-chip' + (TD_UI.tab === v ? ' on' : '') + '" data-act="mb-td" data-v="' + v + '">' + l + '</a>';
+      const rows = tdRowsFor(who);
+      setMain('<div class="mb-chips">' + tabs.map(t => chip(t[0], t[1])).join('') + '</div>' +
+        '<a class="btn primary mb-add" data-act="td-new">New to-do</a>' +
+        (rows.length ? rows.map(t => '<div class="mb-card' + (t.st === 'Overdue' ? ' late' : '') + '">' +
+          '<div class="mb-t">' + esc(t.title) + '</div>' +
+          '<div class="mb-m">' + esc([t.category, t.priority, tdRemLabel(t.remind)].filter(Boolean).join(' · ')) + '</div>' +
+          (t.note ? '<div class="mb-m">' + esc(t.note) + '</div>' : '') +
+          '<div class="mb-r"><span class="st ' + (TD_CLS[t.st] || 'Waiting') + '">' + esc(t.st) + '</span>' +
+          '<span class="mb-d">' + fmtD(t.due_date) + ' ' + esc(t.due_time || '') + '</span></div>' +
+          '<div class="mb-a">' + (t.st === 'Done'
+            ? '<a class="btn ghost sm" data-act="td-reopen" data-id="' + esc(t.id) + '">Reopen</a>'
+            : '<a class="btn sm" data-act="td-done" data-id="' + esc(t.id) + '">Done</a>' +
+            '<a class="btn ghost sm" data-act="td-push" data-id="' + esc(t.id) + '" data-d="1">+1 day</a>' +
+            '<a class="btn ghost sm" data-act="td-edit" data-id="' + esc(t.id) + '">Edit</a>') + '</div></div>').join('')
+          : '<div class="mb-empty">Nothing here.</div>'));
+    }
+  };
+  // the phone app has no separate to-do screen of its own to re-render, so point the module at this one
+  VIEWS.todo = VIEWS.mytodo;
+  ACTIONS['mb-td'] = el => { TD_UI.tab = el.dataset.v; VIEWS.mytodo.render(); };
   ACTIONS['mb-f'] = el => { MOB.f = el.dataset.v; VIEWS.mytasks.render(); };
   // the sidebar becomes the bottom bar; nothing else is reachable in the app
   renderNav = function () {
     const v = curView().v; const c = navCounts();
     const tab = (to, l, ic, cnt) => '<a href="#/' + to + '" class="' + (v === to ? 'on' : '') + '"><svg viewBox="0 0 24 24">' + ic + '</svg><span>' + l + '</span>' + (cnt ? '<i>' + cnt + '</i>' : '') + '</a>';
+    const td = typeof tdMine === 'function' ? tdMine(ME.doer).filter(t => ['Today', 'Overdue'].includes(tdStatus(t))).length : 0;
     $('#nav').innerHTML = tab('mytasks', 'My tasks', '<path d="M4 7h16M4 12h16M4 17h10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>', c.tasks && c.tasks.n) +
+      tab('mytodo', 'To-do', '<path d="M4 7l2.5 2.5L11 5M4 16l2.5 2.5L11 14M14 7h6M14 17h6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>', td) +
       tab('myscore', 'My score', '<path d="M4 19V10M10 19V5M16 19v-6M22 19H2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>', 0);
     const w = $('#who'); if (w) w.textContent = ME.name || '';
   };
