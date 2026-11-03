@@ -64,7 +64,11 @@ function pushTask(id) {
   if (!CLOUD || DEMO || !id) return;
   // the record is still being written to the cloud, so give it a few tries before giving up
   let n = 0;
-  const go = () => pushCall({ action: 'task', id: String(id) }).catch(e => {
+  const go = () => pushCall({ action: 'task', id: String(id) }).then(r => {
+    // say it plainly when nobody could be reached, so a missing notification is never a mystery
+    if (!r.to) flash('Task saved, but no notification: that person has no Nexus login, or their login has no doer name.', 'warn');
+    else if (!r.sent) flash('Task saved, but no notification: that person has not switched notifications on in the Nexus app yet.', 'warn');
+  }).catch(e => {
     if (/not found/i.test(e.message) && ++n < 4) setTimeout(go, n * 2500); else console.error('push', e.message);
   });
   setTimeout(go, 1500);

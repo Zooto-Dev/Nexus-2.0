@@ -24,3 +24,18 @@ create table if not exists public.nx_push_subs (
 );
 alter table public.nx_push_subs enable row level security;
 create index if not exists nx_push_subs_doer on public.nx_push_subs (upper(doer));
+
+-- what happened to each notification (RLS on, no policy: only the edge function writes and reads it)
+create table if not exists public.nx_push_log (
+  id bigserial primary key,
+  at timestamptz default now(),
+  action text,
+  user_id uuid,
+  doer text,
+  sent int default 0,
+  gone int default 0,
+  recipients int default 0,
+  err text
+);
+alter table public.nx_push_log enable row level security;
+create index if not exists nx_push_log_at on public.nx_push_log (at desc);

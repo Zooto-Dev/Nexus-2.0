@@ -21,7 +21,16 @@ function adminKey(): string {
   try { const k = JSON.parse(Deno.env.get('SUPABASE_SECRET_KEYS') || '{}'); const v = k.default || Object.values(k)[0]; if (v) return String(v); } catch (_e) { /* not set */ }
   return Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
 }
+function jwtUser(jwt: string): string {
+  try {
+    const part = jwt.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+    const p = JSON.parse(atob(part + '='.repeat((4 - part.length % 4) % 4)));
+    return p.role === 'authenticated' ? String(p.sub || '') : '';
+  } catch (_e) { return ''; }
+}
 const db = createClient(Deno.env.get('SUPABASE_URL')!, adminKey(), { auth: { persistSession: false } });
+// every call is written down, so a notification that did not arrive can be explained
+const logIt = (row: Doc) => db.from('nx_push_log').insert(row).then(() => { }, () => { });
 const APP_URL = Deno.env.get('NX_APP_URL') || 'https://zooto-dev.github.io/Nexus-2.0/app.html';
 
 // the key pair lives in the database; it is made once, on the first call
@@ -70,18 +79,19 @@ Deno.serve(async (req) => {
     // the public key is public by design: the browser needs it to subscribe
     if (b.action === 'key') return out({ ok: true, key: (await vapid()).publicKey });
 
-    const jwt = (req.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '');
-    const { data: who } = await db.auth.getUser(jwt);
-    if (!who?.user) return out({ error: 'Not signed in' }, 401);
-    const uid = who.user.id;
+    const uid = jwtUser((req.headers.get('Authorization') || '').replace(/^Bearer\s+/i, ''));
+    if (!uid) { logIt({ action: String(b.action || ''), err: 'not signed in' }); return out({ error: 'Not signed in' }, 401); }
 
     if (b.action === 'subscribe') {
       const s = b.sub || {};
       const endpoint = String(s.endpoint || ''); const p256dh = String(s.keys?.p256dh || ''); const auth = String(s.keys?.auth || '');
       if (!/^https:\/\//.test(endpoint) || !p256dh || !auth) return out({ error: 'Bad subscription' }, 400);
       const { error } = await db.from('nx_push_subs').upsert({ id: endpoint, user_id: uid, doer: clean(b.doer, 60), endpoint, p256dh, auth, agent: clean(b.agent, 120), created_at: new Date().toISOString() }, { onConflict: 'endpoint' });
-      if (error) return out({ error: error.message }, 500);
-      return out({ ok: true });
+      if (error) { logIt({ action: 'subscribe', user_id: uid, doer: clean(b.doer, 60), err: error.message }); return out({ error: error.message }, 500); }
+      // proof straight away, so nobody has to wonder whether it worked
+      const r = await pushTo([uid], { title: 'Nexus', body: 'Notifications are on for this phone.', url: APP_URL + '#/mytasks', tag: 'nx-on' });
+      logIt({ action: 'subscribe', user_id: uid, doer: clean(b.doer, 60), sent: r.sent, gone: r.gone, recipients: 1, err: r.sent ? null : 'subscribed but nothing delivered' });
+      return out({ ok: true, ...r });
     }
     if (b.action === 'unsubscribe') {
       await db.from('nx_push_subs').delete().eq('endpoint', String(b.endpoint || '')).eq('user_id', uid);
@@ -89,17 +99,19 @@ Deno.serve(async (req) => {
     }
     if (b.action === 'test') {
       const r = await pushTo([uid], { title: 'Nexus', body: 'Notifications are working on this phone.', url: APP_URL, tag: 'nx-test' });
+      logIt({ action: 'test', user_id: uid, sent: r.sent, gone: r.gone, recipients: 1 });
       return out({ ok: true, ...r });
     }
     // a task that was just given to someone: the words come from the record itself
     if (b.action === 'task') {
       const { data: rec } = await db.from('nx_docs').select('data').eq('collection', 'checklist').eq('id', String(b.id || '')).maybeSingle();
       const t = rec?.data as Doc | undefined;
-      if (!t) return out({ error: 'Task not found' }, 404);
-      if (t.active === false || (t.done && Object.keys(t.done).length)) return out({ ok: true, skipped: 'not open' });
+      if (!t) { logIt({ action: 'task', user_id: uid, err: 'task not found: ' + String(b.id || '') }); return out({ error: 'Task not found' }, 404); }
+      if (t.active === false || (t.done && Object.keys(t.done).length)) { logIt({ action: 'task', user_id: uid, doer: clean(t.doer, 60), err: 'task not open' }); return out({ ok: true, skipped: 'not open' }); }
       const ids = await usersOfDoer(String(t.doer || ''));
       const due = fmtD(t.start || t.due);
       const r = await pushTo(ids, { title: 'New task for you', body: clean(t.title, 120) + (due ? '\nBy ' + due : ''), url: APP_URL + '#/mytasks', tag: 'nx-task-' + String(b.id).slice(-12) });
+      logIt({ action: 'task', user_id: uid, doer: clean(t.doer, 60), sent: r.sent, gone: r.gone, recipients: ids.length, err: ids.length ? (r.sent ? null : 'no phone registered for this doer') : 'no login found for this doer' });
       return out({ ok: true, ...r, to: ids.length });
     }
     // a flow step that has just opened for its doer
@@ -109,10 +121,13 @@ Deno.serve(async (req) => {
       if (!o) return out({ error: 'Record not found' }, 404);
       const ids = await usersOfDoer(String(b.doer || ''));
       const r = await pushTo(ids, { title: 'New step for you', body: clean(b.step, 90) + '\n' + clean(o.no, 40) + (o.customer_name ? ' · ' + clean(o.customer_name, 40) : ''), url: APP_URL + '#/mytasks', tag: 'nx-step-' + clean(o.no, 20) });
+      logIt({ action: 'step', user_id: uid, doer: clean(b.doer, 60), sent: r.sent, gone: r.gone, recipients: ids.length, err: ids.length ? (r.sent ? null : 'no phone registered for this doer') : 'no login found for this doer' });
       return out({ ok: true, ...r, to: ids.length });
     }
     return out({ error: 'Unknown action' }, 400);
   } catch (e) {
-    return out({ error: String((e as Error).message || e) }, 500);
+    const msg = String((e as Error).message || e);
+    logIt({ action: 'error', err: msg });
+    return out({ error: msg }, 500);
   }
 });

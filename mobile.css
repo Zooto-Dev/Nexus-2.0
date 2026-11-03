@@ -39,3 +39,6 @@ body.mb .mb-note span { flex: 1 1 160px; }
 body.mb .mb-set { display: flex; gap: 10px; align-items: center; justify-content: space-between; flex-wrap: wrap; padding: 8px 0; border-bottom: 1px solid #eef1f2; }
 body.mb .mb-set:last-child { border-bottom: 0; }
 body.mb .mb-set-r { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+body.mb .mb-note.big { background: #fff4e5; border-color: #f0c28a; color: #6b3f00; display: block; }
+body.mb .mb-note.big span { display: block; margin-bottom: 8px; }
+body.mb .mb-note.big .btn { width: 100%; text-align: center; padding: 10px; font-size: 14px; }

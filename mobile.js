@@ -14,13 +14,14 @@ if (window.NX_APP === 'mobile') (function () {
   const mobStandalone = () => !!(window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true;
   const mobIos = () => /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
   function mobNudge() {
-    const canInstall = typeof PUSH === 'object' && PUSH.install;
-    if (canInstall) return '<div class="mb-note"><span>Install Nexus on this phone so it opens like an app.</span><a class="btn sm" data-act="mb-install">Install</a></div>';
-    // on an iPhone notifications work only after the app is added to the Home Screen
-    if (mobIos() && !mobStandalone()) return '<div class="mb-note"><span>iPhone: tap Share, then Add to Home Screen. Open Nexus from there and notifications can be switched on.</span></div>';
-    if (MOB.push === 'off') return '<div class="mb-note"><span>Get a notification the moment a new task comes to you.</span><a class="btn sm" data-act="mb-push-on">Turn on</a></div>';
-    if (MOB.push === 'blocked') return '<div class="mb-note"><span>Notifications are blocked for Nexus in this browser. Allow them in the browser site settings, then open this screen again.</span></div>';
-    return '';
+    let h = '';
+    // notifications first: this is the one thing a person must switch on, and it is easy to miss
+    if (MOB.push === 'off') h += '<div class="mb-note big"><span><b>Notifications are off on this phone.</b><br>Switch them on and you will be told the moment a new task comes to you.</span><a class="btn" data-act="mb-push-on">Turn on notifications</a></div>';
+    else if (MOB.push === 'blocked') h += '<div class="mb-note big"><span><b>Notifications are blocked for Nexus in this browser.</b><br>Browser settings → Site settings → Notifications → allow nexus, then open this screen again.</span></div>';
+    else if (MOB.push === 'na') h += '<div class="mb-note"><span>This browser cannot show notifications. Open the app from the home screen icon.</span></div>';
+    if (typeof PUSH === 'object' && PUSH.install) h += '<div class="mb-note"><span>Install Nexus on this phone so it opens like an app.</span><a class="btn sm" data-act="mb-install">Install</a></div>';
+    else if (mobIos() && !mobStandalone()) h += '<div class="mb-note"><span>iPhone: tap Share, then Add to Home Screen. Open Nexus from there — on an iPhone notifications work only from the home screen app.</span></div>';
+    return h;
   }
   function mobPushCard() {
     const st = MOB.push;
