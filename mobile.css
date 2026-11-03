@@ -11,7 +11,7 @@ body.mb #nav a { flex: 1; display: flex; flex-direction: column; align-items: ce
 body.mb #nav a.on { color: var(--teal, #0e6a73); font-weight: 700; }
 body.mb #nav a svg { width: 22px; height: 22px; }
 body.mb #nav a i { position: absolute; top: 2px; left: 50%; margin-left: 6px; background: #b91c1c; color: #fff; border-radius: 9px; font-style: normal; font-size: 10px; padding: 0 5px; line-height: 15px; }
-.mb-chips { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 10px; -webkit-overflow-scrolling: touch; }
+.mb-chips { display: flex; flex-wrap: wrap; gap: 6px; padding-bottom: 10px; }
 .mb-chip { flex: 0 0 auto; padding: 7px 12px; border-radius: 999px; border: 1px solid var(--line, #e3e6e4); background: #fff; font-size: 13px; cursor: pointer; text-decoration: none; color: inherit; }
 .mb-chip.on { background: var(--teal, #0e6a73); border-color: var(--teal, #0e6a73); color: #fff; font-weight: 700; }
 .mb-card { background: #fff; border: 1px solid var(--line, #e3e6e4); border-left: 4px solid #9ca3af; border-radius: 12px; padding: 12px; margin-bottom: 10px; }
@@ -20,8 +20,8 @@ body.mb #nav a i { position: absolute; top: 2px; left: 50%; margin-left: 6px; ba
 .mb-m { font-size: 12.5px; color: #6b7280; margin-top: 3px; }
 .mb-r { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; }
 .mb-d { font-size: 12px; color: #6b7280; }
-.mb-a { margin-top: 10px; }
-.mb-a .btn, .mb-a a.btn { width: 100%; justify-content: center; padding: 11px; font-size: 15px; }
+.mb-a { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.mb-a .btn, .mb-a a.btn { flex: 1 1 0; min-width: 84px; width: auto; justify-content: center; text-align: center; padding: 11px 6px; font-size: 15px; }
 .mb-ph { display: flex; gap: 6px; margin-top: 6px; }
 .mb-ph img { height: 44px !important; border-radius: 6px; }
 .mb-empty { text-align: center; color: #6b7280; padding: 40px 10px; }
@@ -36,7 +36,7 @@ body.mb table { font-size: 12.5px; }
 /* install + notifications */
 body.mb .mb-note { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; background: #e8f4f5; border: 1px solid #b7dde1; color: #124c52; border-radius: 10px; padding: 10px 12px; margin: 0 0 10px; font-size: 13px; line-height: 1.35; }
 body.mb .mb-note span { flex: 1 1 160px; }
-body.mb .mb-set { display: flex; gap: 10px; align-items: center; justify-content: space-between; flex-wrap: wrap; padding: 8px 0; border-bottom: 1px solid #eef1f2; }
+body.mb .mb-set { display: flex; gap: 10px; align-items: center; justify-content: space-between; flex-wrap: wrap; padding: 10px 12px; border-bottom: 1px solid #eef1f2; }
 body.mb .mb-set:last-child { border-bottom: 0; }
 body.mb .mb-set-r { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 body.mb .mb-note.big { background: #fff4e5; border-color: #f0c28a; color: #6b3f00; display: block; }
@@ -44,3 +44,15 @@ body.mb .mb-note.big span { display: block; margin-bottom: 8px; }
 body.mb .mb-note.big .btn { width: 100%; text-align: center; padding: 10px; font-size: 14px; }
 body.mb .mb-add { display: block; text-align: center; margin: 0 0 10px; padding: 10px; font-size: 14px; }
 body.mb #nav a { flex: 1 1 0; min-width: 0; }
+
+/* nothing may run past the edge of the screen */
+body.mb .mb-set { align-items: flex-start; }
+body.mb .mb-set b { flex: 1 1 140px; min-width: 0; }
+body.mb .mb-set-r { flex: 0 1 auto; min-width: 0; justify-content: flex-end; }
+body.mb .mb-set-r .st { white-space: normal; text-align: right; }
+body.mb .mb-card .mb-t, body.mb .mb-card .mb-m { overflow-wrap: anywhere; }
+/* a wide table is swiped sideways rather than cut off */
+body.mb .tbl-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; max-width: 100%; }
+body.mb .card, body.mb .mb-note { max-width: 100%; box-sizing: border-box; }
+/* every button in a card should look like a button, ghost ones included */
+body.mb .mb-a .btn.ghost { border: 1px solid var(--line, #d7dcda); background: #fff; }

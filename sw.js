@@ -18,7 +18,7 @@ self.addEventListener('push', e => {
   try { p = e.data ? e.data.json() : {}; } catch (_e) { p = { body: e.data ? e.data.text() : '' }; }
   const body = String(p.body || '');
   e.waitUntil(self.registration.showNotification(String(p.title || 'Nexus'), {
-    body, tag: String(p.tag || 'nexus'), renotify: true, silent: false, icon: 'app-192.png', badge: 'app-192.png',
+    body, tag: String(p.tag || 'nexus'), renotify: true, silent: false, icon: 'app-192.png', badge: 'app-badge.png',
     vibrate: [120, 60, 120], requireInteraction: false, data: { url: String(p.url || 'app.html#/mytasks') }
   }));
 });

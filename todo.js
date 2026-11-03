@@ -7,7 +7,6 @@ const TD_CAT = ['Call', 'Meeting', 'Follow-up', 'Approval', 'Payment', 'Document
 const TD_PRI = ['High', 'Medium', 'Low'];
 // how long before the time it should remind
 const TD_REM = [['0', 'At the time'], ['10', '10 minutes before'], ['30', '30 minutes before'], ['60', '1 hour before'], ['180', '3 hours before'], ['1440', '1 day before'], ['', 'No reminder']];
-const TD_HOURS = (() => { const o = []; for (let h = 6; h <= 22; h++) for (const m of ['00', '30']) o.push(String(h).padStart(2, '0') + ':' + m); return o; })();
 const TD_UI = { tab: 'today', who: '', q: '' };
 
 const tdAll = () => Store.all('todos').filter(t => t.active !== false);
@@ -42,7 +41,7 @@ function tdDialog(t) {
     { k: 'category', l: 'Category', type: 'select', options: TD_CAT, value: v.category || 'Follow-up' },
     { k: 'priority', l: 'Priority', type: 'select', options: TD_PRI, value: v.priority || 'Medium' },
     { k: 'due_date', l: 'Date', type: 'date', value: v.due_date || todayYmd(), req: true },
-    { k: 'due_time', l: 'Time', type: 'select', options: TD_HOURS, value: v.due_time || '18:00' },
+    { k: 'due_time', l: 'Time', type: 'time', value: v.due_time || '18:00', req: true },
     { k: 'remind', l: 'Remind me', type: 'select', options: TD_REM.map(r => r[1]), value: tdRemLabel(v.remind) },
     { k: 'note', l: 'Note', type: 'textarea', value: v.note || '' }
   ];
