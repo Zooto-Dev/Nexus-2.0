@@ -335,6 +335,7 @@ ACTIONS['cl-save'] = () => {
   }
   Store.put('checklist', r);
   audit('checklist.create', r.title, r.doer + ' · ' + (del ? 'Delegation ' + r.start : r.frequency + (r.schedule ? ' ' + r.schedule : '')) + (r.need ? ' · needs ' + needText(r.need) : ''));
+  if (del && typeof pushTask === 'function') pushTask(r.id);
   CL_FORM = { clDoer: F.clDoer }; CHK_UI.tab = 'list'; flash('Task assigned to ' + esc(r.doer) + '.'); renderNav(); VIEWS.checklist.render();
 };
 

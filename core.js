@@ -556,12 +556,28 @@ function markStepDone(orderId, stepId, note, capVal, proof) {
     Store.put('task_proof', { id: pid, src: 'fms', ref: o.no, order_id: o.id, step: stepId, step_name: s.name, photos: p.photos || [], files: p.files || [], remark: String(p.remark || '').trim(), date: p.date || '', by: ME.name, at: nowIso() });
     o.proof = o.proof || {}; o.proof[stepId] = pid;
   }
+  const wasOpen = {};   // which steps were already open, so only the newly opened ones are announced
+  Object.keys(r.steps).forEach(k => { if (r.steps[k].status === 'Pending' || r.steps[k].status === 'Late') wasOpen[k] = 1; });
   o.actuals = o.actuals || {}; o.actuals[stepId] = nowIso();
   if (note) { o.notes = o.notes || {}; o.notes[stepId] = note; }
   o.done_by = o.done_by || {}; o.done_by[stepId] = ME.name;
   fmsPut(o);
+  stepOpened(o, wasOpen, stepId);
   audit('step.done', o.no, s.name + (s.delayMinutes ? ' (late ' + fmtDelay(s.delayMinutes) + ')' : '') + (proof && proof.date ? ' · ' + ((def.need && def.need.date_label) || 'date') + ' ' + fmtD(proof.date) : '') + (note ? ' — ' + note : ''));
   flash(esc(s.name) + ' marked done for ' + esc(o.no) + '. <a data-act="undo-step" data-o="' + esc(o.id) + '" data-s="' + esc(stepId) + '">Undo</a>');
+}
+// a step that has just opened for someone else: their phone is told
+function stepOpened(o, wasOpen, justDone) {
+  if (typeof pushStep !== 'function') return;
+  try {
+    const r2 = resolveOrder(fmsGet(o.id) || o); if (!r2) return;
+    Object.keys(r2.steps).forEach(k => {
+      const st = r2.steps[k];
+      if (k === justDone || wasOpen[k] || !(st.status === 'Pending' || st.status === 'Late') || !st.doer) return;
+      if (norm(st.doer) === norm(ME.doer)) return;   // no notification for the person who just closed a step
+      pushStep(o.kind === 'sample' ? 'samples' : 'orders', o.id, st.doer, st.name);
+    });
+  } catch (e) { console.error(e); }
 }
 function fieldLabelOf(spec, key) { const f = ((spec && spec.fields) || []).find(x => x.key === key); return f ? f.label : key; }
 /* ---- FMS auto-close rules: a step set to "Closed by: another system" closes itself when its rule is met ---- */

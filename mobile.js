@@ -2,11 +2,51 @@
    It loads the same code as the full Nexus, so a task closed here follows exactly the same rules. */
 'use strict';
 if (window.NX_APP === 'mobile') (function () {
-  const MOB = { f: 'open' };
+  const MOB = { f: 'open', push: '' };
   const MOB_VIEWS = { mytasks: 1, myscore: 1 };
   const stCls = { Delayed: 'Late', Pending: 'Pending', Upcoming: 'Waiting', Completed: 'Done', 'Not done': 'Late', Excused: 'Cancelled' };
   // the Nexus activity links open the full Nexus in a browser tab
   const fixBtn = t => t.src === 'Nexus' && t.btn ? t.btn.replace(/href="#\//, 'href="index.html#/').replace('<a ', '<a target="_blank" rel="noopener" ') : (t.btn || '');
+
+  /* ---- install + notifications ---- */
+  function mobPushRead() { if (typeof pushState !== 'function') { MOB.push = 'na'; return; } pushState().then(v => { if (v !== MOB.push) { MOB.push = v; const w = curView().v; if (VIEWS[w] && (w === 'mytasks' || w === 'myscore')) VIEWS[w].render(); } }); }
+  // shown on My tasks only while something still needs doing; the full switch lives on My score
+  const mobStandalone = () => !!(window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true;
+  const mobIos = () => /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  function mobNudge() {
+    const canInstall = typeof PUSH === 'object' && PUSH.install;
+    if (canInstall) return '<div class="mb-note"><span>Install Nexus on this phone so it opens like an app.</span><a class="btn sm" data-act="mb-install">Install</a></div>';
+    // on an iPhone notifications work only after the app is added to the Home Screen
+    if (mobIos() && !mobStandalone()) return '<div class="mb-note"><span>iPhone: tap Share, then Add to Home Screen. Open Nexus from there and notifications can be switched on.</span></div>';
+    if (MOB.push === 'off') return '<div class="mb-note"><span>Get a notification the moment a new task comes to you.</span><a class="btn sm" data-act="mb-push-on">Turn on</a></div>';
+    if (MOB.push === 'blocked') return '<div class="mb-note"><span>Notifications are blocked for Nexus in this browser. Allow them in the browser site settings, then open this screen again.</span></div>';
+    return '';
+  }
+  function mobPushCard() {
+    const st = MOB.push;
+    const row = st === 'on' ? '<span class="st Done">On</span><a class="btn ghost sm" data-act="mb-push-test">Send a test</a><a class="btn ghost sm" data-act="mb-push-off">Turn off</a>'
+      : st === 'blocked' ? '<span class="st Late">Blocked in the browser</span>'
+        : st === 'na' ? '<span class="st Waiting">Not available in this browser</span>'
+          : '<span class="st Pending">Off</span><a class="btn sm" data-act="mb-push-on">Turn on</a>';
+    return '<div class="card"><div class="mb-set"><b>Task notifications</b><div class="mb-set-r">' + row + '</div></div>' +
+      (typeof PUSH === 'object' && PUSH.install ? '<div class="mb-set"><b>Install the app</b><div class="mb-set-r"><a class="btn sm" data-act="mb-install">Install</a></div></div>'
+        : mobIos() && !mobStandalone() ? '<div class="mb-set"><b>Install the app</b><div class="mb-set-r"><span class="small">Share → Add to Home Screen</span></div></div>'
+          : mobStandalone() ? '<div class="mb-set"><b>Install the app</b><div class="mb-set-r"><span class="st Done">Installed</span></div></div>' : '') + '</div>';
+  }
+  ACTIONS['mb-install'] = async () => {
+    if (!PUSH.install) { flash('Use the browser menu: Add to Home screen.', 'warn'); return; }
+    const e = PUSH.install; PUSH.install = null;
+    try { e.prompt(); const r = await e.userChoice; flash(r && r.outcome === 'accepted' ? 'Installing — look for Nexus on your home screen.' : 'Not installed.', r && r.outcome === 'accepted' ? 'ok' : 'warn'); } catch (err) { flash(esc(err.message), 'err'); }
+    VIEWS[curView().v].render();
+  };
+  ACTIONS['mb-push-on'] = async el => {
+    el.classList.add('busy');
+    try { await pushEnable(); MOB.push = 'on'; flash('Notifications are on for this phone.', 'ok'); }
+    catch (e) { MOB.push = await pushState(); flash(esc(e.message), 'err'); }
+    VIEWS[curView().v].render();
+  };
+  ACTIONS['mb-push-off'] = async () => { try { await pushDisable(); } catch (e) { } MOB.push = 'off'; flash('Notifications are off for this phone.', 'ok'); VIEWS[curView().v].render(); };
+  ACTIONS['mb-push-test'] = async () => { try { const r = await pushTest(); flash(r.sent ? 'Test sent.' : 'This phone is not registered any more — turn notifications on again.', r.sent ? 'ok' : 'warn'); if (!r.sent) { MOB.push = 'off'; VIEWS[curView().v].render(); } } catch (e) { flash(esc(e.message), 'err'); } };
 
   VIEWS.mytasks = {
     mod: 'tasks', render() {
@@ -15,7 +55,8 @@ if (window.NX_APP === 'mobile') (function () {
       const list = all.filter(t => MOB.f === 'open' ? (t.status !== 'Completed' && t.status !== 'Excused') : t.status === MOB.f)
         .sort((a, b) => { const o = { Delayed: 0, 'Not done': 1, Pending: 2, Upcoming: 3, Completed: 4, Excused: 5 }; return (o[a.status] - o[b.status]) || (b.delay || 0) - (a.delay || 0) || (a.planned || 0) - (b.planned || 0); });
       const chip = (v, l) => '<a class="mb-chip' + (MOB.f === v ? ' on' : '') + '" data-act="mb-f" data-v="' + v + '">' + l + ' ' + n(v) + '</a>';
-      setMain('<div class="mb-chips">' + chip('open', 'Open') + chip('Delayed', 'Late') + chip('Pending', 'Today') + chip('Upcoming', 'Later') + chip('Completed', 'Done') + '</div>' +
+      if (MOB.push === '') mobPushRead();
+      setMain(mobNudge() + '<div class="mb-chips">' + chip('open', 'Open') + chip('Delayed', 'Late') + chip('Pending', 'Today') + chip('Upcoming', 'Later') + chip('Completed', 'Done') + '</div>' +
         (list.length ? list.map(t => '<div class="mb-card' + (t.status === 'Delayed' || t.status === 'Not done' ? ' late' : '') + '">' +
           '<div class="mb-t">' + esc(t.task) + '</div>' +
           '<div class="mb-m">' + esc([t.src, t.ref, t.party].filter(Boolean).join(' · ')) + '</div>' +
@@ -30,13 +71,14 @@ if (window.NX_APP === 'mobile') (function () {
   };
   VIEWS.myscore = {
     mod: 'dashboard', render() {
+      if (MOB.push === '') mobPushRead();
       const sc = scoreOf(ME.doer, 30, true);
       const open = personTasks(ME.doer || '');
       const k = (l, v, c) => '<div class="mb-k"><b class="' + (c || '') + '">' + v + '</b><i>' + l + '</i></div>';
       setMain('<div class="mb-kpi">' + k('Score · 30 days', sc ? sc.score.toFixed(2) : '—', sc ? scoreCls(sc.score) : '') +
         k('Delayed', open.filter(t => t.status === 'Delayed').length, 'late-txt') + k('Today', open.filter(t => t.status === 'Pending').length) +
         k('Done · 30 days', open.filter(t => t.status === 'Completed').length, 'done-txt') + '</div>' +
-        myScoreCard(ME.doer) + (typeof teamCard === 'function' ? teamCard(ME.doer) : ''));
+        myScoreCard(ME.doer) + (typeof teamCard === 'function' ? teamCard(ME.doer) : '') + mobPushCard());
     }
   };
   ACTIONS['mb-f'] = el => { MOB.f = el.dataset.v; VIEWS.mytasks.render(); };

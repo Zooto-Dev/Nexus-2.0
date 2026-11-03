@@ -20,6 +20,7 @@ function eaDelegate(task, doer, date, src, ref, need) {
   if (needAny(need)) r.need = need;
   Store.put('checklist', r);
   audit('delegation.create', r.title, r.doer + ' · ' + fmtD(date) + (ref ? ' · ' + ref : ''));
+  if (typeof pushTask === 'function') pushTask(r.id);   // the doer's phone gets told at once
   return r;
 }
 const eaPointStatus = cl => { if (!cl) return { status: 'Pending', by: '', at: '' }; const dn = clDoneOf(cl, cl.start); if (dn && dn.at) return { status: 'Done', by: dn.by, at: dn.at }; return { status: clPlanned(cl, cl.start) < new Date() ? 'Overdue' : 'Pending' }; };
