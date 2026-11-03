@@ -284,3 +284,37 @@ ACTIONS['home-ticket'] = () => {
     if (curView().v === 'home') VIEWS.home.render();
   });
 };
+
+/* ---------------- HOD: the team's score and what is still open with them ---------------- */
+const isHodUser = u => !!(u && /\bHEAD\b|MANAGER|INCHARGE|\bCEO\b|CHIEF/i.test(String(u.designation || '')));
+function myTeamUsers(who) {
+  const me = Store.all('users').find(u => u.doer && norm(u.doer) === norm(who)) || {};
+  if (!isHodUser(me) && !isAdminRole()) return { dept: '', list: [] };
+  const dept = String(me.department || '').trim(); if (!dept) return { dept: '', list: [] };
+  return { dept, list: Store.all('users').filter(u => u.active !== false && u.doer && norm(u.department) === norm(dept) && norm(u.doer) !== norm(who)).sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''))) };
+}
+function teamCard(who) {
+  const { dept, list } = myTeamUsers(who); if (!list.length) return '';
+  const all = allTasks();
+  const sc = {}; scoreRows(ymdAdd(todayYmd(), -30), todayYmd(), null, true).forEach(r => { sc[norm(r.doer)] = r; });
+  const rows = list.map(u => {
+    const open = all.filter(x => !x.done && norm(x.doer || x.owner) === norm(u.doer));
+    return { u, s: sc[norm(u.doer)] || null, open,
+      late: open.filter(x => x.status === 'Delayed'), today: open.filter(x => x.status === 'Pending'), soon: open.filter(x => x.status === 'Upcoming') };
+  }).sort((a, b) => b.late.length - a.late.length || b.today.length - a.today.length || String(a.u.name || '').localeCompare(String(b.u.name || '')));
+  const tLate = rows.reduce((a, r) => a + r.late.length, 0), tOpen = rows.reduce((a, r) => a + r.open.length, 0);
+  const openRows = r => { const sorted = r.open.slice().sort((a, b) => (b.delay || 0) - (a.delay || 0) || (a.planned || 0) - (b.planned || 0)); const show = sorted.slice(0, 15);
+    return '<div class="tbl-wrap"><table class="nopage nofilter"><tr><th>Task</th><th>Source</th><th>Reference</th><th>Planned</th><th>Status</th><th class="num">Delay</th></tr>' +
+    (show.length ? show.map(x => '<tr><td>' + esc(x.task) + '</td><td>' + esc(x.src) + '</td><td>' + esc(x.ref || x.party || '') + '</td><td class="nowrap">' + (x.planned ? fmtDT(x.planned) : '') + '</td><td><span class="st ' + (x.status === 'Delayed' ? 'Late' : x.status === 'Pending' ? 'Pending' : 'Waiting') + '">' + esc(x.status) + '</span></td><td class="num' + (x.delay ? ' late-txt' : '') + '">' + (x.delay ? fmtDelay(x.delay) : '') + '</td></tr>').join('')
+      : '<tr><td colspan="6" class="empty">Nothing open</td></tr>') + '</table></div>' +
+    '<div class="small" style="margin-top:4px">' + (sorted.length > show.length ? '+' + (sorted.length - show.length) + ' more · ' : '') + '<a href="#/alltasks/' + esc(r.u.doer) + '">See every task of ' + esc(r.u.name) + '</a></div>'; };
+  return '<div class="dcard"><div class="dh3">My team · ' + esc(dept) + '<span class="n' + (tLate ? ' red' : '') + '">' + list.length + '</span><span class="grow"></span><span class="muted small">' + tOpen + ' open · ' + tLate + ' delayed · score of the last 30 days</span></div>' +
+    '<div class="tbl-wrap"><table><tr><th>Name</th><th>Designation</th><th class="num">Score</th><th class="num">Done</th><th class="num">On time</th><th class="num">Delayed</th><th class="num">Due today</th><th class="num">Upcoming</th><th class="noprint"></th></tr>' +
+    rows.map(r => '<tr' + (HT_UI.team === r.u.doer ? ' class="cur"' : '') + '><td><b>' + esc(r.u.name) + '</b><div class="small muted">' + esc(r.u.doer) + '</div></td><td>' + esc(r.u.designation || '') + '</td>' +
+      '<td class="num">' + (r.s ? '<b class="' + scoreCls(r.s.score) + '">' + r.s.score.toFixed(2) + '</b>' : '<span class="muted">—</span>') + '</td>' +
+      '<td class="num">' + (r.s ? r.s.completed + '/' + r.s.total : '') + '</td><td class="num">' + (r.s && r.s.completed ? pct(r.s.onTimePct) : '') + '</td>' +
+      '<td class="num' + (r.late.length ? ' late-txt' : '') + '"><b>' + (r.late.length || '') + '</b></td><td class="num">' + (r.today.length || '') + '</td><td class="num">' + (r.soon.length || '') + '</td>' +
+      '<td class="noprint"><button class="btn sm" data-act="ht-team" data-d="' + esc(r.u.doer) + '">' + (HT_UI.team === r.u.doer ? 'Hide' : 'Open work') + '</button></td></tr>' +
+      (HT_UI.team === r.u.doer ? '<tr class="inline-form"><td colspan="9">' + openRows(r) + '</td></tr>' : '')).join('') + '</table></div></div>';
+}
+ACTIONS['ht-team'] = el => { HT_UI.team = HT_UI.team === el.dataset.d ? null : el.dataset.d; VIEWS.home.render(); };

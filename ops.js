@@ -33,7 +33,7 @@ ACTIONS['step-done'] = el => {
 function dueToday(s) { const d = s.planned; return d && ymdOf(d) === todayYmd(); }
 
 /* ---------------- Home: one person's dashboard (Admin can pick anyone) ---------------- */
-const HT_UI = { who: '', f: 'all', heldAll: false };
+const HT_UI = { who: '', f: 'all', heldAll: false, team: null };
 function personTasks(doer) {
   const now = new Date(), today = todayYmd(), since = new Date(Date.now() - 30 * 86400000), cal = calInfo();
   const late = (p, a) => { if (!p || !a || a <= p) return 0; try { return cal.workMinutesBetween(p, a); } catch (e) { return Math.round((a - p) / 60000); } };
@@ -181,6 +181,8 @@ VIEWS.home = {
     if (D.escToMe.length) h += '<div class="dcard"><div class="dh3">' + (self ? 'Escalated to me' : 'Escalated to ' + esc(person)) + '<span class="n red">' + D.escToMe.length + '</span><span class="grow"></span><a class="small" href="#/escalations">All</a></div>' + D.escToMe.slice(0, 6).map(escLine).join('') + '</div>';
     h += '</div></div>';
 
+    // the team of a head of department: score and what is still open with each person
+    h += teamCard(who);
     // requests this person sent for approval
     h += myRequestsCard(names);
     // open activities (purchase / store / approvals)
