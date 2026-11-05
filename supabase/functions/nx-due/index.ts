@@ -58,8 +58,8 @@ async function doerMap(): Promise<Record<string, string[]>> {
   return map;
 }
 const doneKey = (t: Doc, ymd: string) => (t.freq === 'Once' || t.type === 'Delegation') ? 'once' : ymd;
-const REPEAT_MIN = 2;          // how often an unanswered reminder comes back
-const QUIET_FROM = 8, QUIET_TO = 22;   // repeats only between these hours, India time
+// how often a reminder comes back, and the hours it stays quiet, are kept in nx_cron
+const SET = { repeat_min: 2, quiet_from: 8, quiet_to: 22 };
 // claim a record: the first caller to get it announces it, everyone else stays quiet.
 // This is what keeps the browser and the scheduler from both ringing the same task.
 async function claim(key: string): Promise<boolean> {
@@ -95,7 +95,7 @@ async function announceNew(getMap: () => Promise<Record<string, string[]>>): Pro
 Deno.serve(async (req) => {
   if (req.method !== 'POST') return out({ error: 'Method not allowed' }, 405);
   try {
-    const { data: ck } = await db.from('nx_cron').select('token').eq('id', 1).maybeSingle();
+    const { data: ck } = await db.from('nx_cron').select('token, quiet_from, quiet_to, repeat_min').eq('id', 1).maybeSingle();
     if (!ck?.token || req.headers.get('x-nx-key') !== ck.token) {
       // lengths only, never the values, so a mismatch can be told apart from a missing key
       return out({ error: 'Not allowed', header: (req.headers.get('x-nx-key') || '').length, stored: (ck?.token || '').length }, 401);
@@ -108,8 +108,11 @@ Deno.serve(async (req) => {
 
     // A reminder does not go quiet by itself: it comes back every REPEAT_MIN minutes until the person
     // presses Stop on it, or finishes the work. fired_at is the "stopped" mark.
+    if (ck.repeat_min != null) SET.repeat_min = Number(ck.repeat_min) || 2;
+    if (ck.quiet_from != null) SET.quiet_from = Number(ck.quiet_from);
+    if (ck.quiet_to != null) SET.quiet_to = Number(ck.quiet_to);
     const now = Date.now();
-    const again = new Date(now - REPEAT_MIN * 60e3).toISOString();
+    const again = new Date(now - SET.repeat_min * 60e3).toISOString();
     const { data: due } = await db.from('nx_alarms').select('*')
       .is('fired_at', null).lte('at', new Date(now).toISOString()).gte('at', new Date(now - 7 * 86400e3).toISOString())
       .or('last_at.is.null,last_at.lte.' + again)
@@ -117,7 +120,7 @@ Deno.serve(async (req) => {
     if (!due || !due.length) return out({ ok: true, due: 0, told });
     // at night a repeat waits for the morning; the very first ring always goes out
     const istHour = new Date(now + 5.5 * 3600e3).getUTCHours();
-    const quiet = istHour < QUIET_FROM || istHour >= QUIET_TO;
+    const quiet = istHour < SET.quiet_from || istHour >= SET.quiet_to;
     let rang = 0, skipped = 0, held = 0;
     for (const a of due) {
       const col = a.kind === 'todo' ? 'todos' : 'checklist';
