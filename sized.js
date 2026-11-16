@@ -12,7 +12,8 @@ function sizeRunList(txt, half) {
   const step = half ? 0.5 : 1;
   const clean = n => String(Math.round(n * 2) / 2).replace(/\.0$/, '');
   String(txt || '').split(/[,\s]+/).filter(Boolean).forEach(part => {
-    const m = /^(\d+(?:\.\d+)?)\s*(?:-|to|–)\s*(\d+(?:\.\d+)?)$/i.exec(part);
+    // 6-10, 6 to 10, and the master's own 6X10 all mean the same run
+    const m = /^(\d+(?:\.\d+)?)\s*(?:-|to|–|x)\s*(\d+(?:\.\d+)?)$/i.exec(part);
     if (m) {
       let a = parseFloat(m[1]), b = parseFloat(m[2]);
       if (!(a > 0) || !(b > 0)) return;
@@ -24,9 +25,16 @@ function sizeRunList(txt, half) {
   });
   return Array.from(new Set(out)).sort((a, b) => parseFloat(a) - parseFloat(b));
 }
-const sizedType = t => !!(t && t.sized);
-// a size-wise type asks for the run once instead of a "SIZE RUN" attribute, so that attribute is left out
+// SIZE RUN is what makes an item size-wise: a type that has it is built one item per size.
+// The run is typed (or picked) once instead of being one more value in the name.
 const isRunAttr = a => /\bSIZE\s*RUN\b/i.test(String(a && a.name || ''));
+const sizedType = t => !!(t && (t.sized || (t.attrs || []).some(n => isRunAttr({ name: n }))));
+// the runs already in the SIZE RUN master, offered as a list before anyone types one
+function runOptions(t) {
+  if (!t) return [];
+  const a = catAttrs(t.category).find(x => isRunAttr(x) && (t.attrs || []).some(n => norm(n) === norm(x.name)));
+  return a ? (a.values || []).slice() : [];
+}
 const sizedAttrs = (t, list) => sizedType(t) ? list.filter(a => !isRunAttr(a)) : list;
 const sizeOf = m => String((m && m.size) || '').trim();
 const isSizedMat = m => !!sizeOf(m);

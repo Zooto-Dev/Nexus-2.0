@@ -215,7 +215,8 @@ function icCreateHtml(edit) {
   });
   if (sized) {
     rows += '<tr><td class="k"><span class="seqn">' + (attrs.length + 1) + '</span>Size run *</td><td><div class="icdim">' +
-      '<input id="icRun" value="' + esc(IC_UI.run) + '" placeholder="6-10  or  6,7,8" style="min-width:150px">' +
+      '<input id="icRun" list="dlRun" value="' + esc(IC_UI.run) + '" placeholder="6-10  or  6,7,8" style="min-width:150px">' +
+      '<datalist id="dlRun">' + runOptions(t).map(r => '<option>' + esc(r) + '</option>').join('') + '</datalist>' +
       '<label class="small nowrap"><input type="checkbox" id="icHalf"' + (IC_UI.half ? ' checked' : '') + '> half sizes</label></div>' +
       '<div class="small ' + (runs.length ? 'muted' : 'late-txt') + '">' + (runs.length ? runs.length + ' item(s): ' + esc(runs.join(', ')) : 'Type the run, e.g. 6-10 — one item is made for each size.') + '</div></td></tr>';
   }
@@ -436,25 +437,21 @@ function icTypeMatrix(cat, edit) {
   const A = catAttrs(cat); const T = typesOf(cat);
   const uomSel = v => '<select data-tf="uom">' + UOMS.map(u => '<option' + (u === (v || 'PCS') ? ' selected' : '') + '>' + u + '</option>').join('') + '</select>';
   let h = '<div style="overflow-x:auto"><table class="jcbom icgrid"><tr class="hd"><th style="width:170px">Item Type</th>' + A.map((a, i) => '<th class="c">' + (i + 1) + '. ' + esc(a.name) + '</th>').join('') +
-    '<th class="c" style="width:76px" title="One item per shoe size">Size-wise</th>' +
     '<th style="width:90px">UOM</th><th style="width:80px">HSN</th><th style="width:60px">GST %</th><th style="width:60px">Items</th>' + (edit ? '<th style="width:130px">Actions</th>' : '') + '</tr>';
   T.forEach(t => {
     const n = Store.all('materials').filter(m => norm(m.item_type || '') === norm(t.name) && norm(m.group) === norm(cat)).length;
     if (edit && IC_UI.editType === t.id) {
       h += '<tr data-trow="' + esc(t.id) + '"><td><input data-tf="name" value="' + esc(t.name) + '"></td>' + A.map(a => '<td class="c"><input type="checkbox" data-tatt="' + esc(a.name) + '"' + (usesAttr(t, a.name) ? ' checked' : '') + '></td>').join('') +
-        '<td class="c"><input type="checkbox" data-tf-sized' + (sizedType(t) ? ' checked' : '') + '></td>' +
         '<td>' + uomSel(t.uom) + '</td><td><input data-tf="hsn" value="' + esc(t.hsn || '') + '"></td><td><input data-tf="gst" type="number" value="' + esc(t.gst || '') + '"></td><td class="c">' + (n || '—') + '</td>' +
         '<td class="c nowrap"><button class="btn sm primary" data-act="it-save" data-id="' + esc(t.id) + '">Save</button> <button class="btn sm" data-act="it-cancel">Cancel</button></td></tr>';
     } else {
       h += '<tr><td><b>' + esc(t.name) + '</b></td>' + A.map(a => '<td class="c">' + (usesAttr(t, a.name) ? '<span class="tick">✓</span>' : '') + '</td>').join('') +
-        '<td class="c">' + (sizedType(t) ? '<span class="tick">✓</span>' : '') + '</td>' +
         '<td>' + esc(t.uom || '') + '</td><td>' + esc(t.hsn || '') + '</td><td class="c">' + (t.gst || '') + '</td><td class="c">' + (n || '—') + '</td>' +
         (edit ? '<td class="c nowrap"><button class="btn sm" data-act="it-edit" data-id="' + esc(t.id) + '">Edit</button> ' + (n ? '' : '<button class="btn sm ghost danger" data-act="it-del" data-id="' + esc(t.id) + '" data-confirm="Delete?">×</button>') + '</td>' : '') + '</tr>';
     }
   });
-  if (!T.length) h += '<tr><td colspan="' + (A.length + 7) + '" class="empty">No item types for ' + esc(cat) + ' yet</td></tr>';
+  if (!T.length) h += '<tr><td colspan="' + (A.length + 6) + '" class="empty">No item types for ' + esc(cat) + ' yet</td></tr>';
   if (edit) h += '<tr class="addrow" data-trow="new"><td><input data-tf="name" placeholder="New item type"></td>' + A.map(a => '<td class="c"><input type="checkbox" data-tatt="' + esc(a.name) + '"></td>').join('') +
-    '<td class="c"><input type="checkbox" data-tf-sized></td>' +
     '<td>' + uomSel('') + '</td><td><input data-tf="hsn"></td><td><input data-tf="gst" type="number"></td><td></td><td class="c"><button class="btn sm primary" data-act="it-add">Add Type</button></td></tr>';
   return h + '</table></div>';
 }
@@ -532,8 +529,7 @@ function itRead(tr) {
   return {
     name: $('[data-tf="name"]', tr).value.trim().toUpperCase().replace(/\s+/g, ' '),
     attrs: $$('[data-tatt]', tr).filter(c => c.checked).map(c => c.dataset.tatt),
-    uom: $('[data-tf="uom"]', tr).value, hsn: $('[data-tf="hsn"]', tr).value.trim(), gst: num($('[data-tf="gst"]', tr).value) || 0,
-    sized: !!($('[data-tf-sized]', tr) || {}).checked
+    uom: $('[data-tf="uom"]', tr).value, hsn: $('[data-tf="hsn"]', tr).value.trim(), gst: num($('[data-tf="gst"]', tr).value) || 0
   };
 }
 function itCheck(r, cat, selfId) {
@@ -577,7 +573,7 @@ const IC_DEFAULT_ATTRS = {
   'Grinderies': [['MATERIAL', 'NYLON, POLYESTER, COTTON, PVC, TPU, METAL'], ['THREAD TKT', 'TKT 10, TKT 20, TKT 30, TKT 40, TKT 60, TKT 80'], ['LACE SHAPE', 'FLAT, ROUND, OVAL, WAXED ROUND'], ['LACE LENGTH', '80CM, 90CM, 100CM, 110CM, 120CM, 140CM, 160CM'], ['EYELET SIZE', '3MM, 4MM, 5MM, 6MM, 8MM, 10MM'], ['TAPE WIDTH', '10MM, 12MM, 16MM, 20MM, 25MM, 32MM, 38MM, 50MM'], ['SIZE RUN', SIZE_RUNS], ['FINISH', 'MATT, GLOSSY, ANTIQUE, NICKEL, BLACK OXIDE'], ['COLOUR', COLOURS], ['PRINT', 'PLAIN, 1 COLOUR PRINT, 2 COLOUR PRINT, MULTI COLOUR PRINT']],
   'Packaging': [['BOX SIZE', 'NO.1, NO.2, NO.3, NO.4, NO.5, NO.6, KIDS'], ['BAG SIZE', '8X10, 10X14, 12X16, 14X18, 16X20'], ['LABEL SIZE', '38X25MM, 50X25MM, 50X38MM, 75X50MM, 100X50MM'], ['PLY', '3 PLY, 5 PLY, 7 PLY'], ['COLOUR', COLOURS], ['PRINT', 'PLAIN, 1 COLOUR PRINT, 2 COLOUR PRINT, MULTI COLOUR PRINT']],
   'Consumable Item': [['MATERIAL', 'PU, NEOPRENE, LATEX, WATER BASED, SOLVENT BASED'], ['PACK SIZE', '1 LTR, 5 LTR, 15 LTR, 20 LTR, 1 KG, 5 KG, 25 KG']],
-  'Silicon': [['COLOUR', COLOURS], ['PRINT', 'PLAIN, 1 COLOUR PRINT, 2 COLOUR PRINT, MULTI COLOUR PRINT']]
+  'Silicon': [['COLOUR', COLOURS], ['PRINT', 'PLAIN, 1 COLOUR PRINT, 2 COLOUR PRINT, MULTI COLOUR PRINT'], ['SIZE RUN', SIZE_RUNS]]
 };
 const IC_DEFAULT_TYPES = [
   ['Compound', 'EVA SHEET', 'THICKNESS, HARDNESS, COLOUR, SHEET SIZE', 'SHEET', '3921'], ['Compound', 'PU COMPOUND', 'HARDNESS, COLOUR', 'KGS', '3909'],
@@ -595,7 +591,7 @@ const IC_DEFAULT_TYPES = [
   ['Packaging', 'TISSUE PAPER', 'COLOUR', 'PCS', '4803'], ['Packaging', 'BARCODE LABEL', 'LABEL SIZE', 'ROLL', '4821'],
   ['Consumable Item', 'ADHESIVE', 'MATERIAL, PACK SIZE', 'LTR', '3506'], ['Consumable Item', 'PRIMER', 'MATERIAL, PACK SIZE', 'LTR', '3208'], ['Consumable Item', 'HARDENER', 'PACK SIZE', 'LTR', '3208'],
   ['Silicon', 'SILICON LABEL', 'COLOUR, PRINT', 'PCS', '3926'],
-  ['Silicon', 'SILICON PATTA', 'COLOUR, PRINT', 'PAIR', '6406', true]
+  ['Silicon', 'SILICON PATTA', 'COLOUR, PRINT, SIZE RUN', 'PAIR', '6406']
 ];
 // adds only what is missing — never replaces an attribute or item type that already exists (renamed or edited ones included)
 function icSeedDefaults() {
@@ -603,7 +599,7 @@ function icSeedDefaults() {
   Object.keys(IC_DEFAULT_ATTRS).forEach(cat => IC_DEFAULT_ATTRS[cat].forEach(([n, v], i) => {
     const id = 'ca_' + icSlug(cat) + '_' + icSlug(n); if (has('attributes', id, cat, n)) return;
     Store.put('attributes', { id, category: cat, name: n, seq: i + 1, values: v.split(',').map(x => x.trim()) }); }));
-  IC_DEFAULT_TYPES.filter(r => !has('item_types', 'it_' + icSlug(r[0] + '_' + r[1]), r[0], r[1])).forEach(r => Store.put('item_types', { id: 'it_' + icSlug(r[0] + '_' + r[1]), category: r[0], name: r[1], attrs: r[2].split(',').map(x => x.trim()), uom: r[3], hsn: r[4], gst: r[0] === 'Fabric' || r[0] === 'Packaging' ? 12 : 18, sized: !!r[5] }));
+  IC_DEFAULT_TYPES.filter(r => !has('item_types', 'it_' + icSlug(r[0] + '_' + r[1]), r[0], r[1])).forEach(r => Store.put('item_types', { id: 'it_' + icSlug(r[0] + '_' + r[1]), category: r[0], name: r[1], attrs: r[2].split(',').map(x => x.trim()), uom: r[3], hsn: r[4], gst: r[0] === 'Fabric' || r[0] === 'Packaging' ? 12 : 18 }));
 }
 // item types added after the first seed: put in only the ones that are still missing,
 // and never touch an item type that is already there (it may have been renamed or edited)
@@ -612,8 +608,8 @@ function icSeedLate() {
   IC_DEFAULT_TYPES.filter(r => IC_LATE_TYPES.includes(r[1])).forEach(r => {
     if (Store.all('item_types').some(t => norm(t.category) === norm(r[0]) && norm(t.name) === norm(r[1]))) return;
     if (!Store.all('attributes').some(a => norm(a.category) === norm(r[0]))) return;   // its category is not set up here
-    Store.put('item_types', { id: 'it_' + icSlug(r[0] + '_' + r[1]), category: r[0], name: r[1], attrs: r[2].split(',').map(x => x.trim()), uom: r[3], hsn: r[4], gst: 18, sized: !!r[5] });
-    audit('itemtype.add', r[0] + ' · ' + r[1], 'size-wise item type added by Nexus');
+    Store.put('item_types', { id: 'it_' + icSlug(r[0] + '_' + r[1]), category: r[0], name: r[1], attrs: r[2].split(',').map(x => x.trim()), uom: r[3], hsn: r[4], gst: 18 });
+    audit('itemtype.add', r[0] + ' · ' + r[1], 'item type added by Nexus');
   });
 }
 // called from migrateDb on every login; fixed ids keep two browsers seeding at once consistent
