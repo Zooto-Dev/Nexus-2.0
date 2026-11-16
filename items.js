@@ -19,8 +19,21 @@ function itemCats() {
 function catAttrs(cat) { return Store.all('attributes').filter(a => norm(a.category || '') === norm(cat)).sort((a, b) => (a.seq || 0) - (b.seq || 0)); }
 function typesOf(cat) { return Store.all('item_types').filter(t => norm(t.category) === norm(cat)).sort((a, b) => a.name.localeCompare(b.name)); }
 function usesAttr(t, name) { return (t.attrs || []).some(x => norm(x) === norm(name)); }
-// the attributes a type uses, always in the category sequence (never in the order they were ticked)
-function typeAttrs(t) { return catAttrs(t.category).filter(a => usesAttr(t, a.name)); }
+// The attributes a type uses, in that type's OWN order: an item name follows the sequence set on the
+// item type, so SILICON PATTA can read BRAND, ARTICLE, COLOUR while another type in the same category
+// reads something else entirely. A newly ticked attribute joins at the end, in category order.
+function typeAttrs(t) {
+  const A = catAttrs(t.category);
+  const own = (t.attrs || []).map(n => A.find(a => norm(a.name) === norm(n))).filter(Boolean);
+  const seen = new Set(own.map(a => norm(a.name)));
+  return own.concat(A.filter(a => usesAttr(t, a.name) && !seen.has(norm(a.name))));
+}
+// keep the order already set and put anything newly ticked at the end
+function attrOrderKeep(prev, now) {
+  const has = n => now.some(x => norm(x) === norm(n));
+  const kept = (prev || []).filter(has);
+  return kept.concat(now.filter(n => !kept.some(x => norm(x) === norm(n))));
+}
 // an attribute can depend on another one ("only when FOAM = WITH FOAM"); otherwise it is always asked
 function attrOn(a, vals, t) { return !a.when_attr || (t && !usesAttr(t, a.when_attr)) || norm(vals[a.when_attr] || '') === norm(a.when_val || ''); }
 function activeAttrs(t, vals) { return typeAttrs(t).filter(a => attrOn(a, vals, t)); }
@@ -447,7 +460,7 @@ function icTypeMatrix(cat, edit) {
     } else {
       h += '<tr><td><b>' + esc(t.name) + '</b></td>' + A.map(a => '<td class="c">' + (usesAttr(t, a.name) ? '<span class="tick">✓</span>' : '') + '</td>').join('') +
         '<td>' + esc(t.uom || '') + '</td><td>' + esc(t.hsn || '') + '</td><td class="c">' + (t.gst || '') + '</td><td class="c">' + (n || '—') + '</td>' +
-        (edit ? '<td class="c nowrap"><button class="btn sm" data-act="it-edit" data-id="' + esc(t.id) + '">Edit</button> ' + (n ? '' : '<button class="btn sm ghost danger" data-act="it-del" data-id="' + esc(t.id) + '" data-confirm="Delete?">×</button>') + '</td>' : '') + '</tr>';
+        (edit ? '<td class="c nowrap"><button class="btn sm" data-act="it-order" data-id="' + esc(t.id) + '" title="Order of the parts in the item name">Order</button> <button class="btn sm" data-act="it-edit" data-id="' + esc(t.id) + '">Edit</button> ' + (n ? '' : '<button class="btn sm ghost danger" data-act="it-del" data-id="' + esc(t.id) + '" data-confirm="Delete?">×</button>') + '</td>' : '') + '</tr>';
     }
   });
   if (!T.length) h += '<tr><td colspan="' + (A.length + 6) + '" class="empty">No item types for ' + esc(cat) + ' yet</td></tr>';
@@ -538,6 +551,52 @@ function itCheck(r, cat, selfId) {
   if (typesOf(cat).some(t => t.id !== selfId && norm(t.name) === norm(r.name))) return r.name + ' already exists in ' + cat + '.';
   return '';
 }
+/* ---- the order of the parts in an item's name, per item type ---- */
+const IT_ORD = { id: '', list: [], hidden: [] };
+function itOrderDialog() {
+  const t = Store.get('item_types', IT_ORD.id); if (!t) return;
+  const old = $('#itOrdDlg'); if (old) old.remove();
+  const d = document.createElement('div'); d.id = 'itOrdDlg'; d.className = 'dlg-back';
+  const rows = IT_ORD.list.map((n, i) => '<tr><td class="c">' + (i + 1) + '</td><td>' + esc(n) + '</td>' +
+    '<td class="c nowrap"><button class="btn sm" data-ord="-1" data-i="' + i + '"' + (i ? '' : ' disabled') + '>\u2191</button> ' +
+    '<button class="btn sm" data-ord="1" data-i="' + i + '"' + (i < IT_ORD.list.length - 1 ? '' : ' disabled') + '>\u2193</button></td></tr>').join('');
+  d.innerHTML = '<div class="dlg"><div class="dlg-h">Name order \u00b7 ' + esc(t.name) + '</div>' +
+    '<div class="small muted">The item name is built in this order: ITEM TYPE first, then these.' +
+    (sizedType(t) ? ' The size comes last on its own, from the size run.' : '') + '</div>' +
+    '<table class="jcbom" style="margin-top:8px"><tr class="hd"><th style="width:50px">Seq</th><th>Name part</th><th style="width:90px"></th></tr>' +
+    '<tr><td class="c">\u2014</td><td><b>ITEM TYPE</b> \u2014 ' + esc(t.name) + '</td><td></td></tr>' + rows + '</table>' +
+    '<div class="small muted" style="margin-top:6px">Example: ' + esc(itOrdSample(t)) + '</div>' +
+    '<div class="dlg-f"><span class="grow"></span><button class="btn" data-x>Cancel</button><button class="btn primary" data-ok>Save order</button></div></div>';
+  document.body.appendChild(d);
+  d.addEventListener('click', ev => {
+    const mv = ev.target.closest('[data-ord]');
+    if (mv) { const i = +mv.dataset.i, j = i + (+mv.dataset.ord); const L = IT_ORD.list; if (j < 0 || j >= L.length) return; const x = L[i]; L[i] = L[j]; L[j] = x; itOrderDialog(); return; }
+    if (ev.target.closest('[data-x]')) { d.remove(); return; }
+    if (!ev.target.closest('[data-ok]')) return;
+    if (!icSuper()) return;
+    t.attrs = IT_ORD.list.concat(IT_ORD.hidden || []); Store.put('item_types', t);
+    audit('itemtype.order', t.category + ' \u00b7 ' + t.name, t.attrs.join(' > '));
+    d.remove(); flash('Name order saved for ' + esc(t.name) + '.'); icRender();
+  });
+}
+// what a name of this type will look like: a real value where there is one, else the part's own name
+function itOrdSample(t) {
+  const A = catAttrs(t.category);
+  const parts = IT_ORD.list.map(n => {
+    const a = A.find(x => norm(x.name) === norm(n)); if (!a) return n;
+    const v = (atValues(a, {}, t) || []).find(x => x && !blankVal(x));
+    return v || n;
+  });
+  return [t.name].concat(parts).join(' ') + (sizedType(t) ? ' ' + SIZE_TAG + '-6' : '');
+}
+ACTIONS['it-order'] = el => {
+  const t = Store.get('item_types', el.dataset.id); if (!t) return;
+  const all = typeAttrs(t).map(a => a.name);
+  IT_ORD.id = t.id;
+  IT_ORD.hidden = sizedType(t) ? all.filter(n => isRunAttr({ name: n })) : [];
+  IT_ORD.list = all.filter(n => !IT_ORD.hidden.includes(n));
+  itOrderDialog();
+};
 ACTIONS['it-add'] = el => {
   if (!icSuper()) return;
   const cat = IC_UI.scat; const r = itRead(el.closest('tr')); const err = itCheck(r, cat);
@@ -550,6 +609,7 @@ ACTIONS['it-cancel'] = () => { IC_UI.editType = null; icRender(); };
 ACTIONS['it-save'] = el => {
   if (!icSuper()) return;
   const t = Store.get('item_types', el.dataset.id); const r = itRead(el.closest('tr')); const err = itCheck(r, t.category, t.id);
+  r.attrs = attrOrderKeep(t.attrs, r.attrs);   // the checkboxes read in category order; keep this type's own
   if (err) { flash(esc(err), 'err'); return; }
   Object.assign(t, r); Store.put('item_types', t);
   audit('itemtype.edit', t.category + ' · ' + t.name, r.attrs.join(', ')); IC_UI.editType = null; icRender();

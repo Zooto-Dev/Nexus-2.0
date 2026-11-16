@@ -39,7 +39,7 @@ const sizedAttrs = (t, list) => sizedType(t) ? list.filter(a => !isRunAttr(a)) :
 const sizeOf = m => String((m && m.size) || '').trim();
 const isSizedMat = m => !!sizeOf(m);
 // one name per size: the base name with the size written at the end
-const sizedName = (base, size) => (base + ' ' + SIZE_TAG + ' ' + size).replace(/\s+/g, ' ').trim().toUpperCase();
+const sizedName = (base, size) => (base + ' ' + SIZE_TAG + '-' + size).replace(/\s+/g, ' ').trim().toUpperCase();
 // every size of the same item, newest naming or old
 const sizeFamily = key => Store.all('materials').filter(m => m.size_key && m.size_key === key).sort((a, b) => parseFloat(sizeOf(a)) - parseFloat(sizeOf(b)));
 const sizeSibling = (key, size) => Store.all('materials').find(m => m.size_key === key && String(sizeOf(m)) === String(size)) || null;
