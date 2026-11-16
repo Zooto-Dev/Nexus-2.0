@@ -901,3 +901,8 @@ body.mb #nxRing { bottom: 62px; }
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
   overflow: hidden; white-space: normal; max-width: 420px; min-width: 220px; line-height: 1.35;
 }
+
+/* a job card line that belongs to one shoe size */
+.szbadge { display: inline-block; background: #0e6a73; color: #fff; border-radius: 10px; padding: 1px 7px; font-size: 10.5px; font-weight: 600; white-space: nowrap; margin-left: 4px; }
+.jcnamecell { display: flex; gap: 6px; align-items: center; }
+.jcnamecell input { flex: 1 1 auto; min-width: 0; }

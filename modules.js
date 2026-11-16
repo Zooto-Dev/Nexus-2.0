@@ -820,8 +820,11 @@ function jcfDecorate() {
 document.addEventListener('input', e => { if (e.target.id === 'jfRem' && window.JCF) JCF.rem = e.target.value; });
 function jcfBomRow(l) {
   l = l || {}; const m = matBy(l.material) || {};
-  return '<tr data-bomrow><td class="c" data-idx></td><td><input data-b="process" value="' + esc(l.process || '') + '"></td><td><input data-b="section" value="' + esc(l.section || '') + '"></td><td><input data-b="category" list="dlCatJc" value="' + esc(l.category || m.group || '') + '"></td>' +
-    '<td><input data-b="mat" list="dlMatJc" value="' + esc(m.name || l.material || '') + '"></td><td class="c muted" data-b-code>' + esc(l.material || '') + '</td><td class="c muted" data-b-uom>' + esc(l.uom || m.uom || '') + '</td>' +
+  // a size-wise line is tied to one size of the order and takes that size's quantity
+  const z = String(l.size || m.size || '');
+  return '<tr data-bomrow' + (z ? ' data-size="' + esc(z) + '"' : '') + '><td class="c" data-idx></td><td><input data-b="process" value="' + esc(l.process || '') + '"></td><td><input data-b="section" value="' + esc(l.section || '') + '"></td><td><input data-b="category" list="dlCatJc" value="' + esc(l.category || m.group || '') + '"></td>' +
+    (z ? '<td><div class="jcnamecell"><input data-b="mat" list="dlMatJc" value="' + esc(m.name || l.material || '') + '"><span class="szbadge">Size ' + esc(z) + '</span></div></td>'
+      : '<td><input data-b="mat" list="dlMatJc" value="' + esc(m.name || l.material || '') + '"></td>') + '<td class="c muted" data-b-code>' + esc(l.material || '') + '</td><td class="c muted" data-b-uom>' + esc(l.uom || m.uom || '') + '</td>' +
     '<td><input data-b="norms" type="number" min="0" step="any" class="right" value="' + esc(l.norms || l.qty || '') + '"></td><td class="c" data-b-req>0</td><td>' + vendorSel('data-b="supplier"', l.supplier || '') + '</td><td class="c"><a data-act="jcf-bom-del" title="Remove">×</a></td></tr>';
 }
 // +2% extra on the TOTAL (rounded up once), shared over the sizes by largest remainder — not rounded up per size
@@ -831,6 +834,68 @@ function jcExtraSplit(acts) {
   raw.map((v, i) => ({ i, f: v - base[i] })).filter(x => acts[x.i] > 0).sort((a, b) => b.f - a.f).forEach(x => { if (left > 0) { base[x.i] += 1; left--; } });
   return base.map((v, i) => acts[i] > 0 ? v : 0);
 }
+/* ---- size-wise items on a job card ----
+   A sole or a silicon patta is a different item for every shoe size. Put one on a job card and it
+   opens into one line per size of the order, each taking that size's own quantity. A size the order
+   does not have cannot be put on the card at all. */
+function jcfSizedExpand(tr, mt) {
+  const zs = jcfSizeNow();
+  if (!zs.length) { flash('Fill the size rows first — a size-wise item takes its quantity from the order sizes.', 'err'); return false; }
+  const runs = zs.map(z => String(z.size));
+  // the order's size run decides: a sole for a size this order does not make has no business here
+  if (!runs.some(x => x === String(mt.size))) {
+    flash('Size ' + esc(mt.size) + ' is not in this order — it runs ' + esc(runs.join(', ')) + '.', 'err');
+    return false;
+  }
+  const missing = runs.filter(z => !sizeSibling(mt.size_key, z));
+  if (missing.length) {
+    flash('This item has no size ' + esc(missing.join(', ')) + '. Make the missing size(s) in Development → Item Creation first.', 'err');
+    return false;
+  }
+  const keep = {
+    process: $('[data-b="process"]', tr).value.trim(), section: $('[data-b="section"]', tr).value.trim(),
+    category: $('[data-b="category"]', tr).value.trim() || mt.group || '',
+    norms: num($('[data-b="norms"]', tr).value) || 1, supplier: $('[data-b="supplier"]', tr).value.trim()
+  };
+  // one line per size, in size order, each already pointing at that size's own item
+  const html = runs.map(z => { const sib = sizeSibling(mt.size_key, z); return jcfBomRow(Object.assign({}, keep, { material: sib.code, uom: sib.uom, size: z })); }).join('');
+  tr.insertAdjacentHTML('afterend', html);
+  tr.remove();
+  flash(runs.length + ' size(s) added for ' + esc(mt.size_base || mt.name) + ' — quantity comes from each size of the order.');
+  return true;
+}
+// a line already tied to a size must keep pointing at that size's item
+function jcfSizedCheck(tr, mt) {
+  const z = tr.dataset.size;
+  if (String(mt.size || '') === String(z)) return true;
+  flash('This line is for size ' + esc(z) + '. Pick the size ' + esc(z) + ' item, or remove the line.', 'err');
+  return false;
+}
+// a BOM loaded from Development may name a size-wise item: open it into the order's sizes
+function jcfExpandAll() {
+  let n = 0;
+  $$('#jfBom tr[data-bomrow]').forEach(tr => {
+    if (tr.dataset.size) return;
+    const mt = matBy($('[data-b="mat"]', tr).value);
+    if (!mt || !isSizedMat(mt)) return;
+    const zs = jcfSizeNow().map(z => String(z.size));
+    if (!zs.length || zs.some(z => !sizeSibling(mt.size_key, z))) return;
+    const keep = {
+      process: $('[data-b="process"]', tr).value.trim(), section: $('[data-b="section"]', tr).value.trim(),
+      category: $('[data-b="category"]', tr).value.trim() || mt.group || '',
+      norms: num($('[data-b="norms"]', tr).value) || 1, supplier: $('[data-b="supplier"]', tr).value.trim()
+    };
+    tr.insertAdjacentHTML('afterend', zs.map(z => { const sib = sizeSibling(mt.size_key, z); return jcfBomRow(Object.assign({}, keep, { material: sib.code, uom: sib.uom, size: z })); }).join(''));
+    tr.remove(); n++;
+  });
+  return n;
+}
+// the size rows as they stand, each with its own +2% quantity
+function jcfSizeNow() {
+  const rows = $$('#jfSizes tr[data-szrow]');
+  const exs = jcExtraSplit(rows.map(tr => num($('[data-sz="act"]', tr).value)));
+  return rows.map((tr, n) => ({ size: $('[data-sz="size"]', tr).value.trim().toUpperCase(), act: num($('[data-sz="act"]', tr).value), ext: exs[n] })).filter(z => z.size && z.act > 0);
+}
 function jcfRecalc() {
   let act = 0, ext = 0;
   const rows = $$('#jfSizes tr[data-szrow]'); const exs = jcExtraSplit(rows.map(tr => num($('[data-sz="act"]', tr).value)));
@@ -839,10 +904,13 @@ function jcfRecalc() {
   const o = Store.all('orders').find(x => norm(x.no) === norm(($('#jfOrd') || {}).value || ''));
   const li = num(($('#jfLine') || {}).value); const oq = o ? num(jcOrderLine(o, li).qty) : 0;
   $('#jfSzMsg').innerHTML = oq && act !== oq ? '<span class="late-txt">Act total ' + qtyFmt(act) + ' ≠ order qty ' + qtyFmt(oq) + '</span>' : (oq ? '<span class="st Done">Act = order qty</span>' : '');
+  const zn = jcfSizeNow();
   $$('#jfBom tr[data-bomrow]').forEach((tr, i2) => {
     $('[data-idx]', tr).textContent = i2 + 1;
     const n = num($('[data-b="norms"]', tr).value);
-    $('[data-b-req]', tr).textContent = n && ext ? qtyFmt(Math.ceil(n * ext * 1000) / 1000) : '0';
+    const z = tr.dataset.size;
+    const basis = z ? ((zn.find(x => String(x.size) === String(z)) || {}).ext || 0) : ext;
+    $('[data-b-req]', tr).textContent = n && basis ? qtyFmt(Math.ceil(n * basis * 1000) / 1000) : '0';
   });
   jcfDecorate();
   return { act, ext };
@@ -860,13 +928,26 @@ function jcFormWire() {
       $('#jfOrd').value = o.no;
       $('#jfLine').value = o.lines.findIndex(l2 => norm(l2.jc_no) === norm(jc));
       $('#jfNo').value = jc;
-      jcfFillFromOrder();
+      // the details table holds this very input, so let the change event finish before it is rebuilt
+      setTimeout(jcfFillFromOrder, 0);
     }
     if (e.target.id === 'jfPhoto') readImg(e.target.files[0], src => { JCF.photo = src; $('#jfPhotoTag').innerHTML = '<img src="' + src + '">'; });
     if (e.target.dataset.b === 'mat') {
       const mt = matBy(e.target.value); const tr = e.target.closest('tr');
       if (mt) { e.target.value = mt.name; $('[data-b-code]', tr).textContent = mt.code; $('[data-b-uom]', tr).textContent = mt.uom; const c = $('[data-b="category"]', tr); if (!c.value) c.value = mt.group || ''; }
       else { $('[data-b-code]', tr).textContent = ''; $('[data-b-uom]', tr).textContent = ''; }
+      // A size-wise item opens into every size of the order; one already on a size just has to match it.
+      // The row is replaced, so this waits for the change event to finish — removing the field being
+      // edited from under the browser upsets it.
+      if (mt && isSizedMat(mt)) {
+        setTimeout(() => {
+          if (!tr.isConnected) return;
+          const ok = tr.dataset.size ? jcfSizedCheck(tr, mt) : jcfSizedExpand(tr, mt);
+          if (!ok && !tr.dataset.size && tr.isConnected) { $('[data-b="mat"]', tr).value = ''; $('[data-b-code]', tr).textContent = ''; $('[data-b-uom]', tr).textContent = ''; }
+          jcfRecalc();
+        }, 0);
+        return;
+      }
       jcfRecalc();
     }
   });
@@ -892,6 +973,8 @@ function jcfFillFromOrder() {
   $$('#jfBom tr[data-bomrow]').forEach(tr => tr.remove());
   if (b) { b.lines.forEach(x => $('#jfBom').insertAdjacentHTML('beforeend', jcfBomRow(x))); $('#jfBomTag').textContent = 'Auto-loaded from BOM (' + (b.brand ? b.brand + ' · ' : '') + b.article + (b.colour ? ' ' + b.colour : '') + ' v' + b.version + ', ' + b.lines.length + ' items)'; if (b.photo && !JCF.photo) { JCF.photo = b.photo; $('#jfPhotoTag').innerHTML = '<img src="' + b.photo + '">'; } }
   else { $('#jfBom').insertAdjacentHTML('beforeend', jcfBomRow()); $('#jfBomTag').textContent = ''; flash('No Development BOM for this article — fill the rows manually or create one in Development.', 'err'); }
+  const grew = jcfExpandAll();   // size-wise items open into one line per size of this order
+  if (grew) $('#jfBomTag').textContent += (($('#jfBomTag').textContent ? ' · ' : '') + grew + ' size-wise item(s) opened per size');
   jcfRecalc();
 }
 ACTIONS['jcf-size'] = () => { $('#jfSzTotal').insertAdjacentHTML('beforebegin', jcfSizeRow()); jcfRecalc(); };
@@ -941,7 +1024,9 @@ ACTIONS['jc-save'] = () => {
   if (dupJc) { $('#njMsg').innerHTML = '<span class="late-txt">This order line already has job card ' + esc(dupJc.no) + '.</span>'; return; }
   const lines = $$('#jfBom tr[data-bomrow]').map(tr => {
     const m = matBy($('[data-b="mat"]', tr).value); const n = num($('[data-b="norms"]', tr).value);
-    return m && n > 0 ? { process: $('[data-b="process"]', tr).value.trim(), section: $('[data-b="section"]', tr).value.trim(), category: $('[data-b="category"]', tr).value.trim() || m.group || '', material: m.code, uom: m.uom, norms: n, required: Math.ceil(n * ext * 1000) / 1000, supplier: $('[data-b="supplier"]', tr).value.trim(), po_raised: 0 } : null;
+    const z = tr.dataset.size || '';
+    const basis = z ? ((sizes.find(x => String(x.size) === String(z)) || {}).extra || 0) : ext;
+    return m && n > 0 ? { process: $('[data-b="process"]', tr).value.trim(), section: $('[data-b="section"]', tr).value.trim(), category: $('[data-b="category"]', tr).value.trim() || m.group || '', material: m.code, uom: m.uom, norms: n, size: z, required: Math.ceil(n * basis * 1000) / 1000, supplier: $('[data-b="supplier"]', tr).value.trim(), po_raised: 0 } : null;
   }).filter(Boolean);
   const badNorm = $$('#jfBom tr[data-bomrow]').some(tr => matBy($('[data-b="mat"]', tr).value) && num($('[data-b="norms"]', tr).value) <= 0);
   if (badNorm) { $('#njMsg').innerHTML = '<span class="late-txt">Norms must be greater than 0 for every item.</span>'; return; }

@@ -5,7 +5,7 @@
    Item Category Configuration; only the first-run footwear defaults live in code. */
 'use strict';
 
-const IC_UI = { cat: '', type: '', vals: {}, extra: {}, dims: {}, scat: '', editAttr: null, editType: null, newCats: [] };
+const IC_UI = { cat: '', type: '', vals: {}, extra: {}, dims: {}, scat: '', editAttr: null, editType: null, newCats: [], run: '', half: false };
 const icSlug = s => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '_');
 const squash = s => norm(s).replace(/[^a-z0-9.]/g, '');
 
@@ -133,8 +133,9 @@ VIEWS.itemcreate = {
     m.addEventListener('change', e => {
       const t = e.target;
       if (t.id === 'icCat') { IC_UI.cat = t.value; IC_UI.type = ''; IC_UI.vals = {}; IC_UI.dims = {}; IC_UI.extra = {}; IC_UI.photo = ''; icRender(); }
-      if (t.id === 'icType') { IC_UI.type = t.value; IC_UI.vals = {}; IC_UI.dims = {}; IC_UI.extra = {}; icRender(); }
+      if (t.id === 'icType') { IC_UI.type = t.value; IC_UI.vals = {}; IC_UI.dims = {}; IC_UI.extra = {}; IC_UI.run = ''; IC_UI.half = false; icRender(); }
       if (t.id === 'icPhoto') readImg(t.files[0], src => { IC_UI.photo = src; icRender(); });
+      if (t.id === 'icHalf') { IC_UI.half = t.checked; icRender(); return; }
       if (t.dataset.icmp) { const mt = Store.get('materials', t.dataset.icmp); if (mt) readImg(t.files[0], src => { mt.photo = src; Store.put('materials', mt); audit('item.photo', '', mt.code); flash('Photo saved.'); icRender(); }); }
       if (t.dataset.icMulti && t.value) {
         const k = t.dataset.icMulti; const cur = (IC_UI.vals[k] || '').split('/').filter(Boolean);
@@ -152,6 +153,7 @@ VIEWS.itemcreate = {
     });
     m.addEventListener('input', e => {
       if (e.target.dataset.icx) IC_UI.extra[e.target.dataset.icx] = e.target.value;
+      if (e.target.id === 'icRun') { IC_UI.run = e.target.value; const p = e.target.selectionStart; icRender(); const n2 = $('#icRun'); if (n2) { n2.focus(); n2.setSelectionRange(p, p); } return; }
       if (e.target.dataset.swq != null) {
         const q = e.target.value.trim().toUpperCase(); (IC_UI.swq = IC_UI.swq || {})[e.target.dataset.swq] = e.target.value;
         const box = e.target.closest('.icsw');
@@ -173,8 +175,9 @@ function icCreateHtml(edit) {
   const cats = itemCats().filter(c => typesOf(c).length);
   const types = IC_UI.cat ? typesOf(IC_UI.cat) : [];
   const t = types.find(x => x.id === IC_UI.type);
-  const attrs = t ? activeAttrs(t, IC_UI.vals) : [];
+  const attrs = t ? sizedAttrs(t, activeAttrs(t, IC_UI.vals)) : [];
   const X = IC_UI.extra;
+  const sized = sizedType(t); const runs = sized ? sizeRunList(IC_UI.run, IC_UI.half) : [];
   let rows = '<tr><td class="k">Category *</td><td><select id="icCat"><option value="">Select category…</option>' + cats.map(c => '<option' + (c === IC_UI.cat ? ' selected' : '') + '>' + esc(c) + '</option>').join('') + '</select></td></tr>' +
     '<tr><td class="k">Item Type *</td><td><select id="icType"' + (types.length ? '' : ' disabled') + '><option value="">' + (IC_UI.cat ? 'Select item type…' : '—') + '</option>' + types.map(x => '<option value="' + esc(x.id) + '"' + (x.id === IC_UI.type ? ' selected' : '') + '>' + esc(x.name) + '</option>').join('') + '</select></td></tr>';
   // attributes open one by one, strictly in the category sequence
@@ -210,6 +213,12 @@ function icCreateHtml(edit) {
     }
     if (!v) open = false;
   });
+  if (sized) {
+    rows += '<tr><td class="k"><span class="seqn">' + (attrs.length + 1) + '</span>Size run *</td><td><div class="icdim">' +
+      '<input id="icRun" value="' + esc(IC_UI.run) + '" placeholder="6-10  or  6,7,8" style="min-width:150px">' +
+      '<label class="small nowrap"><input type="checkbox" id="icHalf"' + (IC_UI.half ? ' checked' : '') + '> half sizes</label></div>' +
+      '<div class="small ' + (runs.length ? 'muted' : 'late-txt') + '">' + (runs.length ? runs.length + ' item(s): ' + esc(runs.join(', ')) : 'Type the run, e.g. 6-10 — one item is made for each size.') + '</div></td></tr>';
+  }
   if (t) {
     const inp = (k, label, def, type) => '<tr><td class="k">' + label + '</td><td><input data-icx="' + k + '"' + (type ? ' type="' + type + '" min="0" step="any"' : '') + ' value="' + esc(X[k] != null ? X[k] : def) + '"></td></tr>';
     rows += '<tr><td class="k">Photo</td><td>' + attachBox('id="icPhoto" accept="image/*"', IC_UI.photo, 'Attach photo') + (IC_UI.photo ? ' <a class="small" data-act="ic-photo-clear">Remove</a>' : '') + '</td></tr>' +
@@ -217,8 +226,11 @@ function icCreateHtml(edit) {
       inp('gst', 'GST %', t.gst || '', 'number') + inp('hsn', 'HSN', t.hsn || '') + inp('rack', 'Rack No.', '') + inp('min', 'Min Level', '', 'number');
   }
   const missing = attrs.filter(a => !IC_UI.vals[a.name]);
-  const dup = t && !missing.length ? itemDuplicate(IC_UI.cat, t, IC_UI.vals) : null;
-  const name = t ? itemNameOf(t, IC_UI.vals) : '';
+  const base = t ? itemNameOf(t, IC_UI.vals) : '';
+  // a size-wise item is only "already there" when every size of the run is already there
+  const made = sized ? runs.filter(z => sizedDuplicate(IC_UI.cat, t, IC_UI.vals, z)) : [];
+  const dup = t && !missing.length && !sized ? itemDuplicate(IC_UI.cat, t, IC_UI.vals) : null;
+  const name = sized ? (base && runs.length ? sizedName(base, runs[0]) + (runs.length > 1 ? '  …  ' + sizedName(base, runs[runs.length - 1]) : '') : base) : base;
   let right = '<div class="icres"><div class="icres-h">GENERATED ITEM NAME</div><div class="icres-name">' + (name ? esc(name) : '<span class="muted">Select category and item type</span>') + '</div>';
   if (t) {
     right += '<table class="jcbom"><tr class="hd"><th style="width:60px">Seq</th><th>Name Part</th><th>Value</th></tr>' +
@@ -229,8 +241,12 @@ function icCreateHtml(edit) {
         return '<tr><td class="c">' + (i + 1) + '</td><td>' + esc(a.name) + '</td><td>' + cell(V[a.name]) + '</td></tr>'; }).join(''); })() + '</table>' +
       '<div class="icres-f"><span>Item Code <b>' + esc(itemCodeAuto(IC_UI.cat)) + '</b></span>' +
       (missing.length ? '<span class="st Pending">Next: select ' + esc(missing[0].name) + '</span>'
-        : dup ? '<span class="st Late">Already exists: ' + esc(dup.code) + '</span>' : '<span class="st Done">New item — ready</span>') +
-      '<span class="grow"></span><button class="btn primary" data-act="ic-create"' + (!edit || missing.length || dup ? ' disabled' : '') + '>Create Item</button></div>';
+        : sized && !runs.length ? '<span class="st Pending">Next: type the size run</span>'
+          : sized && made.length === runs.length ? '<span class="st Late">Every size already exists</span>'
+            : sized && made.length ? '<span class="st Pending">' + made.length + ' size(s) already there — ' + (runs.length - made.length) + ' will be made</span>'
+              : dup ? '<span class="st Late">Already exists: ' + esc(dup.code) + '</span>' : '<span class="st Done">New item — ready</span>') +
+      '<span class="grow"></span><button class="btn primary" data-act="ic-create"' + (!edit || missing.length || dup || (sized && (!runs.length || made.length === runs.length)) ? ' disabled' : '') + '>' +
+      (sized ? 'Create ' + (runs.length - made.length || '') + ' Item' + (runs.length - made.length === 1 ? '' : 's') : 'Create Item') + '</button></div>';
   }
   right += '</div>';
   let h = '<div class="jcdoc"><div class="jcban">ITEM CREATION</div><div class="jcmid"><div class="jcl icl"><table class="jckv">' + rows + '</table></div>' + right + '</div></div>';
@@ -263,22 +279,50 @@ function itemColours(t, vals) { const out = []; typeAttrs(t).filter(isColourAttr
 ACTIONS['ic-create'] = () => {
   if (!requirePerm('development', 'edit')) return;
   const t = Store.get('item_types', IC_UI.type); if (!t) return;
-  const attrs = activeAttrs(t, IC_UI.vals); const vals = {};
+  const attrs = sizedAttrs(t, activeAttrs(t, IC_UI.vals)); const vals = {};
   attrs.forEach(a => { vals[a.name] = IC_UI.vals[a.name] || ''; });
   if (attrs.some(a => !vals[a.name])) { flash('Select every attribute first.', 'err'); return; }
-  const dup = itemDuplicate(IC_UI.cat, t, vals);
-  if (dup) { flash('Already exists as ' + esc(dup.code) + ' · ' + esc(dup.name), 'err'); return; }
-  const X = IC_UI.extra;
-  const m = Store.put('materials', {
-    id: uid(), code: itemCodeAuto(IC_UI.cat), name: itemNameOf(t, vals), group: IC_UI.cat, item_type: t.name,
-    attrs: vals, attr_key: itemKeyOf(IC_UI.cat, t.name, vals), uom: X.uom || t.uom || 'PCS',
-    price: 0, gst: num(X.gst != null ? X.gst : t.gst) || 0, hsn: String(X.hsn != null ? X.hsn : t.hsn || '').trim(),
-    rack: String(X.rack || '').trim().toUpperCase(), min_level: num(X.min) || 0, photo: IC_UI.photo || '', colours: itemColours(t, vals), colour_photo: colourSwatchImg(itemColours(t, vals)), created_at: nowIso(), created_by: ME.name
+  const sized = sizedType(t);
+  const runs = sized ? sizeRunList(IC_UI.run, IC_UI.half) : [''];
+  if (sized && !runs.length) { flash('Type the size run first, e.g. 6-10.', 'err'); return; }
+  if (!sized) {
+    const dup = itemDuplicate(IC_UI.cat, t, vals);
+    if (dup) { flash('Already exists as ' + esc(dup.code) + ' · ' + esc(dup.name), 'err'); return; }
+  }
+  const base = itemNameOf(t, vals);
+  const key = itemKeyOf(IC_UI.cat, t.name, vals);
+  const made = [], skipped = [];
+  runs.forEach(z => {
+    if (sized && sizedDuplicate(IC_UI.cat, t, vals, z)) { skipped.push(z); return; }
+    made.push(icPutItem(t, vals, base, key, z));
   });
-  audit('item.create', m.code, m.name);
-  flash('Created ' + esc(m.code) + ' · ' + esc(m.name));
-  IC_UI.vals = {}; IC_UI.dims = {}; IC_UI.extra = {}; IC_UI.photo = ''; icRender();
+  if (!made.length) { flash('Nothing to create — every size is already there.', 'err'); return; }
+  audit('item.create', made.map(m => m.code).join(', '), sized ? base + ' · size ' + made.map(m => m.size).join(', ') : made[0].name);
+  flash(sized ? 'Created ' + made.length + ' item(s) for ' + esc(base) + ' — size ' + esc(made.map(m => m.size).join(', ')) + (skipped.length ? ' (size ' + esc(skipped.join(', ')) + ' already existed)' : '')
+    : 'Created ' + esc(made[0].code) + ' · ' + esc(made[0].name));
+  IC_UI.vals = {}; IC_UI.dims = {}; IC_UI.extra = {}; IC_UI.photo = ''; IC_UI.run = ''; icRender();
 };
+// one material record. For a size-wise type the size goes into the name, the attributes and the key,
+// and size_key ties every size of the same item together.
+function icPutItem(t, vals, base, key, size) {
+  const X = IC_UI.extra; const sized = !!size;
+  const a2 = sized ? Object.assign({}, vals, { [SIZE_TAG]: String(size) }) : vals;
+  return Store.put('materials', {
+    id: uid(), code: itemCodeAuto(IC_UI.cat), name: sized ? sizedName(base, size) : base, group: IC_UI.cat, item_type: t.name,
+    attrs: a2, attr_key: sized ? key + '|size=' + norm(size) : key,
+    size: sized ? String(size) : '', size_key: sized ? key : '', size_base: sized ? base : '',
+    uom: X.uom || t.uom || 'PCS',
+    price: 0, gst: num(X.gst != null ? X.gst : t.gst) || 0, hsn: String(X.hsn != null ? X.hsn : t.hsn || '').trim(),
+    rack: String(X.rack || '').trim().toUpperCase(), min_level: num(X.min) || 0, photo: IC_UI.photo || '',
+    colours: itemColours(t, vals), colour_photo: colourSwatchImg(itemColours(t, vals)), created_at: nowIso(), created_by: ME.name
+  });
+}
+// a size-wise item already exists when its own size is already there
+function sizedDuplicate(cat, t, vals, size) {
+  const key = itemKeyOf(cat, t.name, vals) + '|size=' + norm(size);
+  const nm = squash(sizedName(itemNameOf(t, vals), size));
+  return Store.all('materials').find(m => (m.attr_key && m.attr_key === key) || squash(m.name) === nm) || null;
+}
 /* ---- Colour Matcher: every named colour in big tiles, a large / full-screen preview to hold a swatch against,
    and matching from a photo of the swatch (tap the photo → nearest named colours) ---- */
 const CM = { a: '', sel: '' };
@@ -392,21 +436,25 @@ function icTypeMatrix(cat, edit) {
   const A = catAttrs(cat); const T = typesOf(cat);
   const uomSel = v => '<select data-tf="uom">' + UOMS.map(u => '<option' + (u === (v || 'PCS') ? ' selected' : '') + '>' + u + '</option>').join('') + '</select>';
   let h = '<div style="overflow-x:auto"><table class="jcbom icgrid"><tr class="hd"><th style="width:170px">Item Type</th>' + A.map((a, i) => '<th class="c">' + (i + 1) + '. ' + esc(a.name) + '</th>').join('') +
+    '<th class="c" style="width:76px" title="One item per shoe size">Size-wise</th>' +
     '<th style="width:90px">UOM</th><th style="width:80px">HSN</th><th style="width:60px">GST %</th><th style="width:60px">Items</th>' + (edit ? '<th style="width:130px">Actions</th>' : '') + '</tr>';
   T.forEach(t => {
     const n = Store.all('materials').filter(m => norm(m.item_type || '') === norm(t.name) && norm(m.group) === norm(cat)).length;
     if (edit && IC_UI.editType === t.id) {
       h += '<tr data-trow="' + esc(t.id) + '"><td><input data-tf="name" value="' + esc(t.name) + '"></td>' + A.map(a => '<td class="c"><input type="checkbox" data-tatt="' + esc(a.name) + '"' + (usesAttr(t, a.name) ? ' checked' : '') + '></td>').join('') +
+        '<td class="c"><input type="checkbox" data-tf-sized' + (sizedType(t) ? ' checked' : '') + '></td>' +
         '<td>' + uomSel(t.uom) + '</td><td><input data-tf="hsn" value="' + esc(t.hsn || '') + '"></td><td><input data-tf="gst" type="number" value="' + esc(t.gst || '') + '"></td><td class="c">' + (n || '—') + '</td>' +
         '<td class="c nowrap"><button class="btn sm primary" data-act="it-save" data-id="' + esc(t.id) + '">Save</button> <button class="btn sm" data-act="it-cancel">Cancel</button></td></tr>';
     } else {
       h += '<tr><td><b>' + esc(t.name) + '</b></td>' + A.map(a => '<td class="c">' + (usesAttr(t, a.name) ? '<span class="tick">✓</span>' : '') + '</td>').join('') +
+        '<td class="c">' + (sizedType(t) ? '<span class="tick">✓</span>' : '') + '</td>' +
         '<td>' + esc(t.uom || '') + '</td><td>' + esc(t.hsn || '') + '</td><td class="c">' + (t.gst || '') + '</td><td class="c">' + (n || '—') + '</td>' +
         (edit ? '<td class="c nowrap"><button class="btn sm" data-act="it-edit" data-id="' + esc(t.id) + '">Edit</button> ' + (n ? '' : '<button class="btn sm ghost danger" data-act="it-del" data-id="' + esc(t.id) + '" data-confirm="Delete?">×</button>') + '</td>' : '') + '</tr>';
     }
   });
-  if (!T.length) h += '<tr><td colspan="' + (A.length + 6) + '" class="empty">No item types for ' + esc(cat) + ' yet</td></tr>';
+  if (!T.length) h += '<tr><td colspan="' + (A.length + 7) + '" class="empty">No item types for ' + esc(cat) + ' yet</td></tr>';
   if (edit) h += '<tr class="addrow" data-trow="new"><td><input data-tf="name" placeholder="New item type"></td>' + A.map(a => '<td class="c"><input type="checkbox" data-tatt="' + esc(a.name) + '"></td>').join('') +
+    '<td class="c"><input type="checkbox" data-tf-sized></td>' +
     '<td>' + uomSel('') + '</td><td><input data-tf="hsn"></td><td><input data-tf="gst" type="number"></td><td></td><td class="c"><button class="btn sm primary" data-act="it-add">Add Type</button></td></tr>';
   return h + '</table></div>';
 }
@@ -484,7 +532,8 @@ function itRead(tr) {
   return {
     name: $('[data-tf="name"]', tr).value.trim().toUpperCase().replace(/\s+/g, ' '),
     attrs: $$('[data-tatt]', tr).filter(c => c.checked).map(c => c.dataset.tatt),
-    uom: $('[data-tf="uom"]', tr).value, hsn: $('[data-tf="hsn"]', tr).value.trim(), gst: num($('[data-tf="gst"]', tr).value) || 0
+    uom: $('[data-tf="uom"]', tr).value, hsn: $('[data-tf="hsn"]', tr).value.trim(), gst: num($('[data-tf="gst"]', tr).value) || 0,
+    sized: !!($('[data-tf-sized]', tr) || {}).checked
   };
 }
 function itCheck(r, cat, selfId) {
@@ -545,7 +594,8 @@ const IC_DEFAULT_TYPES = [
   ['Packaging', 'SHOE BOX', 'BOX SIZE, PLY, PRINT', 'PCS', '4819'], ['Packaging', 'CARTON', 'BOX SIZE, PLY', 'PCS', '4819'], ['Packaging', 'POLY BAG', 'BAG SIZE', 'PCS', '3923'],
   ['Packaging', 'TISSUE PAPER', 'COLOUR', 'PCS', '4803'], ['Packaging', 'BARCODE LABEL', 'LABEL SIZE', 'ROLL', '4821'],
   ['Consumable Item', 'ADHESIVE', 'MATERIAL, PACK SIZE', 'LTR', '3506'], ['Consumable Item', 'PRIMER', 'MATERIAL, PACK SIZE', 'LTR', '3208'], ['Consumable Item', 'HARDENER', 'PACK SIZE', 'LTR', '3208'],
-  ['Silicon', 'SILICON LABEL', 'COLOUR, PRINT', 'PCS', '3926']
+  ['Silicon', 'SILICON LABEL', 'COLOUR, PRINT', 'PCS', '3926'],
+  ['Silicon', 'SILICON PATTA', 'COLOUR, PRINT', 'PAIR', '6406', true]
 ];
 // adds only what is missing — never replaces an attribute or item type that already exists (renamed or edited ones included)
 function icSeedDefaults() {
@@ -553,7 +603,18 @@ function icSeedDefaults() {
   Object.keys(IC_DEFAULT_ATTRS).forEach(cat => IC_DEFAULT_ATTRS[cat].forEach(([n, v], i) => {
     const id = 'ca_' + icSlug(cat) + '_' + icSlug(n); if (has('attributes', id, cat, n)) return;
     Store.put('attributes', { id, category: cat, name: n, seq: i + 1, values: v.split(',').map(x => x.trim()) }); }));
-  IC_DEFAULT_TYPES.filter(r => !has('item_types', 'it_' + icSlug(r[0] + '_' + r[1]), r[0], r[1])).forEach(r => Store.put('item_types', { id: 'it_' + icSlug(r[0] + '_' + r[1]), category: r[0], name: r[1], attrs: r[2].split(',').map(x => x.trim()), uom: r[3], hsn: r[4], gst: r[0] === 'Fabric' || r[0] === 'Packaging' ? 12 : 18 }));
+  IC_DEFAULT_TYPES.filter(r => !has('item_types', 'it_' + icSlug(r[0] + '_' + r[1]), r[0], r[1])).forEach(r => Store.put('item_types', { id: 'it_' + icSlug(r[0] + '_' + r[1]), category: r[0], name: r[1], attrs: r[2].split(',').map(x => x.trim()), uom: r[3], hsn: r[4], gst: r[0] === 'Fabric' || r[0] === 'Packaging' ? 12 : 18, sized: !!r[5] }));
+}
+// item types added after the first seed: put in only the ones that are still missing,
+// and never touch an item type that is already there (it may have been renamed or edited)
+const IC_LATE_TYPES = ['SILICON PATTA'];
+function icSeedLate() {
+  IC_DEFAULT_TYPES.filter(r => IC_LATE_TYPES.includes(r[1])).forEach(r => {
+    if (Store.all('item_types').some(t => norm(t.category) === norm(r[0]) && norm(t.name) === norm(r[1]))) return;
+    if (!Store.all('attributes').some(a => norm(a.category) === norm(r[0]))) return;   // its category is not set up here
+    Store.put('item_types', { id: 'it_' + icSlug(r[0] + '_' + r[1]), category: r[0], name: r[1], attrs: r[2].split(',').map(x => x.trim()), uom: r[3], hsn: r[4], gst: 18, sized: !!r[5] });
+    audit('itemtype.add', r[0] + ' · ' + r[1], 'size-wise item type added by Nexus');
+  });
 }
 // called from migrateDb on every login; fixed ids keep two browsers seeding at once consistent
 function seedItemMasters() {
@@ -572,4 +633,5 @@ function seedItemMasters() {
     return;
   }
   if (!Store.all('attributes').length && !Store.all('item_types').length) icSeedDefaults();
+  else icSeedLate();
 }
