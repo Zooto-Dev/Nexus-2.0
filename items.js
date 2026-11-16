@@ -36,7 +36,7 @@ const atMax = a => Math.max(1, num(a.max) || AT_MAX);
 const atKindLabel = a => (AT_KINDS.find(k => k[0] === atKind(a)) || AT_KINDS[0])[1] + (atKind(a) === 'multi' ? ' (up to ' + atMax(a) + ')' : '');
 function atValues(a, vals, t) {
   const k = atKind(a);
-  if (k === 'brand') return Store.all('customers').map(c => String(c.name || '').trim().toUpperCase()).filter(Boolean).sort();
+  if (k === 'brand') return ['NONE'].concat(Store.all('customers').map(c => String(c.name || '').trim().toUpperCase()).filter(Boolean).sort());
   if (k === 'article') {
     // only the articles of the brand chosen above (articles without a brand are shown for every brand)
     const b = t ? typeAttrs(t).find(x => atKind(x) === 'brand' && vals[x.name]) : null; const bv = b ? vals[b.name] : '';
