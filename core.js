@@ -67,6 +67,7 @@ const CFG = window.NEXUS_CONFIG || {};
 const DEMO_SHARED = DEMO && !!(CFG.SUPABASE_URL && CFG.SUPABASE_ANON_KEY && window.supabase);
 const CLOUD = (!DEMO && !!(CFG.SUPABASE_URL && CFG.SUPABASE_ANON_KEY && window.supabase)) || DEMO_SHARED;
 const TBL = DEMO ? 'nx_demo' : 'nx_docs';
+const LITE = TBL + '_lite';     // the same rows, but a material comes without its photo (has_photo says if one exists)
 let SB = null;
 
 /* ---- small dialogs used by approvals: a reason box, and an edit box for sending corrections back ---- */
@@ -269,7 +270,9 @@ function cloudApply(col, id, data, ver, del) {
   if (ver) CL_VER.set(k, ver);
   if (col === 'settings') { DB.settings = data; SNAP.set('settings|main', JSON.stringify(data)); return true; }
   const list = DB[col]; if (!list) return false;
-  const i = list.findIndex(d => d.id === id); if (i >= 0) list[i] = data; else list.push(data);
+  const i = list.findIndex(d => d.id === id);
+  if (col === 'materials' && i >= 0 && data && !('photo' in data) && data.has_photo && list[i].photo) data.photo = list[i].photo;
+  if (i >= 0) list[i] = data; else list.push(data);
   SNAP.set(k, JSON.stringify(data)); return true;
 }
 function cloudRefreshView() { RES_CACHE.clear(); const a = document.activeElement; if (!a || !/INPUT|TEXTAREA|SELECT/.test(a.tagName)) { renderNav(); route(); } }
@@ -280,14 +283,14 @@ async function cloudSync() {
   try {
     const seen = new Set(); const changed = {}; let from = 0; const page = 1000;
     for (;;) {
-      const { data, error } = await SB.from(TBL).select('collection,id,updated_at').order('collection').order('id').range(from, from + page - 1);
+      const { data, error } = await SB.from(LITE).select('collection,id,updated_at').order('collection').order('id').range(from, from + page - 1);
       if (error) throw error;
       data.forEach(r => { const k = r.collection + '|' + r.id; seen.add(k); if ((r.collection === 'settings' || COLS.includes(r.collection)) && CL_VER.get(k) !== r.updated_at) (changed[r.collection] = changed[r.collection] || []).push(r.id); });
       if (data.length < page) break; from += page;
     }
     let n = 0;
     for (const [col, ids] of Object.entries(changed)) for (let i = 0; i < ids.length; i += 150) {
-      const { data, error } = await SB.from(TBL).select('collection,id,data,updated_at').eq('collection', col).in('id', ids.slice(i, i + 150));
+      const { data, error } = await SB.from(LITE).select('collection,id,data,updated_at').eq('collection', col).in('id', ids.slice(i, i + 150));
       if (error) throw error; data.forEach(r => { if (cloudApply(r.collection, r.id, r.data, r.updated_at)) n++; });
     }
     Array.from(CL_VER.keys()).forEach(k => { if (!seen.has(k)) { const j = k.indexOf('|'); if (cloudApply(k.slice(0, j), k.slice(j + 1), null, null, true)) n++; } });
@@ -303,7 +306,7 @@ async function cloudLoad() {
   let from = 0; const page = 1000;
   for (;;) {
     // a fixed order, so pages never skip or repeat rows while others are saving
-    const { data, error } = await SB.from(TBL).select('collection,id,data,updated_at').order('collection').order('id').range(from, from + page - 1);
+    const { data, error } = await SB.from(LITE).select('collection,id,data,updated_at').order('collection').order('id').range(from, from + page - 1);
     if (error) throw error;
     data.forEach(r => { CL_VER.set(r.collection + '|' + r.id, r.updated_at); if (r.collection === 'settings') out.settings = r.data; else if (out[r.collection]) out[r.collection].push(r.data); });
     if (data.length < page) break; from += page;

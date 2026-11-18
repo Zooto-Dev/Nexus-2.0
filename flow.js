@@ -75,8 +75,9 @@ const PO_DOC_CSS = '.po2 table{width:auto;border:0;background:none;border-collap
   '.po2 .po2-items td.po2-note{font-size:9.5px;max-width:220px;white-space:normal}.po2-terms{border-left:10px solid #0e6a73;padding:4px 12px;font-size:10px}.po2-th{font-weight:700;font-size:11px;margin-bottom:4px}.po2-terms ol{margin:0;padding-left:16px}' +
   '.po2-sign{display:flex;justify-content:space-between;margin-top:34px}.po2-sign .r{text-align:right}.po2-sl{font-weight:700;font-size:11px}.po2-sn{font-weight:700;font-size:10.5px;margin-top:18px;text-transform:uppercase}';
 (function () { const st = document.createElement('style'); st.textContent = PO_DOC_CSS; document.head.appendChild(st); })();
-ACTIONS['po-print'] = el => {
+ACTIONS['po-print'] = async el => {
   const p = Store.get('purchase_orders', el.dataset.id); if (!p) return;
+  await matPhotoLoad((p.lines || []).map(l => (matBy(l.material) || {}).id));
   const w = window.open('');
   w.document.write('<html><head><title>' + esc(p.no) + '</title><style>@page{size:A4 landscape;margin:8mm}html,body{margin:0}*{-webkit-print-color-adjust:exact;print-color-adjust:exact}' + PO_DOC_CSS + '</style></head><body>' + poDocHtml(p) + '<script>window.onload=function(){window.print()}</' + 'script></body></html>');
   w.document.close();

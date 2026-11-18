@@ -41,6 +41,36 @@ function nxView(srcs) {
   document.body.appendChild(d); d.focus();
 }
 ACTIONS['img-view'] = el => nxView(el.dataset.src);
+/* Item photos are not part of the bulk load (13 MB that every user pulled on every open). A material
+   arrives with has_photo; the picture is fetched for that one item when its icon is tapped, kept in
+   memory for the session, and never written back by the browser unless the user changes it. */
+const MAT_PH_BUSY = new Set();
+async function matPhotoLoad(ids) {
+  ids = Array.from(new Set(ids.filter(Boolean))).filter(id => { const m = Store.get('materials', id); return m && !m.photo && m.has_photo && !MAT_PH_BUSY.has(id); });
+  if (!ids.length || !SB) return;
+  ids.forEach(id => MAT_PH_BUSY.add(id));
+  try {
+    for (let i = 0; i < ids.length; i += 50) {
+      const { data, error } = await SB.from(TBL).select('id,photo:data->>photo').eq('collection', 'materials').in('id', ids.slice(i, i + 50));
+      if (error) throw error;
+      (data || []).forEach(r => { const m = Store.get('materials', r.id); if (m && r.photo) { m.photo = r.photo; SNAP.set('materials|' + m.id, JSON.stringify(m)); } });
+    }
+  } catch (e) { flash('Could not load the photo: ' + esc(e.message || e), 'err'); }
+  ids.forEach(id => MAT_PH_BUSY.delete(id));
+}
+const matHasPhoto = m => !!(m && (m.photo || m.has_photo));
+// thumbnail if the photo is here, a camera icon that fetches it if not, nothing if the item has no photo
+function matThumb(m) {
+  if (!m) return '';
+  if (m.photo) return photoThumb(m.photo);
+  if (!m.has_photo) return '';
+  return '<a class="phico" data-act="mat-photo" data-id="' + esc(m.id) + '" title="Show photo"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg></a>';
+}
+ACTIONS['mat-photo'] = async el => {
+  const m = Store.get('materials', el.dataset.id); if (!m) return;
+  if (el.classList) el.classList.add('busy'); await matPhotoLoad([m.id]); if (el.classList) el.classList.remove('busy');
+  if (m.photo) { nxView(m.photo); cloudRefreshView(); }
+};
 function dlMat(id) { return '<datalist id="' + id + '">' + Store.all('materials').map(m => '<option value="' + esc(m.code) + '">' + esc(m.name + ' · ' + m.uom) + '</option>').join('') + '</datalist>'; }
 function vendorNames() { return Store.all('vendors').map(v => v.name).sort(); }
 function vendorBy(name) { return Store.all('vendors').find(v => norm(v.name) === norm(name)); }
@@ -429,7 +459,7 @@ function poJcLines() {
   return (PO_UI.net || []).map(r => {
     const m = matBy(r.material) || {}; const o = PO_UI.moq[r.material];
     return { key: r.material, r, m, qty: o && o.qty > r.net + 1e-9 ? o.qty : roundUom(m.uom, r.net), moq: !!(o && o.qty > r.net + 1e-9),
-      brand: Array.from(new Set(r.jcs.map(x => x.req ? x.brand : (jcBy(x.jc) || {}).brand).filter(Boolean))).join(', '), photo: m.photo || '' };
+      brand: Array.from(new Set(r.jcs.map(x => x.req ? x.brand : (jcBy(x.jc) || {}).brand).filter(Boolean))).join(', ') };
   });
 }
 function poJcDraw() {
@@ -442,7 +472,7 @@ function poJcDraw() {
     const gst = e.gst != null ? e.gst : (L.m.gst != null ? L.m.gst : '');
     const rem = e.rem != null ? e.rem : (L.moq ? 'MOQ: net ' + qtyFmt(L.r.net) + ' → ' + qtyFmt(L.qty) : !L.r.demand && L.r.min ? 'Min level' : '');
     const a2 = num(L.qty) * num(rate); const g2 = a2 * (1 + num(gst) / 100); q += num(L.qty); amt += a2; tot += g2;
-    return '<tr data-jrow data-key="' + esc(L.key) + '"' + (L.moq ? ' class="moqrow"' : '') + '><td>' + photoThumb(L.photo) + '</td>' +
+    return '<tr data-jrow data-key="' + esc(L.key) + '"' + (L.moq ? ' class="moqrow"' : '') + '><td>' + matThumb(L.m) + '</td>' +
       '<td><b>' + esc(L.m.name || L.r.material) + '</b></td><td>' + esc(L.m.group || '') + '</td><td>' + esc(L.r.material) + '</td><td>' + esc(L.m.hsn || '') + '</td><td>' + esc(L.m.uom || '') + '</td>' +
       '<td>' + (L.brand ? esc(L.brand) : '<input data-jbrand list="dlBrandPo" style="width:120px" value="' + esc((PO_UI.ed[L.key] || {}).brand || '') + '">') + '</td>' +
       '<td class="num">' + poRateCell(L.r.material) + '</td><td class="num">' + esc(gst) + '</td>' +
@@ -1351,7 +1381,7 @@ VIEWS.stock = {
     const low = rows.filter(x => num(x.m.min_level) > 0 && x.q < num(x.m.min_level));
     setMain('<div class="toolbar">' + (low.length ? '<span class="late-txt small"><b>' + low.length + ' item(s) below min level</b></span>' : '') + '<span class="grow"></span><button class="btn" data-act="stock-csv">Export CSV</button></div>' +
       '<div class="tbl-wrap"><table><tr><th class="nofilter">Photo</th><th>Item Code</th><th>Item Name</th><th>Category</th><th>UOM</th><th>Rack</th><th class="num">Min Level</th><th class="num">Stock</th><th class="num">Price ₹</th><th>Status</th><th></th></tr>' +
-      rows.map(x => { const lowRow = num(x.m.min_level) > 0 && x.q < num(x.m.min_level); return '<tr' + (lowRow ? ' style="background:#fdf3f3"' : x.q <= 0 ? ' class="muted"' : '') + '><td>' + photoThumb(x.m.photo) + '</td><td><b>' + esc(x.m.code) + '</b></td><td>' + esc(x.m.name) + '</td><td>' + esc(x.m.group || '') + '</td><td>' + esc(x.m.uom) + '</td><td>' + esc(x.m.rack || '') + '</td><td class="num">' + (num(x.m.min_level) ? qtyFmt(x.m.min_level) : '') + '</td><td class="num"><b>' + qtyFmt(x.q) + '</b></td><td class="num">' + poRateCell(x.m.code) + '</td><td>' + (lowRow ? '<span class="late-txt">Below min</span>' : '') + '</td><td>' + (prCanAsk() && !prPending(x.m.code) ? '<button class="btn sm" data-act="pr-ask" data-c="' + esc(x.m.code) + '">Price</button>' : '') + '</td></tr>'; }).join('') + '</table></div>');
+      rows.map(x => { const lowRow = num(x.m.min_level) > 0 && x.q < num(x.m.min_level); return '<tr' + (lowRow ? ' style="background:#fdf3f3"' : x.q <= 0 ? ' class="muted"' : '') + '><td>' + matThumb(x.m) + '</td><td><b>' + esc(x.m.code) + '</b></td><td>' + esc(x.m.name) + '</td><td>' + esc(x.m.group || '') + '</td><td>' + esc(x.m.uom) + '</td><td>' + esc(x.m.rack || '') + '</td><td class="num">' + (num(x.m.min_level) ? qtyFmt(x.m.min_level) : '') + '</td><td class="num"><b>' + qtyFmt(x.q) + '</b></td><td class="num">' + poRateCell(x.m.code) + '</td><td>' + (lowRow ? '<span class="late-txt">Below min</span>' : '') + '</td><td>' + (prCanAsk() && !prPending(x.m.code) ? '<button class="btn sm" data-act="pr-ask" data-c="' + esc(x.m.code) + '">Price</button>' : '') + '</td></tr>'; }).join('') + '</table></div>');
     VIEWS.stock.rows = rows;
   }
 };
