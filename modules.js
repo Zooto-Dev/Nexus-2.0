@@ -1337,8 +1337,8 @@ VIEWS.stock = {
     const rows = Store.all('materials').map(m => ({ m, q: stk[norm(m.code)] || 0 })).sort((a, b) => a.m.code.localeCompare(b.m.code));
     const low = rows.filter(x => num(x.m.min_level) > 0 && x.q < num(x.m.min_level));
     setMain('<div class="toolbar">' + (low.length ? '<span class="late-txt small"><b>' + low.length + ' item(s) below min level</b></span>' : '') + '<span class="grow"></span><button class="btn" data-act="stock-csv">Export CSV</button></div>' +
-      '<div class="tbl-wrap"><table><tr><th>Item Code</th><th>Item Name</th><th>Category</th><th>UOM</th><th>Rack</th><th class="num">Min Level</th><th class="num">Stock</th><th class="num">Price ₹</th><th>Status</th><th></th></tr>' +
-      rows.map(x => { const lowRow = num(x.m.min_level) > 0 && x.q < num(x.m.min_level); return '<tr' + (lowRow ? ' style="background:#fdf3f3"' : x.q <= 0 ? ' class="muted"' : '') + '><td><b>' + esc(x.m.code) + '</b></td><td>' + esc(x.m.name) + '</td><td>' + esc(x.m.group || '') + '</td><td>' + esc(x.m.uom) + '</td><td>' + esc(x.m.rack || '') + '</td><td class="num">' + (num(x.m.min_level) ? qtyFmt(x.m.min_level) : '') + '</td><td class="num"><b>' + qtyFmt(x.q) + '</b></td><td class="num">' + poRateCell(x.m.code) + '</td><td>' + (lowRow ? '<span class="late-txt">Below min</span>' : '') + '</td><td>' + (prCanAsk() && !prPending(x.m.code) ? '<button class="btn sm" data-act="pr-ask" data-c="' + esc(x.m.code) + '">Price</button>' : '') + '</td></tr>'; }).join('') + '</table></div>');
+      '<div class="tbl-wrap"><table><tr><th class="nofilter">Photo</th><th>Item Code</th><th>Item Name</th><th>Category</th><th>UOM</th><th>Rack</th><th class="num">Min Level</th><th class="num">Stock</th><th class="num">Price ₹</th><th>Status</th><th></th></tr>' +
+      rows.map(x => { const lowRow = num(x.m.min_level) > 0 && x.q < num(x.m.min_level); return '<tr' + (lowRow ? ' style="background:#fdf3f3"' : x.q <= 0 ? ' class="muted"' : '') + '><td>' + photoThumb(x.m.photo) + '</td><td><b>' + esc(x.m.code) + '</b></td><td>' + esc(x.m.name) + '</td><td>' + esc(x.m.group || '') + '</td><td>' + esc(x.m.uom) + '</td><td>' + esc(x.m.rack || '') + '</td><td class="num">' + (num(x.m.min_level) ? qtyFmt(x.m.min_level) : '') + '</td><td class="num"><b>' + qtyFmt(x.q) + '</b></td><td class="num">' + poRateCell(x.m.code) + '</td><td>' + (lowRow ? '<span class="late-txt">Below min</span>' : '') + '</td><td>' + (prCanAsk() && !prPending(x.m.code) ? '<button class="btn sm" data-act="pr-ask" data-c="' + esc(x.m.code) + '">Price</button>' : '') + '</td></tr>'; }).join('') + '</table></div>');
     VIEWS.stock.rows = rows;
   }
 };
@@ -1457,7 +1457,8 @@ VIEWS.materials = {
       defaults: { uom: 'PCS' },
       beforeAdd: d => { if (!String(d.code || '').trim()) d.code = itemCodeAuto(d.group); },
       validate: d => (!String(d.name || '').trim() ? 'Item name is required.' : Store.all('materials').some(x => x.id !== d.id && d.code && norm(x.code) === norm(d.code)) ? 'Code exists.' : ''),
-      inUse: d => (Store.all('purchase_orders').some(p => p.lines.some(l => norm(l.material) === norm(d.code))) || Store.all('issues').some(i => norm(i.material) === norm(d.code))) ? 'Material is in use — cannot delete.' : ''
+      canDelete: d => isSuperAdmin(),
+      inUse: d => { const w = itemUsedWhere(d.code); return w ? d.code + ' is used in: ' + w + ' — cannot delete.' : ''; }
     });
   }
 };

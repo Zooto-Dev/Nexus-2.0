@@ -67,7 +67,9 @@ ACTIONS['mt-add'] = async el => {
 ACTIONS['mt-del'] = el => {
   const cfg = MT_CFG[el.dataset.col]; const d = Store.get(cfg.col, el.dataset.id);
   const why = cfg.inUse && cfg.inUse(d); if (why) { flash(esc(why), 'err'); return; }
-  Store.del(cfg.col, d.id); audit(cfg.col + '.delete', d[cfg.cols[0].k], d[cfg.cols[1].k] || ''); cfg.view.render();
+  // the whole record goes into the audit line (pictures replaced by a marker), so a wrong delete can be put back by hand
+  const copy = JSON.stringify(Object.assign({}, d, d.photo ? { photo: '(photo)' } : {}, d.colour_photo ? { colour_photo: '(swatch)' } : {}));
+  Store.del(cfg.col, d.id); audit(cfg.col + '.delete', d[cfg.cols[0].k], (d[cfg.cols[1].k] || '') + ' · record: ' + copy.slice(0, 1500)); cfg.view.render();
 };
 ACTIONS['mt-paste-toggle'] = el => { const ui = MT_UI[el.dataset.col]; ui.paste = !ui.paste; MT_CFG[el.dataset.col].view.render(); };
 ACTIONS['mt-paste'] = async el => {

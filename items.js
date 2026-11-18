@@ -269,9 +269,11 @@ function icCreateHtml(edit) {
   if (t) {
     const list = Store.all('materials').filter(m => norm(m.group) === norm(IC_UI.cat) && norm(m.item_type || '') === norm(t.name)).sort((a, b) => a.code.localeCompare(b.code));
     const attrs = typeAttrs(t); const hasCol = attrs.some(isColourAttr);
-    h += '<h2>' + esc(t.name) + ' — existing items (' + list.length + ')</h2><div class="tbl-wrap"><table><tr><th>Photo</th>' + (hasCol ? '<th>Colour</th>' : '') + '<th>Item Code</th><th>Item Name</th>' + attrs.map((a, i) => '<th>' + (i + 1) + '. ' + esc(a.name) + '</th>').join('') + '<th>UOM</th><th class="num">Price</th></tr>' +
-      (list.length ? list.map(m => '<tr><td>' + (can('development', 'edit') ? '<label class="icphoto sm" title="Add / change photo">' + (m.photo ? '<img src="' + m.photo + '">' : '<span class="muted small">+ Photo</span>') + '<input type="file" accept="image/*" data-icmp="' + esc(m.id) + '" style="display:none"></label>' : photoThumb(m.photo)) + '</td>' + (hasCol ? '<td>' + photoThumb(m.colour_photo) + '</td>' : '') + '<td><b>' + esc(m.code) + '</b></td><td>' + esc(m.name) + '</td>' + attrs.map(a => '<td>' + esc((m.attrs || {})[a.name] || '') + '</td>').join('') + '<td>' + esc(m.uom || '') + '</td><td class="num">' + (m.price ? money(m.price) : '') + '</td></tr>').join('')
-        : '<tr><td colspan="' + (attrs.length + 5 + (hasCol ? 1 : 0)) + '" class="empty">No items of this type yet</td></tr>') + '</table></div>';
+    const sa = isSuperAdmin();
+    h += '<h2>' + esc(t.name) + ' — existing items (' + list.length + ')</h2><div class="tbl-wrap"><table><tr><th>Photo</th>' + (hasCol ? '<th>Colour</th>' : '') + '<th>Item Code</th><th>Item Name</th>' + attrs.map((a, i) => '<th>' + (i + 1) + '. ' + esc(a.name) + '</th>').join('') + '<th>UOM</th><th class="num">Price</th>' + (sa ? '<th class="noprint"></th>' : '') + '</tr>' +
+      (list.length ? list.map(m => '<tr><td>' + (can('development', 'edit') ? '<label class="icphoto sm" title="Add / change photo">' + (m.photo ? '<img src="' + m.photo + '">' : '<span class="muted small">+ Photo</span>') + '<input type="file" accept="image/*" data-icmp="' + esc(m.id) + '" style="display:none"></label>' : photoThumb(m.photo)) + '</td>' + (hasCol ? '<td>' + photoThumb(m.colour_photo) + '</td>' : '') + '<td><b>' + esc(m.code) + '</b></td><td>' + esc(m.name) + '</td>' + attrs.map(a => '<td>' + esc((m.attrs || {})[a.name] || '') + '</td>').join('') + '<td>' + esc(m.uom || '') + '</td><td class="num">' + (m.price ? money(m.price) : '') + '</td>' +
+        (sa ? '<td class="noprint right">' + (itemUsedWhere(m.code) ? '<span class="muted small" title="' + esc(itemUsedWhere(m.code)) + '">in use</span>' : '<button class="btn sm ghost danger" data-act="ic-del" data-id="' + esc(m.id) + '" data-confirm="Delete ' + esc(m.code) + '?">×</button>') + '</td>' : '') + '</tr>').join('')
+        : '<tr><td colspan="' + (attrs.length + 5 + (hasCol ? 1 : 0) + (sa ? 1 : 0)) + '" class="empty">No items of this type yet</td></tr>') + '</table></div>';
   } else if (IC_UI.cat) {
     h += '<h2>' + esc(IC_UI.cat) + ' — item types</h2>' + icTypeMatrix(IC_UI.cat, false);
   }
@@ -337,6 +339,31 @@ function sizedDuplicate(cat, t, vals, size) {
   const nm = squash(sizedName(itemNameOf(t, vals), size));
   return Store.all('materials').find(m => (m.attr_key && m.attr_key === key) || squash(m.name) === nm) || null;
 }
+/* ---- Super Admin: remove an item that nothing uses. Every document that could name a material is
+   looked at; the deleted record goes into the audit line in full, so it can be put back by hand. ---- */
+function itemUsedWhere(code) {
+  const c = norm(code); const hit = [];
+  const inLines = (col, label, f) => { if (Store.all(col).some(d => (d.lines || []).some(l => norm(f ? f(l) : l.material) === c))) hit.push(label); };
+  inLines('purchase_orders', 'PO'); inLines('grns', 'GRN'); inLines('inwards', 'gate entry'); inLines('job_cards', 'job card'); inLines('boms', 'BOM'); inLines('rtvs', 'RTV');
+  if (Store.all('issues').some(i => norm(i.material) === c)) hit.push('issue');
+  if (Store.all('rtvs').some(r => norm(r.material) === c)) hit.push('RTV');
+  if (Store.all('requisitions').some(r => (r.lines || []).some(l => norm(l.material) === c) || norm(r.material) === c)) hit.push('requisition');
+  if (Store.all('opening_stock').some(o => norm(o.material) === c || (o.lines || []).some(l => norm(l.material) === c))) hit.push('opening stock');
+  if (Store.all('sourcing').some(x => norm(x.material) === c)) hit.push('sourcing');
+  if (Store.all('price_requests').some(x => norm(x.material) === c || (x.items || []).some(y => norm(y.material || y) === c))) hit.push('price request');
+  return Array.from(new Set(hit)).join(', ');
+}
+ACTIONS['ic-del'] = el => {
+  if (!isSuperAdmin()) { flash('Only the Super Admin can delete an item.', 'err'); return; }
+  const m = Store.get('materials', el.dataset.id); if (!m) return;
+  const used = itemUsedWhere(m.code);
+  if (used) { flash(esc(m.code) + ' is used in: ' + esc(used) + ' — it cannot be deleted.', 'err'); return; }
+  const copy = JSON.stringify(Object.assign({}, m, { photo: m.photo ? '(photo)' : '', colour_photo: m.colour_photo ? '(swatch)' : '' }));
+  Store.del('materials', m.id);
+  audit('item.delete', m.code, m.name + ' · record: ' + copy.slice(0, 1500));
+  flash('Deleted ' + esc(m.code) + ' · ' + esc(m.name) + '.');
+  icRender();
+};
 /* ---- Colour Matcher: every named colour in big tiles, a large / full-screen preview to hold a swatch against,
    and matching from a photo of the swatch (tap the photo → nearest named colours) ---- */
 const CM = { a: '', sel: '' };
