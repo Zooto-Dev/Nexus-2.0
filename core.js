@@ -177,9 +177,13 @@ const Store = {
 let pendingWrites = 0;
 let REAUTH = false;
 let CLOUD_OK = false;   // true only once every page of the cloud data has loaded
-async function reauth() {
-  if (REAUTH) return; REAUTH = true;
-  try { const { data } = await SB.auth.refreshSession(); if (data && data.session) { REAUTH = false; return; } } catch (e) { }
+let REAUTH_OK_AT = 0;   // when a token refresh last succeeded
+async function reauth(why) {
+  if (REAUTH) return;
+  // the login was renewed a moment ago and a write still failed: the write is the problem, not the login
+  if (Date.now() - REAUTH_OK_AT < 60000) { flash('Cloud save failed: ' + esc(why || 'refused') + ' — will retry automatically.', 'err'); return; }
+  REAUTH = true;
+  try { const { data } = await SB.auth.refreshSession(); if (data && data.session) { REAUTH = false; REAUTH_OK_AT = Date.now(); retryNow(); return; } } catch (e) { }
   const d = document.createElement('div'); d.className = 'dlg-back'; d.id = 'reDlg';
   d.innerHTML = '<div class="dlg" style="max-width:380px"><div class="dlg-h">Sign in again</div><div class="small">Your login has ended. Unsaved changes are kept and save as soon as you sign in.</div>' +
     '<table class="jckv"><tr><td class="k">Email</td><td class="v"><input id="reEm" value="' + esc((ME && ME.email) || '') + '"></td></tr><tr><td class="k">Password</td><td class="v"><input id="rePw" type="password"></td></tr></table>' +
@@ -197,11 +201,19 @@ function syncBadge() { const s = $('#syncState'); if (s) s.textContent = SANDBOX
 // cloud writes go one after the other, in the order the app made them (a GRN is saved before the gate entry it closes)
 let WRITE_Q = Promise.resolve();
 function cloudWrite(col, doc, isDelete) { pendingWrites++; syncBadge(); const snap = isDelete ? doc : JSON.parse(JSON.stringify(doc)); const run = WRITE_Q.then(() => cloudWriteNow(col, snap, isDelete)); WRITE_Q = run.catch(() => {}); return run; }
+// log collections most people may write but not read back: an UPSERT needs to see the row it might
+// replace, so for them it is refused (42501) — a plain INSERT is not. Only a real duplicate is updated.
+const WRITE_ONLY = new Set(['audit', 'mail_queue', 'wa_log']);
 async function cloudWriteNow(col, doc, isDelete) {
   try {
-    const q = isDelete ? SB.from(TBL).delete().eq('collection', col).eq('id', doc.id)
-      : SB.from(TBL).upsert({ collection: col, id: doc.id, data: doc, updated_at: nowIso() });
-    const { error } = await q; if (error) throw error;
+    const row = { collection: col, id: doc.id, data: doc, updated_at: nowIso() };
+    let error = null;
+    if (isDelete) ({ error } = await SB.from(TBL).delete().eq('collection', col).eq('id', doc.id));
+    else if (WRITE_ONLY.has(col)) {
+      ({ error } = await SB.from(TBL).insert(row));
+      if (error && (error.code === '23505' || /duplicate key/i.test(error.message || ''))) ({ error } = await SB.from(TBL).update({ data: doc, updated_at: row.updated_at }).eq('collection', col).eq('id', doc.id));
+    } else ({ error } = await SB.from(TBL).upsert(row));
+    if (error) throw error;
     RETRY_Q.delete(col + '|' + doc.id);
   } catch (e) {
     // "NX: …" = the database refused the change on purpose (a business rule): do not retry, take the cloud copy back
@@ -214,9 +226,16 @@ async function cloudWriteNow(col, doc, isDelete) {
       }
       flash('Not saved — ' + esc(String(e.message).replace(/^NX:\s*/, '')), 'err'); cloudReload(col, doc.id); return;
     }
+    // the database refused this row on its own rules: that is final, not a sign to sign in again
+    if (/row-level security/i.test(String(e.message || ''))) {
+      RETRY_Q.delete(col + '|' + doc.id); pendingWrites--; syncBadge();
+      if (!WRITE_ONLY.has(col)) { flash('Not allowed — your login may not change ' + esc(col) + '.', 'err'); cloudReload(col, doc.id); }
+      else console.warn('log row refused', col, doc.id);
+      return;
+    }
     RETRY_Q.set(col + '|' + doc.id, { col, id: doc.id, isDelete: !!isDelete });
-    // "permission denied" = the login has ended (signed out elsewhere / expired): renew it or ask for the password
-    if (/permission denied|JWT|not authenticated/i.test(String(e.message || e)) || e.code === '42501' || e.code === 'PGRST301') reauth();
+    // "JWT expired" / not authenticated = the login has ended (signed out elsewhere / expired): renew it or ask for the password
+    if (/JWT|not authenticated|permission denied/i.test(String(e.message || e)) || e.code === 'PGRST301' || e.code === '42501') reauth(String(e.message || e));
     else flash('Cloud save failed: ' + esc(e.message || e) + ' — will retry automatically; keep this page open.', 'err');
   }
   pendingWrites--; syncBadge();
