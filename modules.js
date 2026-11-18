@@ -1562,6 +1562,7 @@ VIEWS.bom = {
         bomRecalc();
       }
       // the category changed under an item of another category: the item goes, the row stays
+      if (e.target.dataset.nb === 'section') { const pr = $('[data-nb="process"]', e.target.closest('tr')); const p = bomProcessOf(e.target.value); if (p) pr.value = p; }
       if (e.target.dataset.nb === 'cat') {
         const tr = e.target.closest('tr'); const mi = $('[data-nb="mat"]', tr); const mt = matBy(mi.value);
         if (mt && e.target.value.trim() && norm(mt.group) !== norm(e.target.value)) { mi.value = ''; $('[data-nb-code]', tr).textContent = ''; $('[data-nb-uom]', tr).textContent = ''; $('[data-nb="price"]', tr).value = ''; bomRecalc(); }
@@ -1589,6 +1590,32 @@ VIEWS.bom = {
   }
 };
 // the processes and sections already written on earlier BOMs, so the same words keep being used
+/* ---- BOM Sections: every section belongs to one process. Kept as a master (Settings › BOM Sections);
+   this list is the fallback until the master has rows. ---- */
+const BOM_SEC_DEFAULT = [['VAMP', 'CUTTING'], ['LINING', 'CUTTING'], ['FOAM', 'CUTTING'], ['THREAD', 'CLOSING'], ['SOLE', 'PACKING'], ['SIZE LABEL', 'CLOSING'], ['PRINING COLOR', 'CUTTING'], ['UPPER', 'CLOSING'], ['QTR STREP', 'CUTTING'], ['HF/PRINTING', 'CLOSING'], ['UPPER THREAD 1', 'CLOSING'], ['UPPER THREAD 2', 'CLOSING'], ['LINING THREAD', 'CLOSING'], ['TOE R/F', 'CUTTING'], ['COUNTER STIFFNER', 'CUTTING'], ['SOCKS', 'PACKING'], ['LACE', 'PACKING'], ['BOBBIN THREAD', 'CLOSING'], ['STROBEL THREAD', 'PACKING'], ['STROBEL', 'CUTTING'], ['EYESTAY', 'PACKING'], ['TONGUE', 'CLOSING'], ['COLLAR FOAM', 'CUTTING'], ['COMPOUND', 'MOULDING'], ['COUNTER', 'CUTTING'], ['TOP EYELET', 'CUTTING'], ['TONGUE FOAM', 'CUTTING'], ['COLLAR', 'CUTTING'], ['TOE', 'CUTTING'], ['COLLAR LINING', 'CUTTING'], ['COLLER', 'CUTTING'], ['TOUNGE LINING', 'CUTTING'], ['TONGUE LOOP', 'CUTTING'], ['SYNTHETIC', 'CUTTING'], ['FABRIC', 'CUTTING'], ['SILICON', 'CLOSING'], ['JIBBITZ', 'PACKING'], ['FOXING', 'PACKING']];
+function bomSections() {
+  const rows = Store.all('bom_sections').filter(r => r.section).map(r => ({ section: String(r.section).trim().toUpperCase(), process: String(r.process || '').trim().toUpperCase() }));
+  return (rows.length ? rows : BOM_SEC_DEFAULT.map(([section, process]) => ({ section, process }))).sort((a, b) => a.section.localeCompare(b.section));
+}
+function bomProcesses() { return Array.from(new Set(bomSections().map(r => r.process).filter(Boolean))).sort(); }
+function bomProcessOf(section) { const r = bomSections().find(x => x.section === String(section || '').trim().toUpperCase()); return r ? r.process : ''; }
+function bomSel(nb, list, v) {
+  v = String(v || '').trim().toUpperCase(); const os = list.slice(); if (v && !os.includes(v)) os.unshift(v);
+  return '<select data-nb="' + nb + '"><option value="">' + (nb === 'section' ? 'Section…' : 'Process…') + '</option>' + os.map(o => '<option' + (o === v ? ' selected' : '') + '>' + esc(o) + '</option>').join('') + '</select>';
+}
+VIEWS.bomsections = {
+  mod: 'settings', render() {
+    masterView({
+      col: 'bom_sections', mod: 'settings', title: 'BOM Sections', view: VIEWS.bomsections, sort: 'section', paste: true,
+      cols: [{ k: 'section', l: 'Section', upper: true, ph: 'e.g. VAMP' }, { k: 'process', l: 'Process', opts: () => [''].concat(Array.from(new Set(bomProcesses().concat(['CUTTING', 'CLOSING', 'PACKING', 'MOULDING']))).sort()).map(v => ({ v, l: v || '—' })) }],
+      normalize: d => { d.section = String(d.section || '').trim().toUpperCase(); d.process = String(d.process || '').trim().toUpperCase(); },
+      validate: d => !d.section ? 'Section is required.' : !d.process ? 'Pick the process.' : Store.all('bom_sections').some(x => x.id !== d.id && norm(x.section) === norm(d.section)) ? 'Section exists.' : '',
+      inUse: d => Store.all('boms').some(b => (b.lines || []).some(l => norm(l.section) === norm(d.section))) ? 'Section is used in a BOM — rename it instead.' : ''
+    });
+    if (!Store.all('bom_sections').length) $('#main').insertAdjacentHTML('beforeend', '<div class="small muted" style="margin-top:8px">No rows yet — the BOM is using the built-in list of ' + BOM_SEC_DEFAULT.length + ' sections. ' + (can('settings', 'edit') ? '<a data-act="bs-seed">Load it here</a> to edit it.' : '') + '</div>');
+  }
+};
+ACTIONS['bs-seed'] = () => { if (!requirePerm('settings', 'edit')) return; BOM_SEC_DEFAULT.forEach(([section, process]) => Store.put('bom_sections', { id: 'bs_' + section.toLowerCase().replace(/[^a-z0-9]+/g, '_'), section, process })); audit('bom_sections.seed', '', BOM_SEC_DEFAULT.length + ' sections loaded'); VIEWS.bomsections.render(); };
 function bomPickLists() {
   const P = new Set(), S = new Set();
   Store.all('boms').forEach(b => (b.lines || []).forEach(l => { if (l.process) P.add(String(l.process).trim().toUpperCase()); if (l.section) S.add(String(l.section).trim().toUpperCase()); }));
@@ -1603,7 +1630,7 @@ function bomMatList(cat) {
 }
 function bomRow(l) {
   l = l || {}; const m = matBy(l.material) || {};
-  return '<tr data-bline><td class="c" data-sr></td><td><input data-nb="process" list="dlProcB" value="' + esc(l.process || '') + '"></td><td><input data-nb="section" list="dlSecB" value="' + esc(l.section || '') + '"></td><td><input data-nb="cat" list="dlCatJc2" value="' + esc(l.category || m.group || '') + '"></td><td><input data-nb="mat" list="dlMatB" value="' + esc(m.name || '') + '"></td><td class="c muted" data-nb-code>' + esc(l.material || '') + '</td><td class="c muted" data-nb-uom>' + esc(l.uom || '') + '</td>' +
+  return '<tr data-bline><td class="c" data-sr></td><td>' + bomSel('process', bomProcesses(), l.process) + '</td><td>' + bomSel('section', bomSections().map(r => r.section), l.section) + '</td><td><input data-nb="cat" list="dlCatJc2" value="' + esc(l.category || m.group || '') + '"></td><td><input data-nb="mat" list="dlMatB" value="' + esc(m.name || '') + '"></td><td class="c muted" data-nb-code>' + esc(l.material || '') + '</td><td class="c muted" data-nb-uom>' + esc(l.uom || '') + '</td>' +
     '<td><input data-nb="qty" type="number" min="0" step="any" class="right" value="' + esc(l.qty || '') + '"></td><td><input data-nb="price" type="number" class="right" readonly tabindex="-1" value="' + esc(l.material && matBy(l.material) ? (matBy(l.material).price || '') : (l.price || '')) + '"></td><td class="c muted" data-nb-cost>0</td><td>' + vendorSel('data-nb="sup"', l.supplier || '') + '</td><td><input data-nb="rem" value="' + esc(l.remark || '') + '"></td><td class="c"><a data-act="bom-line-del" title="Remove">×</a></td></tr>';
 }
 function bomRecalc() {
