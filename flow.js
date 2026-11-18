@@ -18,7 +18,9 @@ function brandMerchant(brand) { const c = Store.all('customers').find(x => norm(
 function isMyMerchant(name) { if (!ME || !name) return false; const n = norm(name); return norm(ME.doer || '') === n || norm(String(ME.name || '').split(/[\s(]/)[0]) === n; }
 // invoice numbers compare without punctuation/spaces: INV-001, INV001 and INV/001 are the same bill
 const billKey = s => norm(s).replace(/[^a-z0-9]/g, '');
-function sameBill(vendor, billNo, exceptId) { return Store.all('inwards').some(x => x.id !== exceptId && norm(x.vendor) === norm(vendor) && billKey(x.bill_no) === billKey(billNo) && x.inv_status !== 'Rejected'); }
+// an invoice number is entered once, full stop: any vendor, any status (a rejected entry is corrected, not re-entered)
+function sameBill(vendor, billNo, exceptId) { return Store.all('inwards').find(x => x.id !== exceptId && billKey(x.bill_no) === billKey(billNo)) || null; }
+function sameBillMsg(d, billNo) { return billNo + ' is already entered as ' + d.no + ' (' + d.vendor + ', ' + fmtD(d.bill_date || d.date) + (d.inv_status ? ', ' + d.inv_status : '') + ').'; }
 // invoice value of the invoiced lines at PO rates (with GST) — compared with the invoice value entered at the gate
 function pendingInwardOf(poNo) { return Store.all('inwards').find(i => i.status === 'Pending GRN' && norm(i.po_no) === norm(poNo)); }
 // a PO with a gate entry still waiting for GRN cannot take another gate entry
@@ -416,7 +418,7 @@ function inwEditDialog(i, title, okLabel, noteLabel, onSave) {
     const v = { bill_no: g('bill_no'), bill_date: g('bill_date'), remark: g('remark'), note: g('note') };
     const msg = t => { $('#ieMsg', d).textContent = t; };
     if (!v.bill_no) return msg(bt + ' No is required.'); if (!v.bill_date) return msg(bt + ' Date is required.'); if (!v.note) return msg(noteLabel + ' is required.');
-    if (sameBill(i.vendor, v.bill_no, i.id)) return msg(i.vendor + ' already has ' + v.bill_no + '.');
+    const dupe = sameBill(i.vendor, v.bill_no, i.id); if (dupe) return msg(sameBillMsg(dupe, v.bill_no));
     v.qty = num(g('qty')); if (v.qty <= 0) return msg(bt + ' Qty is required.');
     if ((i.lines || []).length) v.lines = [];   // an older item-wise entry becomes a plain one
     const r = onSave(v); if (r) return msg(r);
@@ -443,7 +445,7 @@ ACTIONS['inw-save'] = () => {
   if (!err && !(num(F.qty) > 0)) err = U.bt + ' Qty is required.';
   F.qty = r3(num(F.qty));
   if (err) { $('#niMsg').innerHTML = '<span class="late-txt">' + esc(err) + '</span>'; return; }
-  if (sameBill(U.ven, billNo)) { $('#niMsg').innerHTML = '<span class="late-txt">' + esc(U.ven) + ' already has ' + esc(billNo) + '.</span>'; return; }
+  const dupe = sameBill(U.ven, billNo); if (dupe) { $('#niMsg').innerHTML = '<span class="late-txt">' + esc(sameBillMsg(dupe, billNo)) + '</span>'; return; }
   if (pendingInwardOf(U.po)) { $('#niMsg').innerHTML = '<span class="late-txt">' + esc(U.po) + ' already has a gate entry waiting for GRN.</span>'; return; }
   const p = openPOs().find(x => norm(x.no) === norm(U.po) && norm(x.vendor) === norm(U.ven)); if (!p) { $('#niMsg').innerHTML = '<span class="late-txt">' + esc(U.po) + ' is not an open approved PO of ' + esc(U.ven) + '.</span>'; return; }
   const qcl = [];
