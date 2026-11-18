@@ -1,0 +1,30 @@
+-- 2026-11-18 — why "Sign in again" kept coming back, and what was changed.
+--
+-- Since sql/2026-10-29_read_restriction.sql the audit, mail_queue and wa_log rows in nx_docs can be
+-- read only by admins (policy "nx read"). That was right and stays as it is.
+--
+-- Postgres lets a row be written with INSERT ... ON CONFLICT (an upsert) only where the writer could
+-- also SELECT it, because the conflict check has to see the existing rows. The app wrote every log row
+-- with an upsert, so for everyone who is not an admin the audit row after each action was refused with
+--   42501  new row violates row-level security policy for table "nx_docs"
+-- while the action itself (the material, the task …) saved fine.
+--
+-- The app took 42501 for an expired login, refreshed the token, the next action failed the same way,
+-- and it refreshed again — several times a second (auth.refresh_tokens shows ~30 rotations in 33 s for
+-- one session). Rotating that fast tripped refresh-token reuse detection, which signed the same login
+-- out of its other tabs and the phone: hence the box every minute.
+--
+-- Fix is in the app (build 180), not in the policies:
+--   * audit / mail_queue / wa_log are written with a plain INSERT (no read needed); a duplicate
+--     falls back to UPDATE;
+--   * a row refused by RLS is final — it never triggers a token refresh or a sign-in;
+--   * a refresh that just succeeded is not repeated for the next failure for 60 s.
+--
+-- Consequence to know: audit rows of non-admin users between 29 Oct and build 180 were never
+-- written. They cannot be recovered.
+--
+-- The probe used to prove it (run as the affected user; both results reproduced on 18 Nov):
+--   insert into nx_docs (collection,id,data) values ('audit','probe',...)                 -> OK
+--   insert ... on conflict (collection,id) do nothing                                     -> 42501
+--
+-- No DDL in this file. Kept so the reasoning stays next to the policy that caused it.
