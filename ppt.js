@@ -50,7 +50,7 @@ async function pptLink(path, secs) {
   if (error) { flash('Could not open the PPT: ' + esc(error.message), 'err'); return ''; }
   return data.signedUrl;
 }
-ACTIONS['ppt-open'] = async el => { const u = await pptLink(el.dataset.p); if (u) window.open(u, '_blank', 'noopener'); };
+ACTIONS['ppt-open'] = async el => { const u = await pptLink(el.dataset.p); if (!u) return; if (/\.pdf$/i.test(el.dataset.p)) nxView(u); else window.open(u, '_blank', 'noopener'); };
 function pptSave(brand, article, up) {
   const old = pptAll().find(p => pptKey(p.brand, p.article) === pptKey(brand, article));
   const rec = old || { id: uid(), brand, article: String(article).trim(), versions: [] };

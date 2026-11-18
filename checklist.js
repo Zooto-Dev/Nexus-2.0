@@ -218,7 +218,7 @@ ACTIONS['cl-reopen'] = el => {
     audit('checklist.reopen', t.title, t.doer + ' · ' + el.dataset.d + ' — ' + why); flash('Task is open again for ' + esc(t.doer) + '.'); renderNav(); route();
   }, true);
 };
-ACTIONS['cl-photo'] = el => { const l = Store.get('checklist_log', el.dataset.log); if (!l) return; const w = window.open(''); w.document.write(l.photos.map(p => '<img src="' + p + '" style="max-width:100%;margin:4px">').join('')); };
+ACTIONS['cl-photo'] = el => { const l = Store.get('checklist_log', el.dataset.log); if (l) nxView(l.photos || []); };
 ACTIONS['cl-undo'] = el => {
   const t = Store.get('checklist', el.dataset.id); if (!t) return; const k = clDoneKey(t, el.dataset.d); const dn = clDoneOf(t, el.dataset.d);
   if (!can('tracker', 'edit') && !(dn && dn.by === ME.name)) { flash('Undo needs tracker edit access.', 'err'); return; }

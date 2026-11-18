@@ -149,7 +149,7 @@ VIEWS.itemcreate = {
       if (t.id === 'icType') { IC_UI.type = t.value; IC_UI.vals = {}; IC_UI.dims = {}; IC_UI.extra = {}; IC_UI.run = ''; IC_UI.half = false; icRender(); }
       if (t.id === 'icPhoto') readImg(t.files[0], src => { IC_UI.photo = src; icRender(); });
       if (t.id === 'icHalf') { IC_UI.half = t.checked; icRender(); return; }
-      if (t.dataset.icmp) { const mt = Store.get('materials', t.dataset.icmp); if (mt) readImg(t.files[0], src => { mt.photo = src; Store.put('materials', mt); audit('item.photo', '', mt.code); flash('Photo saved.'); icRender(); }); }
+      if (t.dataset.icmp) { const mt = Store.get('materials', t.dataset.icmp); if (mt) readImg(t.files[0], src => { const sibs = mt.size_key ? Store.all('materials').filter(x => x.size_key === mt.size_key && norm(x.group) === norm(mt.group)) : [mt]; if (!sibs.some(x => x.id === mt.id)) sibs.push(mt); sibs.forEach(x => { x.photo = src; Store.put('materials', x); }); audit('item.photo', '', sibs.map(x => x.code).join(', ')); flash(sibs.length > 1 ? 'Photo saved on all ' + sibs.length + ' sizes.' : 'Photo saved.'); icRender(); }); }
       if (t.dataset.icMulti && t.value) {
         const k = t.dataset.icMulti; const cur = (IC_UI.vals[k] || '').split('/').filter(Boolean);
         const at = catAttrs(IC_UI.cat).find(x => x.name === k); if (!cur.includes(t.value) && cur.length < (at ? atMax(at) : AT_MAX)) cur.push(t.value);
@@ -235,7 +235,7 @@ function icCreateHtml(edit) {
   }
   if (t) {
     const inp = (k, label, def, type) => '<tr><td class="k">' + label + '</td><td><input data-icx="' + k + '"' + (type ? ' type="' + type + '" min="0" step="any"' : '') + ' value="' + esc(X[k] != null ? X[k] : def) + '"></td></tr>';
-    rows += '<tr><td class="k">Photo</td><td>' + attachBox('id="icPhoto" accept="image/*"', IC_UI.photo, 'Attach photo') + (IC_UI.photo ? ' <a class="small" data-act="ic-photo-clear">Remove</a>' : '') + '</td></tr>' +
+    rows += '<tr><td class="k">Photo *</td><td>' + attachBox('id="icPhoto" accept="image/*"', IC_UI.photo, 'Attach photo') + (IC_UI.photo ? ' <a class="small" data-act="ic-photo-clear">Remove</a>' : '') + '</td></tr>' +
       '<tr><td class="k">UOM</td><td><select data-icx="uom">' + UOMS.map(u => '<option' + (u === (X.uom || t.uom || 'PCS') ? ' selected' : '') + '>' + u + '</option>').join('') + '</select></td></tr>' +
       inp('gst', 'GST %', t.gst || '', 'number') + inp('hsn', 'HSN', t.hsn || '') + inp('rack', 'Rack No.', '') + inp('min', 'Min Level', '', 'number');
   }
@@ -259,7 +259,7 @@ function icCreateHtml(edit) {
           : sized && made.length === runs.length ? '<span class="st Late">Every size already exists</span>'
             : sized && made.length ? '<span class="st Pending">' + made.length + ' size(s) already there — ' + (runs.length - made.length) + ' will be made</span>'
               : dup ? '<span class="st Late">Already exists: ' + esc(dup.code) + '</span>' : '<span class="st Done">New item — ready</span>') +
-      '<span class="grow"></span><button class="btn primary" data-act="ic-create"' + (!edit || missing.length || dup || (sized && (!runs.length || made.length === runs.length)) ? ' disabled' : '') + '>' +
+      '<span class="grow"></span><button class="btn primary" data-act="ic-create"' + (!edit || missing.length || dup || !IC_UI.photo || (sized && (!runs.length || made.length === runs.length)) ? ' disabled' : '') + '>' +
       (sized ? 'Create ' + (runs.length - made.length || '') + ' Item' + (runs.length - made.length === 1 ? '' : 's') : 'Create Item') + '</button></div>';
   }
   right += '</div>';
@@ -298,6 +298,7 @@ ACTIONS['ic-create'] = () => {
   const attrs = sizedAttrs(t, activeAttrs(t, IC_UI.vals)); const vals = {};
   attrs.forEach(a => { vals[a.name] = IC_UI.vals[a.name] || ''; });
   if (attrs.some(a => !vals[a.name])) { flash('Select every attribute first.', 'err'); return; }
+  if (!IC_UI.photo) { flash('Attach the item photo first — no item is created without one.', 'err'); return; }
   const sized = sizedType(t);
   const runs = sized ? sizeRunList(IC_UI.run, IC_UI.half) : [''];
   if (sized && !runs.length) { flash('Type the size run first, e.g. 6-10.', 'err'); return; }

@@ -27,7 +27,20 @@ function readImg(file, cb) {
 }
 function imgField(id, label, req) { return '<label>' + label + (req ? ' *' : '') + '<input type="file" id="' + id + '" accept="image/*"></label>'; }
 function photoThumb(src) { return src ? '<a data-act="img-view" data-src="' + esc(src) + '"><img src="' + esc(src) + '" style="height:26px;border-radius:3px;vertical-align:middle"></a>' : ''; }
-ACTIONS['img-view'] = el => { const w = window.open(''); w.document.write('<img src="' + el.dataset.src + '" style="max-width:100%">'); };
+// In-page viewer for photos and PDFs: a dark overlay over the screen you are on, closed by the ×, Esc or a
+// click outside. Takes one source or a list; a PDF (data URI or a signed link) shows in a frame.
+function nxView(srcs) {
+  const list = (Array.isArray(srcs) ? srcs : [srcs]).filter(Boolean); if (!list.length) return;
+  const old = $('#nxLb'); if (old) old.remove();
+  const d = document.createElement('div'); d.id = 'nxLb'; d.className = 'nxlb'; d.tabIndex = -1;
+  const isPdf = s => /^data:application\/pdf|\.pdf(\?|$)/i.test(s);
+  d.innerHTML = '<button class="nxlb-x" data-lb="x" aria-label="Close">×</button><div class="nxlb-body">' +
+    list.map(s => isPdf(s) ? '<iframe class="nxlb-pdf" src="' + esc(s) + '"></iframe>' : '<img class="nxlb-img" src="' + esc(s) + '">').join('') + '</div>';
+  d.addEventListener('click', ev => { if (ev.target === d || ev.target.dataset.lb === 'x') d.remove(); });
+  d.addEventListener('keydown', ev => { if (ev.key === 'Escape') d.remove(); });
+  document.body.appendChild(d); d.focus();
+}
+ACTIONS['img-view'] = el => nxView(el.dataset.src);
 function dlMat(id) { return '<datalist id="' + id + '">' + Store.all('materials').map(m => '<option value="' + esc(m.code) + '">' + esc(m.name + ' · ' + m.uom) + '</option>').join('') + '</datalist>'; }
 function vendorNames() { return Store.all('vendors').map(v => v.name).sort(); }
 function vendorBy(name) { return Store.all('vendors').find(v => norm(v.name) === norm(name)); }

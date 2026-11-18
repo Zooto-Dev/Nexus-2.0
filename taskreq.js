@@ -63,7 +63,7 @@ async function taskFileOpen(path) {
   if (!CLOUD || !SB) { flash('Files open in cloud mode.', 'err'); return; }
   const { data, error } = await SB.storage.from('task-files').createSignedUrl(path, 180);
   if (error) { flash('Could not open the file: ' + esc(error.message), 'err'); return; }
-  window.open(data.signedUrl, '_blank', 'noopener');
+  if (/\.(jpe?g|png|gif|webp|pdf)$/i.test(path)) nxView(data.signedUrl); else window.open(data.signedUrl, '_blank', 'noopener');
 }
 ACTIONS['nd-file'] = el => taskFileOpen(el.dataset.p);
 // what was attached, as links (pictures in a new tab, files through a signed link)
@@ -73,7 +73,7 @@ function proofHtml(p) {
   const fls = (p.files || []).map(f => '<a data-act="nd-file" data-p="' + esc(f.path) + '">📎 ' + esc(f.name) + '</a>').join(' ');
   return imgs + fls;
 }
-ACTIONS['nd-imgs'] = el => { const p = Store.get('task_proof', el.dataset.id) || Store.get('checklist_log', el.dataset.id); if (!p) return; const w = window.open(''); if (w) w.document.write((p.photos || []).map(x => '<img src="' + x + '" style="max-width:100%;margin:4px">').join('')); };
+ACTIONS['nd-imgs'] = el => { const p = Store.get('task_proof', el.dataset.id) || Store.get('checklist_log', el.dataset.id); if (p) nxView(p.photos || []); };
 
 /* ---------- set the requirements on a task that already exists ---------- */
 function needEditDialog(title, need, onOk) {

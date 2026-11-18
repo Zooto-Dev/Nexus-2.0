@@ -339,7 +339,7 @@ async function waiSeen(wa) {
   try { await SB.from('nx_wa_msgs').update({ seen: true }).eq('wa', wa).eq('dir', 'in').eq('seen', false); } catch (e) { }
 }
 ACTIONS['wai-open'] = el => { WAI.sel = el.dataset.wa; WAI.pick = null; VIEWS.wainbox.render(); };
-ACTIONS['wai-img'] = el => { const w = window.open(''); if (w) { w.document.write('<body style="margin:0;background:#111;display:flex;align-items:center;justify-content:center;min-height:100vh"><img src="' + el.dataset.src + '" style="max-width:100%;max-height:100vh"></body>'); } };
+ACTIONS['wai-img'] = el => nxView(el.dataset.src);
 // talk to the server function; returns an error text or ''
 async function waiCall(body) {
   try {

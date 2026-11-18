@@ -11,7 +11,7 @@ function readDoc(file, cb) {
   const fr = new FileReader(); fr.onload = () => cb(fr.result); fr.readAsDataURL(file);
 }
 function docThumb(src) { return !src ? '' : /^data:application\/pdf/.test(src) ? '<a data-act="doc-view" data-src="' + esc(src) + '">PDF</a>' : photoThumb(src); }
-ACTIONS['doc-view'] = el => { const w = window.open(''); w.document.write('<iframe src="' + el.dataset.src + '" style="border:0;width:100%;height:100vh"></iframe>'); w.document.close(); };
+ACTIONS['doc-view'] = el => nxView(el.dataset.src);
 function qcCats() { const s = settings(); return Array.isArray(s.qc_categories) ? s.qc_categories : ['Silicon', 'Fabric', 'Synthetic']; }
 function isQcCat(cat) { return qcCats().some(c => norm(c) === norm(cat)); }
 function brandMerchant(brand) { const c = Store.all('customers').find(x => norm(x.name) === norm(brand)); return c ? String(c.merchandiser || '').trim() : ''; }
