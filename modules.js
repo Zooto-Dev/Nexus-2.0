@@ -1480,7 +1480,7 @@ VIEWS.bom = {
       if (!has) pend.push({ key, brand: o.customer_name, article: l.article, style: l.style || '', colour: l.colour || '', gender: l.gender || '', category: o.category || '', run: l.size_run || l.size || '', mould: o.tooling_no || '' });
     }));
     const pendBrands = Array.from(new Set(pend.map(p => p.brand)));
-    let h = subTitle('Development BOM') + '<div class="card"><div class="card-b">' + dlMat('dlMatB') + dlVendor() +
+    let h = subTitle('Development BOM') + '<div class="card"><div class="card-b">' + dlMat('dlMatB') + dlVendor() + bomPickLists() +
       '<datalist id="dlCatJc2">' + itemCats().map(x => '<option>' + x + '</option>').join('') + '</datalist><datalist id="dlCatB">' + fieldOptions('category').map(x => '<option value="' + esc(x) + '">').join('') + '</datalist>' +
       '<div class="jcdoc"><div class="jcban">BILL OF MATERIALS</div><div class="jcmid">' +
       '<div class="jcl"><table class="jckv">' +
@@ -1506,7 +1506,22 @@ VIEWS.bom = {
     const m = $('#main'); window.NBF = { photo: '' };
     m.addEventListener('input', e => { if (e.target.closest('#nbTable')) bomRecalc(); });
     m.addEventListener('change', e => {
-      if (e.target.dataset.nb === 'mat') { const mt = Store.all('materials').find(x => norm(x.name) === norm(e.target.value) || norm(x.code) === norm(e.target.value)); const tr = e.target.closest('tr'); if (mt) { e.target.value = mt.name; $('[data-nb-code]', tr).textContent = mt.code; $('[data-nb-uom]', tr).textContent = mt.uom; const pr = $('[data-nb="price"]', tr); pr.value = mt.price || ''; const c = $('[data-nb="cat"]', tr); if (!c.value) c.value = mt.group || ''; } bomRecalc(); }
+      if (e.target.dataset.nb === 'mat') {
+        const mt = Store.all('materials').find(x => norm(x.name) === norm(e.target.value) || norm(x.code) === norm(e.target.value)); const tr = e.target.closest('tr');
+        const c = $('[data-nb="cat"]', tr);
+        // an item from another category does not go on this row
+        if (mt && c.value.trim() && norm(mt.group) !== norm(c.value)) {
+          flash(esc(mt.name) + ' is a ' + esc(mt.group) + ' item — this row is ' + esc(c.value.trim()) + '. Change the category or pick a ' + esc(c.value.trim()) + ' item.', 'err');
+          e.target.value = ''; $('[data-nb-code]', tr).textContent = ''; $('[data-nb-uom]', tr).textContent = ''; $('[data-nb="price"]', tr).value = ''; bomRecalc(); return;
+        }
+        if (mt) { e.target.value = mt.name; $('[data-nb-code]', tr).textContent = mt.code; $('[data-nb-uom]', tr).textContent = mt.uom; const pr = $('[data-nb="price"]', tr); pr.value = mt.price || ''; if (!c.value) c.value = mt.group || ''; }
+        bomRecalc();
+      }
+      // the category changed under an item of another category: the item goes, the row stays
+      if (e.target.dataset.nb === 'cat') {
+        const tr = e.target.closest('tr'); const mi = $('[data-nb="mat"]', tr); const mt = matBy(mi.value);
+        if (mt && e.target.value.trim() && norm(mt.group) !== norm(e.target.value)) { mi.value = ''; $('[data-nb-code]', tr).textContent = ''; $('[data-nb-uom]', tr).textContent = ''; $('[data-nb="price"]', tr).value = ''; bomRecalc(); }
+      }
       if (e.target.id === 'nbPhoto') readImg(e.target.files[0], src => { NBF.photo = src; $('#nbPhotoTag').innerHTML = '<img src="' + src + '">'; });
       if (e.target.id === 'nbCopy' && e.target.value) { const src = Store.get('boms', e.target.value); $$('#nbTable tr[data-bline]').forEach(tr => tr.remove()); src.lines.forEach(l => $('#nbTable').insertAdjacentHTML('beforeend', bomRow(l))); bomRecalc(); }
       if (e.target.id === 'nbBrand') {
@@ -1521,15 +1536,30 @@ VIEWS.bom = {
         if (p) { $('#nbStyle').value = p.style; $('#nbCol').value = p.colour; $('#nbGen').value = p.gender; $('#nbCat').value = p.category; $('#nbRun').value = p.run; $('#nbMould').value = p.mould; }
       }
     });
+    // while an item is being picked, its list holds only that row's category
+    m.addEventListener('focusin', e => { if (e.target.dataset && e.target.dataset.nb === 'mat') bomMatList(($('[data-nb="cat"]', e.target.closest('tr')) || {}).value || ''); });
     m.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); ACTIONS['bom-save'](); } });
     excelGrid($('#nbTable'), { rowSel: 'tr[data-bline]', addRow: () => $('#nbTable').insertAdjacentHTML('beforeend', bomRow()), importText: bomImportText });
     bomRecalc();
     $('#nbBrand').focus();
   }
 };
+// the processes and sections already written on earlier BOMs, so the same words keep being used
+function bomPickLists() {
+  const P = new Set(), S = new Set();
+  Store.all('boms').forEach(b => (b.lines || []).forEach(l => { if (l.process) P.add(String(l.process).trim().toUpperCase()); if (l.section) S.add(String(l.section).trim().toUpperCase()); }));
+  const opts = set => Array.from(set).sort().map(v => '<option>' + esc(v) + '</option>').join('');
+  return '<datalist id="dlProcB">' + opts(P) + '</datalist><datalist id="dlSecB">' + opts(S) + '</datalist>';
+}
+// the item list of one row shows only the items of that row's category
+function bomMatList(cat) {
+  const dl = $('#dlMatB'); if (!dl) return;
+  const list = Store.all('materials').filter(m => !cat || norm(m.group) === norm(cat));
+  dl.innerHTML = list.map(m => '<option value="' + esc(m.code) + '">' + esc(m.name + ' · ' + m.uom) + '</option>').join('');
+}
 function bomRow(l) {
   l = l || {}; const m = matBy(l.material) || {};
-  return '<tr data-bline><td class="c" data-sr></td><td><input data-nb="process" value="' + esc(l.process || '') + '"></td><td><input data-nb="section" value="' + esc(l.section || '') + '"></td><td><input data-nb="cat" list="dlCatJc2" value="' + esc(l.category || m.group || '') + '"></td><td><input data-nb="mat" list="dlMatB" value="' + esc(m.name || '') + '"></td><td class="c muted" data-nb-code>' + esc(l.material || '') + '</td><td class="c muted" data-nb-uom>' + esc(l.uom || '') + '</td>' +
+  return '<tr data-bline><td class="c" data-sr></td><td><input data-nb="process" list="dlProcB" value="' + esc(l.process || '') + '"></td><td><input data-nb="section" list="dlSecB" value="' + esc(l.section || '') + '"></td><td><input data-nb="cat" list="dlCatJc2" value="' + esc(l.category || m.group || '') + '"></td><td><input data-nb="mat" list="dlMatB" value="' + esc(m.name || '') + '"></td><td class="c muted" data-nb-code>' + esc(l.material || '') + '</td><td class="c muted" data-nb-uom>' + esc(l.uom || '') + '</td>' +
     '<td><input data-nb="qty" type="number" min="0" step="any" class="right" value="' + esc(l.qty || '') + '"></td><td><input data-nb="price" type="number" class="right" readonly tabindex="-1" value="' + esc(l.material && matBy(l.material) ? (matBy(l.material).price || '') : (l.price || '')) + '"></td><td class="c muted" data-nb-cost>0</td><td>' + vendorSel('data-nb="sup"', l.supplier || '') + '</td><td><input data-nb="rem" value="' + esc(l.remark || '') + '"></td><td class="c"><a data-act="bom-line-del" title="Remove">×</a></td></tr>';
 }
 function bomRecalc() {
@@ -1578,6 +1608,14 @@ ACTIONS['bom-save'] = () => {
     return m ? { process: $('[data-nb="process"]', tr).value.trim(), section: $('[data-nb="section"]', tr).value.trim(), category: $('[data-nb="cat"]', tr).value.trim() || m.group || '', material: m.code, uom: m.uom, qty: num($('[data-nb="qty"]', tr).value), price: num(m.price), supplier: $('[data-nb="sup"]', tr).value.trim(), remark: $('[data-nb="rem"]', tr).value.trim() } : null;
   }).filter(l => l && l.qty > 0);
   if (!brand || !art || !lines.length) { $('#nbMsg').innerHTML = '<span class="late-txt">Brand, Article and at least one item line (Norms > 0) are required.</span>'; return; }
+  const bad = m2 => { $('#nbMsg').innerHTML = '<span class="late-txt">' + m2 + '</span>'; };
+  if (!((window.NBF || {}).photo)) return bad('Add the product photo — a BOM is not saved without it.');
+  const noProc = lines.map((l, i) => !l.process ? i + 1 : 0).filter(Boolean);
+  if (noProc.length) return bad('Process is required on every line — row ' + noProc.join(', ') + '.');
+  const noSec = lines.map((l, i) => !l.section ? i + 1 : 0).filter(Boolean);
+  if (noSec.length) return bad('Section is required on every line — row ' + noSec.join(', ') + '.');
+  const offCat = lines.filter(l => { const m = matBy(l.material); return m && l.category && norm(m.group) !== norm(l.category); });
+  if (offCat.length) return bad('Item not in its row\'s category: ' + esc(offCat.map(l => (matBy(l.material) || {}).name + ' (' + l.category + ')').join(', ')) + '.');
   const badSup = badSuppliers(lines); if (badSup.length) { $('#nbMsg').innerHTML = '<span class="late-txt">Supplier not in Vendors master: ' + esc(badSup.join(', ')) + ' — select a vendor from the list.</span>'; return; }
   const dupKey = lines.map(l => norm(l.section + '|' + l.material)).filter((x, i, a2) => a2.indexOf(x) !== i);
   if (dupKey.length) { $('#nbMsg').innerHTML = '<span class="late-txt">Duplicate Section + Item — remove it.</span>'; return; }
