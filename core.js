@@ -846,6 +846,42 @@ ACTIONS['menu'] = el => { const m = el.parentElement; const was = m.classList.co
 document.addEventListener('click', ev => { if (!ev.target.closest('.menu')) $$('#nav .menu.open').forEach(x => x.classList.remove('open')); }, true);
 ACTIONS['go'] = el => go(el.dataset.v, el.dataset.p);
 ACTIONS['undo-step'] = el => undoStep(el.dataset.o, el.dataset.s);
+function whoPaint(u, r) {
+  const ini = String(u.name || '?').trim().split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase();
+  const who = $('#who'); if (who) who.innerHTML = '<span class="avatar">' + esc(ini) + '</span><span class="uname">' + esc(u.name) + '</span>';
+  const h = $('#umenuWho'); if (h) h.innerHTML = '<b>' + esc(u.name) + '</b><div class="muted small">' + esc(r ? r.name : '') + (u.doer ? ' · ' + esc(u.doer) : '') + (u.email ? '<br>' + esc(u.email) : '') + '</div>';
+}
+ACTIONS['nx-user'] = () => { const m = $('#umenu'); if (m) m.classList.toggle('hidden'); };
+document.addEventListener('click', ev => { const m = $('#umenu'); if (m && !m.classList.contains('hidden') && !ev.target.closest('.umenu-wrap')) m.classList.add('hidden'); });
+// change my own password: the current one is checked first, then the new one is set on the login
+ACTIONS['nx-pass'] = () => {
+  const m = $('#umenu'); if (m) m.classList.add('hidden');
+  const old = $('#pwDlg'); if (old) old.remove();
+  const d = document.createElement('div'); d.id = 'pwDlg'; d.className = 'dlg-back';
+  d.innerHTML = '<div class="dlg"><div class="dlg-h">Change password</div><table class="jckv">' +
+    '<tr><td class="k">Current password</td><td class="v"><input id="pwCur" type="password" autocomplete="current-password"></td></tr>' +
+    '<tr><td class="k">New password</td><td class="v"><input id="pwNew" type="password" autocomplete="new-password" minlength="6"></td></tr>' +
+    '<tr><td class="k">Repeat new password</td><td class="v"><input id="pwNew2" type="password" autocomplete="new-password"></td></tr></table>' +
+    '<div class="small muted" style="margin-top:6px">At least 6 characters. You stay signed in here; other devices keep working until they sign out.</div>' +
+    '<div class="dlg-f"><span id="pwMsg" class="small late-txt"></span><span class="grow"></span><button class="btn" data-pw-cancel>Cancel</button><button class="btn primary" data-pw-ok>Change password</button></div></div>';
+  document.body.appendChild(d); $('#pwCur', d).focus();
+  d.addEventListener('keydown', ev => { if (ev.key === 'Escape') d.remove(); if (ev.key === 'Enter') $('[data-pw-ok]', d).click(); });
+  d.addEventListener('click', async ev => {
+    if (ev.target.closest('[data-pw-cancel]')) { d.remove(); return; }
+    if (!ev.target.closest('[data-pw-ok]')) return;
+    const cur = $('#pwCur', d).value, nw = $('#pwNew', d).value, nw2 = $('#pwNew2', d).value; const msg = t => { $('#pwMsg', d).textContent = t; };
+    if (!cur) return msg('Type the current password.'); if (nw.length < 6) return msg('The new password needs at least 6 characters.'); if (nw !== nw2) return msg('The two new passwords differ.'); if (nw === cur) return msg('That is the current password.');
+    const btn = $('[data-pw-ok]', d); btn.disabled = true;
+    try {
+      if (CLOUD && !DEMO) {
+        const { error: e1 } = await SB.auth.signInWithPassword({ email: norm(ME.email), password: cur }); if (e1) throw new Error('The current password is wrong.');
+        const { error: e2 } = await SB.auth.updateUser({ password: nw }); if (e2) throw new Error(e2.message);
+      } else { if (String(ME.pin || '') !== cur) throw new Error('The current password is wrong.'); }
+      const u = Store.get('users', ME.id); if (u) { u.pin = CLOUD && !DEMO ? '' : nw; u.pw_changed_at = nowIso(); Store.put('users', u); }   // the cloud keeps the password; the admin screen shows it is set by the user
+      audit('user.password', ME.name, 'changed own password'); flash('Password changed.'); d.remove();
+    } catch (e) { msg(e.message || String(e)); btn.disabled = false; }
+  });
+};
 ACTIONS['logout'] = async () => { localStorage.removeItem(ME_KEY); if (SB && !DEMO) await SB.auth.signOut({ scope: 'local' }); location.reload(); };   // this device only, other devices stay signed in
 document.addEventListener('keydown', ev => {
   const typing = /INPUT|TEXTAREA|SELECT/.test((document.activeElement || {}).tagName || '');
@@ -916,7 +952,7 @@ function startApp(u) {
   ME = u; localStorage.setItem(ME_KEY, u.id);
   $('#login').classList.add('hidden'); $('#app').classList.remove('hidden');
   const r = myRole();
-  $('#who').innerHTML = esc(u.name) + ' <span class="muted">· ' + esc(r ? r.name : '') + (u.doer ? ' · ' + esc(u.doer) : '') + '</span>';
+  whoPaint(u, r);
   migrateDb();
   syncBadge(); sbxBar(); if (!location.hash) go(can('tasks', 'view') && !can('dashboard', 'view') ? 'tasks' : 'home'); route();
   setInterval(() => { RES_CACHE.clear(); const a = document.activeElement; if (!a || !/INPUT|TEXTAREA|SELECT/.test(a.tagName)) { renderNav(); if (['home', 'tasks', 'tracker'].includes(curView().v)) route(); } }, 60000);
@@ -941,7 +977,7 @@ function sandboxGuard(sb) {
 function sbxViewAs(id) {
   const u = id ? Store.get('users', id) : SBX_REAL; if (!u) return;
   ME = u; const r = myRole();
-  $('#who').innerHTML = esc(u.name) + ' <span class="muted">· ' + esc(r ? r.name : '') + (u.doer ? ' · ' + esc(u.doer) : '') + '</span>';
+  whoPaint(u, r);
   RES_CACHE.clear(); if (typeof HT_UI !== 'undefined') HT_UI.who = ''; go('home'); route(); sbxBar();
 }
 function sbxBar() {

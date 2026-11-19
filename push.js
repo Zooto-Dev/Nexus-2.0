@@ -95,9 +95,8 @@ async function bellPaint() {
   const b = document.getElementById('bellBtn'); if (!b) return;
   const st = await pushState();
   b.dataset.st = st;
-  b.textContent = st === 'on' ? 'Notifications: on' : st === 'blocked' ? 'Notifications: blocked' : st === 'na' ? '' : 'Notifications: off';
+  b.title = st === 'on' ? 'Notifications are on — tap to turn off' : st === 'blocked' ? 'Notifications are blocked in the browser settings' : 'Notifications are off — tap to turn on';
   b.classList.toggle('hidden', st === 'na');
-  b.classList.toggle('primary', st === 'off');
 }
 if (typeof ACTIONS === 'object') ACTIONS['nx-bell'] = async el => {
   const st = el.dataset.st;

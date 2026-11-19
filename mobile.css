@@ -56,3 +56,7 @@ body.mb .tbl-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; max-wid
 body.mb .card, body.mb .mb-note { max-width: 100%; box-sizing: border-box; }
 /* every button in a card should look like a button, ghost ones included */
 body.mb .mb-a .btn.ghost { border: 1px solid var(--line, #d7dcda); background: #fff; }
+
+body.mb #top .icobtn, body.mb #top .userchip { height: 32px; }
+body.mb .userchip .uname { display: none; }
+body.mb .umenu { top: 38px; }

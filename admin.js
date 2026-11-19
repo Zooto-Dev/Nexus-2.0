@@ -175,7 +175,7 @@ VIEWS.users = {
   mod: 'users', render() {
     const edit = can('users', 'edit'); const q = norm(US_UI.q);
     const rows = Store.all('users').filter(u => !q || norm([u.name, u.doer, u.email, u.department, u.designation, u.mobile, roleName(u.role_id)].join(' ')).includes(q)).sort((a, b) => String(a.name).localeCompare(String(b.name)));
-    const pw = u => { const p = usPwd(u); if (!p) return '<span class="muted">—</span>'; return '<span class="mono" data-pw="' + esc(u.id) + '">••••••</span> <button class="btn ghost sm" data-act="us-eye" data-id="' + esc(u.id) + '" title="Show / hide">👁</button>'; };
+    const pw = u => { const p = usPwd(u); if (!p) return u.pw_changed_at ? '<span class="muted small" title="Changed by the user on ' + esc(fmtD(u.pw_changed_at)) + '">set by user</span>' : '<span class="muted">—</span>'; return '<span class="mono" data-pw="' + esc(u.id) + '">••••••</span> <button class="btn ghost sm" data-act="us-eye" data-id="' + esc(u.id) + '" title="Show / hide">👁</button>'; };
     let h = '<div class="toolbar"><input id="usQ" placeholder="Search…" value="' + esc(US_UI.q) + '"><span class="muted small">' + rows.length + ' user(s)</span><span class="grow"></span>' +
       (edit && CLOUD ? '<button class="btn" data-act="us-sync">Create logins</button>' : '') + (edit ? '<button class="btn primary" data-act="us-new">+ New user</button>' : '') + '</div>';
     h += '<div class="tbl-wrap"><table class="bomflat"><tr><th>Name</th><th>Doer name (FMS)</th><th>Email (login)</th><th>Department</th><th>Designation</th><th>Role</th><th>Password</th><th>Mobile</th><th>Status</th><th></th></tr>' +
