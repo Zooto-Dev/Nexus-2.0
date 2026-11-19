@@ -1,6 +1,6 @@
 // Nexus 2.0 ↔ Nexus_Payroll bridge: who is present today (for EA → MOM / Meetings attendees).
 // Reads only today's attendance names from the payroll project; nothing else is exposed.
-// Secrets (Supabase → Edge Functions → Secrets): PAYROLL_KEY (publishable / anon key of the Nexus_Payroll project).
+// Secrets (Supabase → Edge Functions → Secrets): PAYROLL_KEY — a key of the Nexus_Payroll project. Actions: present (EA), hierarchy (admin).
 import { createClient } from 'npm:@supabase/supabase-js@2';
 
 const cors = {
@@ -44,9 +44,43 @@ Deno.serve(async (req) => {
     const eaLevel = lv((acc.user || {})[meUser.id]) || lv((acc.desig || {})[(meUser.department || '') + '|' + (meUser.designation || '')]) || lv((acc.dept || {})[meUser.department || '']) || lv(acc.role_user) || 'none';
     if (!isAdmin && eaLevel !== 'edit') return out({ error: 'Only Admin or a user with EA edit access can see who is present' }, 403);
 
-    if (b.action !== 'present') return out({ error: 'Unknown action' }, 400);
     const key = Deno.env.get('PAYROLL_KEY') || '';
     if (!key) return out({ error: 'Payroll link is not set up (PAYROLL_KEY secret missing)' }, 400);
+
+    // who reports to whom: only the employee code, name, department, designation and the manager's code
+    // come across — nothing from salary, documents or attendance. Admin only.
+    if (b.action === 'hierarchy') {
+      if (!isAdmin) return out({ error: 'Only Admin can read the team hierarchy' }, 403);
+      const hr = createClient(PAYROLL_URL, key, { auth: { persistSession: false } });
+      const emps: Doc[] = []; const profs: Doc[] = [];
+      for (let from = 0; ; from += 1000) {
+        const { data, error } = await hr.from('employees').select('"Employee code", Name, Status, DEPARTMENT, DESIGNATION').range(from, from + 999);
+        if (error) return out({ error: 'Payroll database: ' + error.message }, 500);
+        emps.push(...(data || [])); if (!data || data.length < 1000) break;
+      }
+      for (let from = 0; ; from += 1000) {
+        const { data, error } = await hr.from('hr_profiles').select('employee_code, reporting_manager').range(from, from + 999);
+        if (error) return out({ error: 'Payroll database: ' + error.message }, 500);
+        profs.push(...(data || [])); if (!data || data.length < 1000) break;
+      }
+      const byCode: Record<string, Doc> = {}; const byName: Record<string, string[]> = {};
+      emps.forEach((e) => { const c = String(e['Employee code'] || '').trim().toUpperCase(); if (!c) return; byCode[c] = e; const n = String(e.Name || '').trim().toUpperCase().replace(/\s+/g, ' '); if (n) (byName[n] = byName[n] || []).push(c); });
+      const mgrOf: Record<string, string> = {}; profs.forEach((p) => { mgrOf[String(p.employee_code || '').trim().toUpperCase()] = String(p.reporting_manager || '').trim(); });
+      // "NAME (ZM01234)" → the code; a bare name → the one active employee with that name, else unresolved
+      const resolve = (raw: string): { code: string; how: string } => {
+        if (!raw) return { code: '', how: '' };
+        const m = raw.match(/\(([A-Z]{2}\d{3,6})\)/i); if (m && byCode[m[1].toUpperCase()]) return { code: m[1].toUpperCase(), how: 'code' };
+        const n = raw.replace(/\(.*?\)/g, '').trim().toUpperCase().replace(/\s+/g, ' ');
+        const hits = (byName[n] || []).filter((c) => /active/i.test(String(byCode[c].Status || '')));
+        if (hits.length === 1) return { code: hits[0], how: 'name' };
+        return { code: '', how: hits.length ? 'ambiguous' : 'unknown' };
+      };
+      const list = Object.keys(byCode).map((c) => { const e = byCode[c]; const raw = mgrOf[c] || ''; const r = resolve(raw); return { code: c, name: String(e.Name || '').trim(), dept: String(e.DEPARTMENT || ''), desig: String(e.DESIGNATION || ''), active: /active/i.test(String(e.Status || '')), mgr_raw: raw, mgr_code: r.code, mgr_how: r.how }; })
+        .sort((x, y) => x.name.localeCompare(y.name));
+      return out({ ok: true, count: list.length, list });
+    }
+
+    if (b.action !== 'present') return out({ error: 'Unknown action' }, 400);
     // the date as seen in India, unless one is given
     const day = /^\d{4}-\d{2}-\d{2}$/.test(String(b.date || '')) ? String(b.date) : new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
     const hr = createClient(PAYROLL_URL, key, { auth: { persistSession: false } });
