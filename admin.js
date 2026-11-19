@@ -463,8 +463,9 @@ function uniqueDoer(name, selfId, current) {
 }
 const doerDupOf = u => u.doer ? Store.all('users').filter(x => x.id !== u.id && x.doer && norm(x.doer) === norm(u.doer)) : [];
 
-/* ---- Team Hierarchy: who reports to whom, pulled from Nexus_Payroll (codes and names only) and kept
-   in org_chart. Nothing is saved until the admin has seen the list and pressed Save. ---- */
+/* ---- Team Hierarchy: who reports to whom among the STAFF, pulled from Nexus_Payroll (codes and names
+   only) and kept in org_chart. Shown as teams: a manager, then the people under them, nested. Nothing is
+   saved until the admin has seen the list and pressed Save. ---- */
 const OH_UI = { list: null, msg: '', at: 0, q: '' };
 function ohNexusUser(code) { const c = norm(code); return c ? Store.all('users').find(u => norm(u.emp_code || '') === c) || null : null; }
 async function ohPull() {
@@ -473,31 +474,37 @@ async function ohPull() {
     const { data, error } = await SB.functions.invoke('nx-hr', { body: { action: 'hierarchy' } });
     let msg = data && data.error; if (error) { msg = error.message; try { const j = await error.context.json(); msg = j.error || msg; } catch (e) { } }
     if (msg) { OH_UI.msg = msg; OH_UI.list = null; }
-    else { OH_UI.list = (data.list || []).filter(x => x.active); OH_UI.at = Date.now(); OH_UI.msg = ''; }
+    else { OH_UI.list = (data.list || []).filter(x => x.active && x.category === 'STAFF'); OH_UI.at = Date.now(); OH_UI.msg = ''; }
   } catch (e) { OH_UI.msg = e.message; OH_UI.list = null; }
   VIEWS.orgchart.render();
 }
+// my team = everyone whose manager chain reaches me (staff only)
+function ohTeamOf(code, all) { const out = []; const walk = c => (all || Store.all('org_chart')).filter(x => x.mgr_code === c).forEach(x => { if (!out.includes(x.code)) { out.push(x.code); walk(x.code); } }); walk(norm(code).toUpperCase()); return out; }
 VIEWS.orgchart = {
   mod: 'settings', render() {
-    const admin = isAdminRole(); const saved = Store.all('org_chart'); const list = OH_UI.list;
-    const byCode = {}; (list || saved).forEach(x => { byCode[x.code] = x; });
-    const nameOf = c => (byCode[c] || {}).name || c;
+    const admin = isAdminRole(); const saved = Store.all('org_chart'); const list = OH_UI.list; const all = list || saved;
+    const byCode = {}; all.forEach(x => { byCode[x.code] = x; });
     const q = norm(OH_UI.q);
-    const rows = (list || saved).filter(x => !q || norm(x.name + ' ' + x.code + ' ' + x.dept + ' ' + (x.mgr_raw || '') + ' ' + nameOf(x.mgr_code)).includes(q)).sort((a, b) => (nameOf(a.mgr_code) || 'zzz').localeCompare(nameOf(b.mgr_code) || 'zzz') || a.name.localeCompare(b.name));
-    const unresolved = (list || saved).filter(x => x.mgr_raw && !x.mgr_code);
-    const managers = new Set((list || saved).map(x => x.mgr_code).filter(Boolean));
+    const unresolved = all.filter(x => x.mgr_raw && !x.mgr_code);
+    const kids = c => all.filter(x => x.mgr_code === c).sort((a, b) => a.name.localeCompare(b.name));
+    // a root is a person whose manager is not among the staff (the top, or a manager outside the list)
+    const roots = all.filter(x => !x.mgr_code || !byCode[x.mgr_code]).sort((a, b) => kids(b.code).length - kids(a.code).length || a.name.localeCompare(b.name));
+    const hit = x => !q || norm(x.name + ' ' + x.code + ' ' + (x.dept || '') + ' ' + (x.desig || '')).includes(q);
+    const person = (x, depth) => { const u = ohNexusUser(x.code); const team = ohTeamOf(x.code, all).length;
+      return '<tr class="' + (depth ? '' : 'bomfirst') + '"><td style="padding-left:' + (10 + depth * 26) + 'px">' + (depth ? '<span class="muted">↳ </span>' : '') + '<b>' + esc(x.name) + '</b>' + (team ? ' <span class="cnt">' + team + '</span>' : '') + '</td><td class="mono">' + esc(x.code) + '</td><td>' + esc(x.dept || '') + '</td><td>' + esc(x.desig || '') + '</td><td>' + (x.mgr_code ? esc((byCode[x.mgr_code] || {}).name || x.mgr_code) : x.mgr_raw ? '<span class="late-txt" title="' + esc(x.mgr_raw) + '">' + esc(x.mgr_raw) + ' ?</span>' : '<span class="muted">—</span>') + '</td><td>' + (u ? esc(u.name) : '<span class="muted">no login</span>') + '</td></tr>'; };
+    const tree = (x, depth, seen) => { if (seen.has(x.code)) return ''; seen.add(x.code); const sub = kids(x.code); const mine = hit(x) || sub.some(k => hit(k)); return (q && !mine ? '' : person(x, depth)) + sub.map(k => tree(k, depth + 1, seen)).join(''); };
+    const seen = new Set(); let body = roots.map(r => tree(r, 0, seen)).join('');
+    all.filter(x => !seen.has(x.code)).forEach(x => { body += tree(x, 0, seen); });   // anyone left out by a loop in the data
     let h = '<div class="toolbar">' + (admin && CLOUD && !DEMO ? '<button class="btn primary" data-act="oh-pull">' + (list ? 'Refresh from Payroll' : 'Sync from Payroll') + '</button>' : '') +
-      (list && admin ? '<button class="btn" data-act="oh-save" data-confirm="Save this hierarchy?">Save hierarchy (' + list.length + ')</button>' : '') +
-      '<input id="ohQ" placeholder="Search name / code / manager…" value="' + esc(OH_UI.q) + '" style="width:240px">' +
-      '<span class="muted small">' + (list ? 'From Payroll just now — not saved yet' : saved.length ? saved.length + ' saved · ' + managers.size + ' manager(s)' : 'Nothing saved yet') + (OH_UI.msg ? ' · <span class="late-txt">' + esc(OH_UI.msg) + '</span>' : '') + '</span><span class="grow"></span>' +
-      (rows.length ? '<button class="btn" data-act="oh-csv">Export CSV</button>' : '') + '</div>';
+      (list && admin ? '<button class="btn" data-act="oh-save" data-confirm="Save this hierarchy?">Save hierarchy (' + list.length + ' staff)</button>' : '') +
+      '<input id="ohQ" placeholder="Search name / code / department…" value="' + esc(OH_UI.q) + '" style="width:240px">' +
+      '<span class="muted small">' + (list ? 'From Payroll just now — staff only, not saved yet' : saved.length ? saved.length + ' staff saved · ' + roots.length + ' at the top' : 'Nothing saved yet') + (OH_UI.msg ? ' · <span class="late-txt">' + esc(OH_UI.msg) + '</span>' : '') + '</span><span class="grow"></span>' +
+      (all.length ? '<button class="btn" data-act="oh-csv">Export CSV</button>' : '') + '</div>';
     if (unresolved.length) h += '<div class="panel" style="margin-bottom:10px"><b>' + unresolved.length + ' manager name(s) could not be matched</b> — Payroll has them as free text. Fix the reporting manager in Payroll (name with the code, e.g. "RAHUL (ZM01234)") and sync again:<div class="small" style="margin-top:4px">' + unresolved.slice(0, 40).map(x => esc(x.name) + ' → "' + esc(x.mgr_raw) + '"' + (x.mgr_how === 'ambiguous' ? ' (two people with that name)' : '')).join(' · ') + (unresolved.length > 40 ? ' …' : '') + '</div></div>';
-    h += '<div class="tbl-wrap"><table><tr><th>Employee</th><th>Code</th><th>Department</th><th>Designation</th><th>Reports to</th><th>Manager code</th><th>Nexus login</th><th>Team size</th></tr>' +
-      (rows.length ? rows.map(x => { const u = ohNexusUser(x.code); const n = (list || saved).filter(y => y.mgr_code === x.code).length; return '<tr><td><b>' + esc(x.name) + '</b></td><td class="mono">' + esc(x.code) + '</td><td>' + esc(x.dept || '') + '</td><td>' + esc(x.desig || '') + '</td><td>' + (x.mgr_code ? esc(nameOf(x.mgr_code)) : x.mgr_raw ? '<span class="late-txt" title="' + esc(x.mgr_raw) + '">' + esc(x.mgr_raw) + ' ?</span>' : '<span class="muted">—</span>') + '</td><td class="mono">' + esc(x.mgr_code || '') + '</td><td>' + (u ? esc(u.name) : '<span class="muted">no login</span>') + '</td><td class="num">' + (n || '') + '</td></tr>'; }).join('')
-        : '<tr><td colspan="8" class="empty">' + (admin ? 'Press "Sync from Payroll" to read who reports to whom.' : 'No hierarchy saved yet.') + '</td></tr>') + '</table></div>';
+    h += '<div class="tbl-wrap"><table><tr><th>Team</th><th>Code</th><th>Department</th><th>Designation</th><th>Reports to</th><th>Nexus login</th></tr>' +
+      (body || '<tr><td colspan="6" class="empty">' + (admin ? 'Press "Sync from Payroll" to read who reports to whom.' : 'No hierarchy saved yet.') + '</td></tr>') + '</table></div>';
     const m = setMain(h);
     $('#ohQ', m).addEventListener('input', e => { OH_UI.q = e.target.value; VIEWS.orgchart.render(); const i = $('#ohQ'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); });
-    OH_UI.rows = rows;
   }
 };
 ACTIONS['oh-pull'] = () => { if (!isAdminRole()) return; ohPull(); };
@@ -506,7 +513,8 @@ ACTIONS['oh-save'] = () => {
   const keep = new Set(OH_UI.list.map(x => x.code));
   Store.all('org_chart').filter(x => !keep.has(x.code)).forEach(x => Store.del('org_chart', x.id));
   OH_UI.list.forEach(x => { const u = ohNexusUser(x.code); Store.put('org_chart', { id: 'oc_' + x.code.toLowerCase(), code: x.code, name: x.name, dept: x.dept, desig: x.desig, mgr_code: x.mgr_code, mgr_raw: x.mgr_raw, user_id: u ? u.id : '', synced_at: nowIso() }); });
-  audit('org_chart.sync', '', OH_UI.list.length + ' employees from Payroll');
+  audit('org_chart.sync', '', OH_UI.list.length + ' staff from Payroll');
   OH_UI.list = null; flash('Hierarchy saved.'); VIEWS.orgchart.render();
 };
-ACTIONS['oh-csv'] = () => downloadCsv('team-hierarchy-' + todayYmd() + '.csv', [['Employee', 'Code', 'Department', 'Designation', 'Reports to', 'Manager code', 'Nexus login']].concat((OH_UI.rows || []).map(x => { const u = ohNexusUser(x.code); const all = OH_UI.list || Store.all('org_chart'); const mg = all.find(y => y.code === x.mgr_code); return [x.name, x.code, x.dept || '', x.desig || '', mg ? mg.name : x.mgr_raw || '', x.mgr_code || '', u ? u.name : '']; })));
+ACTIONS['oh-csv'] = () => { const all = OH_UI.list || Store.all('org_chart'); const by = {}; all.forEach(x => { by[x.code] = x; });
+  downloadCsv('team-hierarchy-' + todayYmd() + '.csv', [['Employee', 'Code', 'Department', 'Designation', 'Reports to', 'Manager code', 'Team size', 'Nexus login']].concat(all.map(x => { const u = ohNexusUser(x.code); return [x.name, x.code, x.dept || '', x.desig || '', (by[x.mgr_code] || {}).name || x.mgr_raw || '', x.mgr_code || '', ohTeamOf(x.code, all).length, u ? u.name : '']; }))); };

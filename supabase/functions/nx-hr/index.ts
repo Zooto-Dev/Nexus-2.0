@@ -59,13 +59,14 @@ Deno.serve(async (req) => {
         emps.push(...(data || [])); if (!data || data.length < 1000) break;
       }
       for (let from = 0; ; from += 1000) {
-        const { data, error } = await hr.from('hr_profiles').select('employee_code, reporting_manager').range(from, from + 999);
+        const { data, error } = await hr.from('hr_profiles').select('employee_code, reporting_manager, category').range(from, from + 999);
         if (error) return out({ error: 'Payroll database: ' + error.message }, 500);
         profs.push(...(data || [])); if (!data || data.length < 1000) break;
       }
       const byCode: Record<string, Doc> = {}; const byName: Record<string, string[]> = {};
       emps.forEach((e) => { const c = String(e['Employee code'] || '').trim().toUpperCase(); if (!c) return; byCode[c] = e; const n = String(e.Name || '').trim().toUpperCase().replace(/\s+/g, ' '); if (n) (byName[n] = byName[n] || []).push(c); });
-      const mgrOf: Record<string, string> = {}; profs.forEach((p) => { mgrOf[String(p.employee_code || '').trim().toUpperCase()] = String(p.reporting_manager || '').trim(); });
+      const mgrOf: Record<string, string> = {}; const catOf: Record<string, string> = {};
+      profs.forEach((p) => { const c = String(p.employee_code || '').trim().toUpperCase(); mgrOf[c] = String(p.reporting_manager || '').trim(); catOf[c] = String(p.category || '').trim().toUpperCase(); });
       // "NAME (ZM01234)" → the code; a bare name → the one active employee with that name, else unresolved
       const resolve = (raw: string): { code: string; how: string } => {
         if (!raw) return { code: '', how: '' };
@@ -75,7 +76,7 @@ Deno.serve(async (req) => {
         if (hits.length === 1) return { code: hits[0], how: 'name' };
         return { code: '', how: hits.length ? 'ambiguous' : 'unknown' };
       };
-      const list = Object.keys(byCode).map((c) => { const e = byCode[c]; const raw = mgrOf[c] || ''; const r = resolve(raw); return { code: c, name: String(e.Name || '').trim(), dept: String(e.DEPARTMENT || ''), desig: String(e.DESIGNATION || ''), active: /active/i.test(String(e.Status || '')), mgr_raw: raw, mgr_code: r.code, mgr_how: r.how }; })
+      const list = Object.keys(byCode).map((c) => { const e = byCode[c]; const raw = mgrOf[c] || ''; const r = resolve(raw); return { code: c, name: String(e.Name || '').trim(), dept: String(e.DEPARTMENT || ''), desig: String(e.DESIGNATION || ''), category: catOf[c] || '', active: /active/i.test(String(e.Status || '')), mgr_raw: raw, mgr_code: r.code, mgr_how: r.how }; })
         .sort((x, y) => x.name.localeCompare(y.name));
       return out({ ok: true, count: list.length, list });
     }
