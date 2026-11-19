@@ -131,7 +131,7 @@ VIEWS.purchasedash = {
     h += '<div class="dtiles dt4">' +
       tile('Open PO value', esc(inr(openVal)), open.length + ' open PO' + (open.length === 1 ? '' : 's'), '#/po') +
       tile('Waiting for approval', apprPend.length, (apprPend.length ? esc(inr(apprPend.reduce((a, p) => a + poVal(p), 0))) + ' · ' : '') + 'avg approval ' + (apprH == null ? '—' : apprH < 24 ? apprH.toFixed(1) + ' h' : (apprH / 24).toFixed(1) + ' days'), '#/poapproval', apprPend.length ? 'warn' : 'good') +
-      tile('Overdue POs', overdue.length, overdue.length ? esc(inr(overdue.reduce((a, p) => a + poPendVal(p), 0))) + ' pending' : 'Nothing late', '#/followup', overdue.length ? 'crit' : 'good') +
+      tile('Overdue POs', overdue.length, overdue.length ? esc(inr(overdue.reduce((a, p) => a + poPendVal(p), 0))) + ' pending' : 'Nothing late', '#/poregister', overdue.length ? 'crit' : 'good') +
       tile('Followups due', fuDue.length, 'today or earlier', '#/followup', fuDue.length ? 'warn' : '') +
       tile('Items to order', net.length, reqOpen.length + ' requirement' + (reqOpen.length === 1 ? '' : 's') + ' open', '#/netreq', net.length ? 'warn' : '') +
       tile('Received this month', esc(inr(recvMonth)), grns.filter(g => (g.date || '').startsWith(month)).length + ' GRN(s)', '#/grnlist') +
@@ -260,3 +260,54 @@ VIEWS.merchantdash = {
     $('#mdBrand', m).addEventListener('change', e => { MD_UI.brand = e.target.value; VIEWS.merchantdash.render(); });
   }
 };
+
+/* ---------- PO Register: every PO line — vendor, item, PO date, delivery date, how late ---------- */
+const POR_UI = { q: '', vendor: '', st: 'open', from: '', to: '' };
+function poRegisterRows() {
+  const today = todayYmd(); const grns = Store.all('grns');
+  const rows = [];
+  Store.all('purchase_orders').filter(p => !p.cancelled && p.approval !== 'Rejected').forEach(p => {
+    const myGrns = grns.filter(g => g.po_id === p.id || (!g.po_id && norm(g.po_no) === norm(p.no)));
+    (p.lines || []).forEach((l, k) => {
+      const m = matBy(l.material) || {}; const qty = num(l.qty), recv = recvOf(p, l, k), pend = poLinePending(p, l, k);
+      const lastGrn = myGrns.filter(g => (g.lines || []).some(x => x.po_line != null ? x.po_line === k : norm(x.material) === norm(l.material))).map(g => g.date).sort().slice(-1)[0] || '';
+      // late = days past the delivery date: still open → counted to today; received → counted to the last GRN
+      const late = !p.expected ? 0 : pend > 0 ? Math.max(0, daysBetween(p.expected, today)) : lastGrn ? Math.max(0, daysBetween(p.expected, lastGrn)) : 0;
+      const status = l.closed ? 'Short closed' : pend <= 0 ? (late ? 'Received late' : 'Received') : recv > 0 ? 'Partial' : (!p.approval || p.approval === 'Pending') ? 'Awaiting approval' : 'Open';
+      rows.push({ p, l, k, m, qty, recv, pend, late, lastGrn, status, open: pend > 0 && !l.closed });
+    });
+  });
+  return rows;
+}
+VIEWS.poregister = {
+  mod: 'purchase', render() {
+    const U = POR_UI; const q = norm(U.q);
+    let rows = poRegisterRows();
+    const vendors = Array.from(new Set(rows.map(r => r.p.vendor).filter(Boolean))).sort();
+    rows = rows.filter(r => (!U.vendor || r.p.vendor === U.vendor) && (!U.from || (r.p.date || '') >= U.from) && (!U.to || (r.p.date || '') <= U.to)
+      && (!q || norm(r.p.no + ' ' + r.p.vendor + ' ' + r.l.material + ' ' + (r.m.name || '')).includes(q))
+      && (U.st === 'all' || (U.st === 'open' ? r.open : U.st === 'late' ? (r.open && r.late > 0) : U.st === 'received' ? !r.open : true)));
+    rows.sort((a, b) => (b.open - a.open) || (b.late - a.late) || (a.p.expected || '9').localeCompare(b.p.expected || '9'));
+    const lateCls = d => d > 15 ? 'late-txt' : d > 0 ? 'warn-txt' : '';
+    const stCls = s => ({ 'Open': 'Pending', 'Partial': 'Partial', 'Received': 'Done', 'Received late': 'Late', 'Short closed': 'Closed', 'Awaiting approval': 'Pending' })[s] || '';
+    const h = '<div class="toolbar"><input id="porQ" placeholder="Search PO no / vendor / item…" value="' + esc(U.q) + '" style="width:260px">' +
+      '<select id="porVen"><option value="">All vendors</option>' + vendors.map(v => '<option' + (v === U.vendor ? ' selected' : '') + '>' + esc(v) + '</option>').join('') + '</select>' +
+      seg('porSt', [{ v: 'open', l: 'Open' }, { v: 'late', l: 'Late' }, { v: 'received', l: 'Received' }, { v: 'all', l: 'All' }], U.st) +
+      '<span class="small muted nowrap" style="display:inline-flex;align-items:center;gap:6px">PO date <input id="porFrom" type="date" value="' + esc(U.from) + '" style="width:150px"> to <input id="porTo" type="date" value="' + esc(U.to) + '" style="width:150px"></span>' +
+      '<span class="muted small">' + rows.length + ' line(s)</span><span class="grow"></span><button class="btn" data-act="por-csv">Export CSV</button></div>' +
+      '<div class="tbl-wrap"><table><tr><th>PO No</th><th>PO Date</th><th>Vendor</th><th>Item Code</th><th>Item Name</th><th>UOM</th><th class="num">PO Qty</th><th class="num">Received</th><th class="num">Pending</th><th>Delivery Date</th><th class="num">Days Late</th><th>Last GRN</th><th>Status</th></tr>' +
+      (rows.length ? rows.map(r => '<tr' + (r.open && r.late > 0 ? ' style="background:#fdf3f3"' : '') + '><td><a href="#/po/' + esc(r.p.id) + '"><b>' + esc(r.p.no) + '</b></a></td><td class="nowrap">' + fmtD(r.p.date) + '</td><td>' + esc(r.p.vendor) + '</td><td>' + esc(r.m.code || r.l.material) + '</td><td>' + esc(r.m.name || '') + '</td><td>' + esc(r.l.uom || r.m.uom || '') + '</td>' +
+        '<td class="num">' + qtyFmt(r.qty) + '</td><td class="num">' + qtyFmt(r.recv) + '</td><td class="num">' + (r.pend ? '<b>' + qtyFmt(r.pend) + '</b>' : '') + '</td><td class="nowrap">' + (r.p.expected ? fmtD(r.p.expected) : '<span class="muted">—</span>') + '</td>' +
+        '<td class="num ' + lateCls(r.late) + '">' + (r.late ? '<b>' + r.late + '</b>' : '') + '</td><td class="nowrap">' + (r.lastGrn ? fmtD(r.lastGrn) : '') + '</td><td><span class="st ' + stCls(r.status) + '">' + esc(r.status) + '</span></td></tr>').join('')
+        : '<tr><td colspan="13" class="empty">No PO lines match</td></tr>') + '</table></div>';
+    const m = setMain(h);
+    $('#porQ', m).addEventListener('input', e => { U.q = e.target.value; VIEWS.poregister.render(); const i = $('#porQ'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); });
+    $('#porVen', m).addEventListener('change', e => { U.vendor = e.target.value; VIEWS.poregister.render(); });
+    $('#porFrom', m).addEventListener('change', e => { U.from = e.target.value; VIEWS.poregister.render(); });
+    $('#porTo', m).addEventListener('change', e => { U.to = e.target.value; VIEWS.poregister.render(); });
+    onSeg(e => { if (e.target.dataset.seg === 'porSt') { U.st = e.detail; VIEWS.poregister.render(); } });
+    POR_UI.rows = rows;
+  }
+};
+ACTIONS['por-csv'] = () => downloadCsv('po-register-' + todayYmd() + '.csv', [['PO No', 'PO Date', 'Vendor', 'Item Code', 'Item Name', 'UOM', 'PO Qty', 'Received', 'Pending', 'Delivery Date', 'Days Late', 'Last GRN', 'Status']]
+  .concat((POR_UI.rows || []).map(r => [r.p.no, r.p.date || '', r.p.vendor, r.m.code || r.l.material, r.m.name || '', r.l.uom || r.m.uom || '', r.qty, r.recv, r.pend, r.p.expected || '', r.late || 0, r.lastGrn, r.status])));

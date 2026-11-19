@@ -257,6 +257,7 @@ th { color: #47605e; font-weight: 650; }
 .st { padding: 1px 8px 1px 6px; border-radius: 3px; }
 .st.Late, .st.Cancelled { background: var(--late-bg); } .st.Pending, .st.OnHold { background: var(--pending-bg); }
 .st.Done { background: var(--done-bg); } .st.Waiting, .st.NA { background: var(--line2); }
+.st.Partial { background: #eaf1fa; color: var(--accent); } .st.Closed { background: var(--line2); color: var(--muted); }
 #flash { border-left-color: var(--accent); }
 
 /* final: nothing wraps — tables scroll horizontally instead */
