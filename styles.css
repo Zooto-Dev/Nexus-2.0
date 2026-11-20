@@ -957,3 +957,7 @@ th.lp-grp { border-bottom: 0; background: var(--accent-bg); color: var(--accent)
 .lp-rep-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 8px; } .lp-report h3 { margin: 14px 0 6px; font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
 .lp-sum { display: flex; align-items: center; gap: 8px; margin: 12px 0; flex-wrap: wrap; } .lp-sum .dt { min-width: 150px; } .lp-op { font-size: 22px; font-weight: 700; color: var(--muted); }
 @media (max-width: 900px) { .lp-rep-grid { grid-template-columns: 1fr; } }
+
+.lp-mp { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); margin-right: 8px; } .lp-mp input { width: 64px; height: 28px; }
+.lp-dpr th, .lp-dpr td { white-space: nowrap; padding: 4px 8px; } .lp-dpr .lp-pack { background: #eef2f8; } .lp-dpr tr.lp-nil td { background: #fffbe6; color: var(--muted); } .lp-dpr tr.lp-today td { outline: 1px solid var(--accent); }
+.lp-dpr tr.lp-avg td { background: #e9eef7; }

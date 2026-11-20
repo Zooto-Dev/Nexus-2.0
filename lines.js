@@ -27,6 +27,8 @@ function lpLines() {
 }
 const lpPlans = () => Store.all('line_plans').filter(p => !p.cancelled);
 const lpActs = () => Store.all('line_actuals');
+function lpDayRow(line, date) { return Store.all('line_days').find(x => x.line === line && x.date === date) || null; }
+function lpCatOf(jc) { const j = jcBy(jc) || {}; const o = Store.all('orders').find(x => norm(x.no) === norm(j.order_no)) || {}; return String(j.category || o.category || 'Other').trim(); }
 // what is already spoken for on a line: plans (less the pairs moved out of them) plus anything that ran without a plan
 function lpPlannedOn(jc, line) { return lpPlans().filter(p => norm(p.jc_no) === norm(jc) && p.line === line).reduce((a, p) => a + num(p.qty) - num(p.carried_qty), 0) + lpActs().filter(a => a.sub && norm(a.jc_no) === norm(jc) && a.line === line).reduce((s, a) => s + num(a.qty) + num(a.rej), 0); }
 // the pairs of a plan that did not run and were not yet moved to another day
@@ -168,6 +170,7 @@ function lpTabDaily(edit) {
     const saved = plans.length && plans.every(p => lpActForPlan(p));
     h += '<div class="card lp-day" data-line="' + esc(line) + '"><div class="lp-day-h"><b>' + esc(line) + '</b>' +
       '<span class="lp-pill">Planned <b>' + qtyFmt(planned) + '</b></span><span class="lp-pill ok">Good <b>' + qtyFmt(made) + '</b></span><span class="lp-pill bad">Rejected <b>' + qtyFmt(rej) + '</b></span>' + (saved ? '<span class="st Done">Saved</span>' : plans.length ? '<span class="st Pending">Not saved</span>' : '') + '<span class="grow"></span>' +
+      (() => { const dr = lpDayRow(line, day) || {}; return '<label class="lp-mp">Manpower ' + (edit ? '<input type="number" min="0" step="1" class="lp-men" value="' + esc(dr.manpower || '') + '">' : '<b>' + esc(dr.manpower || '—') + '</b>') + '</label><label class="lp-mp">Hours ' + (edit ? '<input type="number" min="0" step="0.5" class="lp-hrs" value="' + esc(dr.hours || '') + '">' : '<b>' + esc(dr.hours || '—') + '</b>') + '</label>'; })() +
       (edit ? '<button class="btn sm" data-act="lp-sub" data-line="' + esc(line) + '">+ Ran something else</button> <button class="btn sm primary" data-act="lp-save-day" data-line="' + esc(line) + '">Save ' + esc(line) + '</button>' : '') + '</div>' +
       '<div class="tbl-wrap"><table class="lp-dtab"><tr><th>Job Card</th><th>Article</th><th class="num">Planned</th><th class="num">Good made</th><th class="num">Rejected</th><th class="num">Short</th><th>Reason (needed when short or rejected)</th><th style="width:150px"></th></tr>' +
       (plans.length ? plans.map(p => { const a = lpActForPlan(p); const v = a ? num(a.qty) : '', r = a ? num(a.rej) : ''; const short = a ? Math.max(0, num(p.qty) - num(a.qty) - num(a.rej)) : '';
@@ -195,7 +198,9 @@ ACTIONS['lp-save-day'] = el => {
     Object.assign(a, { date: day, line, jc_no: p.jc_no, planned: num(p.qty), qty, rej, short: Math.max(0, num(p.qty) - qty - rej), reason, saved_by: ME.name, saved_at: nowIso() }); Store.put('line_actuals', a); n++;
   }
   $$('tr[data-sub]', card).forEach(tr => { const a = Store.get('line_actuals', tr.dataset.sub); if (!a) return; a.qty = Math.max(0, num($('.lp-made', tr).value)); a.rej = Math.max(0, num($('.lp-rej', tr).value)); a.reason = $('.lp-why', tr).value.trim(); Store.put('line_actuals', a); n++; });
-  audit('line_actual.save', line + ' ' + day, n + ' row(s)'); flash(line + ' saved for ' + fmtD(day) + '.'); VIEWS.lineplan.render();
+  const men = $('.lp-men', card), hrs = $('.lp-hrs', card);
+  if (men && (men.value !== '' || hrs.value !== '')) { const dr = lpDayRow(line, day) || { id: uid(), line, date: day }; dr.manpower = num(men.value); dr.hours = num(hrs.value); Store.put('line_days', dr); }
+  audit('line_actual.save', line + ' ' + day, n + ' row(s)' + (men && men.value !== '' ? ' · manpower ' + men.value + (hrs.value ? ' · ' + hrs.value + ' h' : '') : '')); flash(line + ' saved for ' + fmtD(day) + '.'); VIEWS.lineplan.render();
 };
 ACTIONS['lp-carry'] = el => {
   if (!requirePerm('production', 'edit')) return; const p = Store.get('line_plans', el.dataset.id); if (!p) return;
@@ -331,12 +336,49 @@ function lpTabClosing() {
   return h;
 }
 
+/* ---------- Daily Production Report: one row per day of the month; per line, good pairs split by product
+   category, with manpower and hours; the last stage's total as "Packing"; total manpower; Total and Average. ---------- */
+function lpTabDpr() {
+  const m = LP_UI.month || todayYmd().slice(0, 7); const first = m + '-01'; const dEnd = new Date(m + '-01T00:00:00'); dEnd.setMonth(dEnd.getMonth() + 1); dEnd.setDate(0); const last = lpYmd(dEnd);
+  const days = []; for (let d = first; d <= last; d = lpAdd(d, 1)) days.push(d);
+  const lines = lpLines(); const fin = lpFinalLine(); const acts = lpActs().filter(a => a.date >= first && a.date <= last);
+  // the product categories each line actually made this month, in a steady order
+  const catsOf = {}; lines.forEach(l => { catsOf[l] = Array.from(new Set(acts.filter(a => a.line === l).map(a => lpCatOf(a.jc_no)))).sort(); if (!catsOf[l].length) catsOf[l] = ['All']; });
+  const cell = (d, l, c) => acts.filter(a => a.date === d && a.line === l && (c === 'All' || lpCatOf(a.jc_no) === c)).reduce((s, a) => s + num(a.qty), 0);
+  const dayRow = (d, l) => lpDayRow(l, d) || {};
+  const packed = d => acts.filter(a => a.date === d && a.line === fin).reduce((s, a) => s + num(a.qty), 0);
+  const totMen = d => lines.reduce((s, l) => s + num(dayRow(d, l).manpower), 0);
+  let h = '<div class="toolbar"><input id="lpMonth" type="month" value="' + m + '"><b>ZOOTO FASHION — DAILY PRODUCTION REPORT · ' + MON[+m.slice(5, 7) - 1] + ' ' + m.slice(0, 4) + '</b><span class="grow"></span><button class="btn" data-act="lp-csv-dpr">Export CSV</button><button class="btn" onclick="window.print()">Print</button></div>';
+  h += '<div class="lp-help">Built from the Daily tab: good pairs per line, split by the product category of the job card; <b>Manpower</b> and <b>Hours</b> are what the line entered for the day. <b>Packing</b> = good pairs at ' + esc(fin) + '. Yellow rows had no production.</div>';
+  h += '<div class="tbl-wrap"><table class="lp-dpr nofilter nopage"><tr><th rowspan="2" class="nofilter">Date</th>' + lines.map(l => '<th colspan="' + (catsOf[l].length + 2) + '" class="c lp-grp nofilter">' + esc(l) + '</th>').join('') + '<th rowspan="2" class="num lp-pack nofilter">Packing<br><span class="small">total</span></th><th rowspan="2" class="num nofilter">Total<br><span class="small">manpower</span></th></tr><tr>' +
+    lines.map(l => catsOf[l].map(c => '<th class="num nofilter">' + esc(c) + '</th>').join('') + '<th class="num small nofilter">Manpower</th><th class="num small nofilter">Hours</th>').join('') + '</tr>';
+  const T = {}; const key = (l, c) => l + '|' + c; let packT = 0, menT = 0, prodDays = 0;
+  const rowsCsv = [];
+  days.forEach(d => {
+    const any = acts.some(a => a.date === d && num(a.qty) > 0); if (any) prodDays++;
+    const csv = [d];
+    h += '<tr class="' + (!any ? 'lp-nil' : '') + (d === todayYmd() ? ' lp-today' : '') + '"><td class="nowrap"><b>' + fmtD(d) + '</b></td>';
+    lines.forEach(l => { catsOf[l].forEach(c => { const v = cell(d, l, c); T[key(l, c)] = (T[key(l, c)] || 0) + v; csv.push(v || ''); h += '<td class="num">' + (v ? qtyFmt(v) : '') + '</td>'; });
+      const dr = dayRow(d, l); T[key(l, '_men')] = (T[key(l, '_men')] || 0) + num(dr.manpower); T[key(l, '_hrs')] = (T[key(l, '_hrs')] || 0) + num(dr.hours); csv.push(dr.manpower || '', dr.hours || '');
+      h += '<td class="num muted">' + (dr.manpower ? dr.manpower : '') + '</td><td class="num muted">' + (dr.hours ? dr.hours : '') + '</td>'; });
+    const pk = packed(d), tm = totMen(d); packT += pk; menT += tm; csv.push(pk || '', tm || ''); rowsCsv.push(csv);
+    h += '<td class="num lp-pack"><b>' + (pk ? qtyFmt(pk) : '0') + '</b></td><td class="num">' + (tm ? tm : '') + '</td></tr>';
+  });
+  const avg = v => prodDays ? qtyFmt(Math.round(v / prodDays)) : '';
+  h += '<tr class="tt"><td><b>Total</b></td>' + lines.map(l => catsOf[l].map(c => '<td class="num"><b>' + qtyFmt(T[key(l, c)] || 0) + '</b></td>').join('') + '<td class="num">' + (T[key(l, '_men')] || '') + '</td><td class="num">' + (T[key(l, '_hrs')] || '') + '</td>').join('') + '<td class="num lp-pack"><b>' + qtyFmt(packT) + '</b></td><td class="num"><b>' + (menT || '') + '</b></td></tr>';
+  h += '<tr class="tt lp-avg"><td><b>Average</b> <span class="small muted">per working day (' + prodDays + ')</span></td>' + lines.map(l => catsOf[l].map(c => '<td class="num">' + avg(T[key(l, c)] || 0) + '</td>').join('') + '<td class="num">' + (prodDays ? Math.round((T[key(l, '_men')] || 0) / prodDays) || '' : '') + '</td><td class="num">' + (prodDays ? Math.round((T[key(l, '_hrs')] || 0) / prodDays * 10) / 10 || '' : '') + '</td>').join('') + '<td class="num lp-pack"><b>' + avg(packT) + '</b></td><td class="num">' + (prodDays ? Math.round(menT / prodDays) || '' : '') + '</td></tr>';
+  h += '</table></div>';
+  LP_UI.dprCsv = [['Date'].concat(lines.flatMap(l => catsOf[l].map(c => l + ' ' + c).concat([l + ' manpower', l + ' hours']))).concat(['Packing total', 'Total manpower'])].concat(rowsCsv);
+  return h;
+}
+ACTIONS['lp-csv-dpr'] = () => downloadCsv('daily-production-' + (LP_UI.month || todayYmd().slice(0, 7)) + '.csv', LP_UI.dprCsv || []);
+
 VIEWS.lineplan = {
   mod: 'production', render(param) {
-    if (param && ['plan', 'daily', 'summary', 'tracker', 'closing'].includes(param)) LP_UI.tab = param;
+    if (param && ['plan', 'daily', 'summary', 'tracker', 'closing', 'dpr'].includes(param)) LP_UI.tab = param;
     const edit = can('production', 'edit');
-    let h = '<div class="lp-tabs">' + [['plan', '1 · Plan', 'put job cards on the lines for the week'], ['daily', '2 · Daily', 'enter good and rejected pairs each day'], ['summary', '3 · Summary', 'plan vs made, per line'], ['tracker', '4 · Tracker', 'every job card, every line'], ['closing', '5 · Order Closing', 'closed orders and their reports']].map(t => '<a href="#/lineplan/' + t[0] + '" class="' + (LP_UI.tab === t[0] ? 'on' : '') + '"><b>' + t[1] + '</b><span>' + t[2] + '</span></a>').join('') + '</div>';
-    h += LP_UI.tab === 'plan' ? lpTabPlan(edit) : LP_UI.tab === 'daily' ? lpTabDaily(edit) : LP_UI.tab === 'summary' ? lpTabSummary() : LP_UI.tab === 'closing' ? lpTabClosing() : lpTabTracker();
+    let h = '<div class="lp-tabs">' + [['plan', '1 · Plan', 'put job cards on the lines for the week'], ['daily', '2 · Daily', 'enter good and rejected pairs each day'], ['summary', '3 · Summary', 'plan vs made, per line'], ['tracker', '4 · Tracker', 'every job card, every line'], ['closing', '5 · Order Closing', 'closed orders and their reports'], ['dpr', '6 · DPR', 'daily production report, the month']].map(t => '<a href="#/lineplan/' + t[0] + '" class="' + (LP_UI.tab === t[0] ? 'on' : '') + '"><b>' + t[1] + '</b><span>' + t[2] + '</span></a>').join('') + '</div>';
+    h += LP_UI.tab === 'plan' ? lpTabPlan(edit) : LP_UI.tab === 'daily' ? lpTabDaily(edit) : LP_UI.tab === 'summary' ? lpTabSummary() : LP_UI.tab === 'closing' ? lpTabClosing() : LP_UI.tab === 'dpr' ? lpTabDpr() : lpTabTracker();
     const m = setMain(h);
     onSeg(e => { if (e.target.dataset.seg === 'lpLine') { LP_UI.line = e.detail; VIEWS.lineplan.render(); } if (e.target.dataset.seg === 'lpRange') { LP_UI.range = e.detail; VIEWS.lineplan.render(); } if (e.target.dataset.seg === 'lpCls') { LP_UI.cls = e.detail; VIEWS.lineplan.render(); } });
     const dayI = $('#lpDay', m); if (dayI) dayI.addEventListener('change', e => { if (e.target.value) { LP_UI.day = e.target.value; VIEWS.lineplan.render(); } });
