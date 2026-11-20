@@ -42,11 +42,12 @@ function whenLabel(a) { return a.when_attr ? a.when_attr + ' = ' + a.when_val : 
 const blankVal = v => /^(NONE|NA|N\/A|NIL|NO|NO .+|WITHOUT .+)$/.test(String(v || '').trim().toUpperCase().replace(/\s+/g, ' '));
 // how an attribute is filled: one value from its list, several values (a foxing in up to 5 colours),
 // a brand from CDB, an article from the Articles master, or a size typed as length × width × height
-const AT_KINDS = [['list', 'One value'], ['multi', 'Many values'], ['brand', 'Brand (CDB)'], ['article', 'Article (Articles master)'], ['dims', 'Size L × W × H']];
+const AT_KINDS = [['list', 'One value'], ['multi', 'Many values'], ['brand', 'Brand (CDB)'], ['article', 'Article (Articles master)'], ['dims', 'Size L × W × H'], ['text', 'Typed text (a code, a number)']];
+const atOptional = a => !!a.optional;   // an optional attribute may be left blank; a blank one is left out of the name
 const AT_MAX = 5, DIM_UNITS = ['MM', 'CM', 'INCH'];
 const atKind = a => a.kind || 'list';
 const atMax = a => Math.max(1, num(a.max) || AT_MAX);
-const atKindLabel = a => (AT_KINDS.find(k => k[0] === atKind(a)) || AT_KINDS[0])[1] + (atKind(a) === 'multi' ? ' (up to ' + atMax(a) + ')' : '');
+const atKindLabel = a => (AT_KINDS.find(k => k[0] === atKind(a)) || AT_KINDS[0])[1] + (atKind(a) === 'multi' ? ' (up to ' + atMax(a) + ')' : '') + (atOptional(a) ? ' · optional' : '');
 function atValues(a, vals, t) {
   const k = atKind(a);
   if (k === 'brand') return ['NONE'].concat(Store.all('customers').map(c => String(c.name || '').trim().toUpperCase()).filter(Boolean).sort());
@@ -159,12 +160,14 @@ VIEWS.itemcreate = {
         const k = t.dataset.icDim; const d = IC_UI.dims[k] || (IC_UI.dims[k] = { u: 'MM' }); d[t.dataset.d] = t.value;
         IC_UI.vals[k] = dimVal(d); icRender(); return;
       }
+      if (t.dataset.icText) { IC_UI.vals[t.dataset.icText] = t.value.toUpperCase().replace(/\s+/g, ' ').trim(); icRender(); return; }
       if (t.dataset.icAttr) {
         IC_UI.vals[t.dataset.icAttr] = t.value;
         const ty = Store.get('item_types', IC_UI.type); if (ty) typeAttrs(ty).forEach(a => { if (!attrOn(a, IC_UI.vals, ty)) delete IC_UI.vals[a.name]; });
         icRender(); const nx = $$('select[data-ic-attr]').find(s => !s.value && !s.disabled); if (nx) nx.focus(); }
     });
     m.addEventListener('input', e => {
+      if (e.target.dataset.icText) { IC_UI.vals[e.target.dataset.icText] = e.target.value.toUpperCase().replace(/\s+/g, ' ').trim(); return; }
       if (e.target.dataset.icx) IC_UI.extra[e.target.dataset.icx] = e.target.value;
       if (e.target.id === 'icRun') { IC_UI.run = e.target.value; const p = e.target.selectionStart; icRender(); const n2 = $('#icRun'); if (n2) { n2.focus(); n2.setSelectionRange(p, p); } return; }
       if (e.target.dataset.swq != null) {
@@ -208,7 +211,11 @@ function icCreateHtml(edit) {
       return;
     }
     const v = IC_UI.vals[a.name] || ''; const k = atKind(a); const dis = open ? '' : ' disabled';
-    const lab = '<td class="k"><span class="seqn">' + (i + 1) + '</span>' + esc(a.name) + ' *</td>';
+    const lab = '<td class="k"><span class="seqn">' + (i + 1) + '</span>' + esc(a.name) + (atOptional(a) ? ' <span class="muted small">(optional)</span>' : ' *') + '</td>';
+    if (k === 'text') {
+      rows += '<tr>' + lab + '<td><input data-ic-text="' + esc(a.name) + '" value="' + esc(v) + '" placeholder="' + (open ? 'Type here' : 'select step ' + i + ' first') + '" style="max-width:260px"' + dis + '></td></tr>';
+      if (!v && !atOptional(a)) open = false; return;
+    }
     if (k === 'multi') {
       const cur = v.split('/').filter(Boolean);
       rows += '<tr>' + lab + '<td>' + cur.map((x, j) => '<span class="chip">' + (isColourAttr(a) ? '<span class="icsw-dot" style="background:' + swHex(x) + '"></span>' : '') + (j + 1) + '. ' + esc(x) + ' <a data-act="ic-mrem" data-a="' + esc(a.name) + '" data-i="' + j + '">×</a></span> ').join('') +
@@ -224,7 +231,7 @@ function icCreateHtml(edit) {
       rows += '<tr>' + lab + '<td><select data-ic-attr="' + esc(a.name) + '"' + dis + '><option value="">' + (open ? 'Select…' : 'select step ' + i + ' first') + '</option>' +
         atValues(a, IC_UI.vals, t).map(x => '<option' + (x === v ? ' selected' : '') + '>' + esc(x) + '</option>').join('') + '</select></td></tr>';
     }
-    if (!v) open = false;
+    if (!v && !atOptional(a)) open = false;
   });
   if (sized) {
     rows += '<tr><td class="k"><span class="seqn">' + (attrs.length + 1) + '</span>Size run *</td><td><div class="icdim">' +
@@ -239,7 +246,7 @@ function icCreateHtml(edit) {
       '<tr><td class="k">UOM</td><td><select data-icx="uom">' + UOMS.map(u => '<option' + (u === (X.uom || t.uom || 'PCS') ? ' selected' : '') + '>' + u + '</option>').join('') + '</select></td></tr>' +
       inp('gst', 'GST %', t.gst || '', 'number') + inp('hsn', 'HSN', t.hsn || '') + inp('rack', 'Rack No.', '') + inp('min', 'Min Level', '', 'number');
   }
-  const missing = attrs.filter(a => !IC_UI.vals[a.name]);
+  const missing = attrs.filter(a => !IC_UI.vals[a.name] && !atOptional(a));
   const base = t ? itemNameOf(t, IC_UI.vals) : '';
   // a size-wise item is only "already there" when every size of the run is already there
   const made = sized ? runs.filter(z => sizedDuplicate(IC_UI.cat, t, IC_UI.vals, z)) : [];
@@ -297,7 +304,7 @@ ACTIONS['ic-create'] = () => {
   const t = Store.get('item_types', IC_UI.type); if (!t) return;
   const attrs = sizedAttrs(t, activeAttrs(t, IC_UI.vals)); const vals = {};
   attrs.forEach(a => { vals[a.name] = IC_UI.vals[a.name] || ''; });
-  if (attrs.some(a => !vals[a.name])) { flash('Select every attribute first.', 'err'); return; }
+  if (attrs.some(a => !vals[a.name] && !atOptional(a))) { flash('Select every attribute first.', 'err'); return; }
   if (!IC_UI.photo) { flash('Attach the item photo first — no item is created without one.', 'err'); return; }
   const sized = sizedType(t);
   const runs = sized ? sizeRunList(IC_UI.run, IC_UI.half) : [''];
@@ -461,7 +468,7 @@ function icSetupHtml(edit) {
       h += '<tr data-arow="' + esc(a.id) + '"><td class="c">' + (i + 1) + '</td><td><input data-af="name" value="' + esc(a.name) + '"></td><td>' + kindSel(a) + '</td><td><textarea data-af="vals" rows="3">' + esc(a.values.join(', ')) + '</textarea></td><td>' + whenSel(A, a) + '</td><td class="wrap small">' + used.map(t => esc(t.name)).join(', ') + '</td>' +
         '<td class="c"><button class="btn sm primary" data-act="at-save" data-id="' + esc(a.id) + '">Save</button> <button class="btn sm" data-act="at-cancel">Cancel</button></td></tr>';
     } else {
-      h += '<tr><td class="c"><span class="seqn">' + (i + 1) + '</span></td><td><b>' + esc(a.name) + '</b></td><td class="small">' + esc(atKindLabel(a)) + '</td><td class="wrap small">' + (['brand', 'article', 'dims'].includes(atKind(a)) ? '<span class="muted">' + (atKind(a) === 'dims' ? 'Typed at item creation' : 'From master') + '</span>' : a.values.map(esc).join(', ') + ' <span class="muted">(' + a.values.length + ')</span>') + '</td><td class="small">' + (a.when_attr ? '<b>' + esc(whenLabel(a)) + '</b>' : '<span class="muted">Always</span>') + '</td><td class="wrap small">' + (used.map(t => esc(t.name)).join(', ') || '—') + '</td>' +
+      h += '<tr><td class="c"><span class="seqn">' + (i + 1) + '</span></td><td><b>' + esc(a.name) + '</b></td><td class="small">' + esc(atKindLabel(a)) + '</td><td class="wrap small">' + (['brand', 'article', 'dims', 'text'].includes(atKind(a)) ? '<span class="muted">' + (atKind(a) === 'dims' || atKind(a) === 'text' ? 'Typed at item creation' : 'From master') + '</span>' : a.values.map(esc).join(', ') + ' <span class="muted">(' + a.values.length + ')</span>') + '</td><td class="small">' + (a.when_attr ? '<b>' + esc(whenLabel(a)) + '</b>' : '<span class="muted">Always</span>') + '</td><td class="wrap small">' + (used.map(t => esc(t.name)).join(', ') || '—') + '</td>' +
         (edit ? '<td class="c nowrap"><button class="btn sm" data-act="at-move" data-id="' + esc(a.id) + '" data-dir="-1" title="Move up"' + (i ? '' : ' disabled') + '>↑</button> <button class="btn sm" data-act="at-move" data-id="' + esc(a.id) + '" data-dir="1" title="Move down"' + (i < A.length - 1 ? '' : ' disabled') + '>↓</button> ' +
           '<button class="btn sm" data-act="at-edit" data-id="' + esc(a.id) + '">Edit</button> ' + '<button class="btn sm ghost danger" data-act="at-del" data-id="' + esc(a.id) + '" data-confirm="' + (used.length ? 'Delete? Removes from ' + used.length + ' item type' + (used.length > 1 ? 's' : '') : 'Delete?') + '">×</button>' + '</td>' : '') + '</tr>';
     }
@@ -514,14 +521,16 @@ function whenSel(A, a) {
   return '<select data-af="when"><option value="">Always</option>' + A.filter(x => !a || x.id !== a.id).map(x => '<optgroup label="' + esc(x.name) + '">' + (x.values || []).map(v => '<option value="' + esc(x.name + '|' + v) + '"' + (cur === x.name + '|' + v ? ' selected' : '') + '>' + esc(x.name + ' = ' + v) + '</option>').join('') + '</optgroup>').join('') + '</select>';
 }
 function kindSel(a) { return '<select data-af="kind">' + AT_KINDS.map(k => '<option value="' + k[0] + '"' + ((a ? atKind(a) : 'list') === k[0] ? ' selected' : '') + '>' + k[1] + '</option>').join('') + '</select>' +
-  '<label class="small">Max (many values) <input data-af="max" type="number" min="1" max="20" value="' + esc(a ? atMax(a) : AT_MAX) + '" style="width:60px"></label>'; }
+  '<label class="small">Max (many values) <input data-af="max" type="number" min="1" max="20" value="' + esc(a ? atMax(a) : AT_MAX) + '" style="width:60px"></label> ' +
+  '<label class="small"><input type="checkbox" data-af="optional"' + (a && atOptional(a) ? ' checked' : '') + '> Optional (may be left blank)</label>'; }
 function atRead(tr) {
   const name = $('[data-af="name"]', tr).value.trim().toUpperCase().replace(/\s+/g, ' ');
   const values = Array.from(new Set($('[data-af="vals"]', tr).value.split(/[,\n]/).map(x => x.trim().toUpperCase().replace(/\s+/g, ' ')).filter(Boolean)));
   const w = ($('[data-af="when"]', tr) || { value: '' }).value; const k = w.indexOf('|');
   const kind = ($('[data-af="kind"]', tr) || { value: 'list' }).value || 'list';
   const max = Math.min(20, Math.max(1, num(($('[data-af="max"]', tr) || { value: '' }).value) || AT_MAX));
-  return { name, kind, max, values: ['brand', 'article', 'dims'].includes(kind) ? [] : values, when_attr: k > 0 ? w.slice(0, k) : '', when_val: k > 0 ? w.slice(k + 1) : '' };
+  const optional = !!(($('[data-af="optional"]', tr) || {}).checked);
+  return { name, kind, max, optional, values: ['brand', 'article', 'dims', 'text'].includes(kind) ? [] : values, when_attr: k > 0 ? w.slice(0, k) : '', when_val: k > 0 ? w.slice(k + 1) : '' };
 }
 ACTIONS['at-add'] = el => {
   if (!icSuper()) return;
@@ -529,7 +538,7 @@ ACTIONS['at-add'] = el => {
   if (!r.name || (!r.values.length && ['list', 'multi'].includes(r.kind))) { flash('Attribute name and at least one value are required.', 'err'); return; }
   if (catAttrs(cat).some(a => norm(a.name) === norm(r.name))) { flash(esc(r.name) + ' already exists in ' + esc(cat) + '.', 'err'); return; }
   if (norm(r.when_attr) === norm(r.name)) { flash('An attribute cannot depend on itself.', 'err'); return; }
-  Store.put('attributes', { id: uid(), category: cat, name: r.name, kind: r.kind, max: r.max, seq: catAttrs(cat).length + 1, values: r.values, when_attr: r.when_attr, when_val: r.when_val });
+  Store.put('attributes', { id: uid(), category: cat, name: r.name, kind: r.kind, max: r.max, optional: r.optional, seq: catAttrs(cat).length + 1, values: r.values, when_attr: r.when_attr, when_val: r.when_val });
   audit('attribute.add', cat + ' · ' + r.name, r.values.length + ' values'); icRender();
 };
 ACTIONS['at-edit'] = el => { IC_UI.editAttr = el.dataset.id; icRender(); };
@@ -540,7 +549,7 @@ ACTIONS['at-save'] = el => {
   if (!r.name || (!r.values.length && ['list', 'multi'].includes(r.kind))) { flash('Attribute name and at least one value are required.', 'err'); return; }
   if (catAttrs(a.category).some(x => x.id !== a.id && norm(x.name) === norm(r.name))) { flash(esc(r.name) + ' already exists in ' + esc(a.category) + '.', 'err'); return; }
   if (norm(r.when_attr) === norm(r.name)) { flash('An attribute cannot depend on itself.', 'err'); return; }
-  const old = a.name; a.name = r.name; a.kind = r.kind; a.max = r.max; a.values = r.values; a.when_attr = r.when_attr; a.when_val = r.when_val; Store.put('attributes', a);
+  const old = a.name; a.name = r.name; a.kind = r.kind; a.max = r.max; a.optional = r.optional; a.values = r.values; a.when_attr = r.when_attr; a.when_val = r.when_val; Store.put('attributes', a);
   if (norm(old) !== norm(r.name)) {
     typesOf(a.category).forEach(t => { if (usesAttr(t, old)) { t.attrs = t.attrs.map(x => norm(x) === norm(old) ? r.name : x); Store.put('item_types', t); } });
     catAttrs(a.category).forEach(x => { if (norm(x.when_attr || '') === norm(old)) { x.when_attr = r.name; Store.put('attributes', x); } });
