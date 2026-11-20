@@ -341,6 +341,7 @@ function fyNo(col, tag, width) {
 }
 // Approvals (PO approve/reject etc.) need Admin or Manager — plain edit access is not enough.
 function canApprove() { return isAdminRole() || can('approve', 'edit'); }
+function canApproveInvoice() { return isAdminRole() || can('inv_approve', 'edit'); }
 function isSuperAdmin() { const r = myRole(); return !!(r && r.system); }
 function nextNo(col, prefix) {
   const yr = new Date().getFullYear(); const head = prefix + '-' + yr + '-';
@@ -392,7 +393,8 @@ const MODULES = [
   { key: 'tracker', label: 'FMS Tracker', note: 'Edit = mark anyone\'s step, undo' },
   { key: 'builder', label: 'FMS Builder', note: 'Edit = change & activate flows' },
   { key: 'masters', label: 'Brands, Articles & Materials' },
-  { key: 'approve', label: 'Approvals (PO, requisition)' },
+  { key: 'approve', label: 'PO approval' },
+  { key: 'inv_approve', label: 'Invoice approval' },
   { key: 'excess', label: 'Excess material approval' },
   { key: 'issue_approve', label: 'Issue approval (Store Incharge)' },
   { key: 'users', label: 'Users' },
@@ -423,7 +425,11 @@ function accessLevel(dept, desig, mod) {
 // Screen access: every screen can be set on its own (key 's:<screen>'); otherwise it follows its module.
 // Order: designation screen > designation module > department screen > department module.
 // rights that are not a screen (approvals) still need a row in Access: they are listed as virtual screens, keyed by their module
-const RIGHT_SCREENS = [{ v: 'approve', l: 'PO / requisition / invoice approval', mod: 'approve' }, { v: 'excess', l: 'Excess material approval', mod: 'excess' }, { v: 'issue_approve', l: 'Issue approval (Store Incharge)', mod: 'issue_approve' }];
+const RIGHT_SCREENS = [
+  { v: 'approve', l: 'PO approval (approve, reject, cancel, short close)', mod: 'approve' },
+  { v: 'inv_approve', l: 'Invoice approval (approve, hold, reject, amend)', mod: 'inv_approve' },
+  { v: 'issue_approve', l: 'Requisition issue approval (Store Incharge)', mod: 'issue_approve' },
+  { v: 'excess', l: 'Excess material approval', mod: 'excess' }];
 function navScreens() { const out = []; NAV.forEach(g => (g.items || [g]).forEach(i => { if (i.v && i.mod && !out.some(x => x.v === i.v)) out.push({ v: i.v, l: i.l, mod: i.mod, menu: g.menu || '' }); })); RIGHT_SCREENS.forEach(r => out.push(Object.assign({ menu: 'Approvals' }, r))); return out; }
 function screenMod(v) { const s = navScreens().find(x => x.v === v); return s ? s.mod : (VIEWS[v] || {}).mod; }
 function screenAccess(dept, desig, v, mod) {

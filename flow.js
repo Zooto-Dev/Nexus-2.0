@@ -482,7 +482,8 @@ VIEWS.invapproval = {
     const codes = p.lines.map(l => l.material);
     if (!IA_UI.notes.length) IA_UI.notes = (i.grn_notes || []).length ? i.grn_notes.map(x => Object.assign({}, x)) : [{ inv_item: '', code: '', note: '' }];
     let h = '<div class="toolbar"><button class="btn" data-act="ia-back">‹ Back</button><span class="grow"></span>';
-    if (edit && IA_UI.act) h += '<input id="iaRem" style="min-width:320px" placeholder="' + (IA_UI.act === 'hold' ? 'Reason for hold' : 'Reason for rejection') + '"><button class="btn ' + (IA_UI.act === 'hold' ? 'primary' : 'danger') + '" data-act="ia-confirm" data-id="' + esc(i.id) + '">' + (IA_UI.act === 'hold' ? 'Put on Hold' : 'Reject Invoice') + '</button><button class="btn" data-act="ia-cancel">Cancel</button>';
+    if (edit && !canApproveInvoice()) h += '<span class="muted small">Only an invoice approver can approve, hold or reject</span>';
+    else if (edit && IA_UI.act) h += '<input id="iaRem" style="min-width:320px" placeholder="' + (IA_UI.act === 'hold' ? 'Reason for hold' : 'Reason for rejection') + '"><button class="btn ' + (IA_UI.act === 'hold' ? 'primary' : 'danger') + '" data-act="ia-confirm" data-id="' + esc(i.id) + '">' + (IA_UI.act === 'hold' ? 'Put on Hold' : 'Reject Invoice') + '</button><button class="btn" data-act="ia-cancel">Cancel</button>';
     else if (edit) h += '<button class="btn primary" data-act="ia-approve" data-id="' + esc(i.id) + '">Approve</button><button class="btn" data-act="ia-amend" data-id="' + esc(i.id) + '">Amend</button><button class="btn" data-act="ia-open" data-a="hold">Hold</button><button class="btn danger" data-act="ia-open" data-a="reject">Reject</button>';
     h += '</div>';
     h += '<div class="grid2"><div>' + kvTable([['Gate Entry', esc(i.no)], ['GRN No', esc(i.grn_no || '')], ['Bill Type', esc(i.bill_type || 'Invoice')], ['Vendor', '<b>' + esc(i.vendor) + '</b>'], ['PO Number', esc(i.po_no)], ['Invoice No', esc(i.bill_no)], ['Invoice Date', fmtD(i.bill_date)], ['Invoice Qty', qtyFmt(i.qty)], ['Inwarding', fmtDT(i.at)], ['Remark', esc(i.remark || '')]].concat(i.inv_status === 'Hold' ? [['Hold Reason', esc(i.inv_hold_reason || '')]] : [])) + '</div>' +
@@ -499,6 +500,7 @@ VIEWS.invapproval = {
   }
 };
 ACTIONS['ia-amend'] = el => {
+  if (!canApproveInvoice()) { flash('Only an invoice approver can amend an invoice.', 'err'); return; }
   if (!requirePerm('purchase', 'edit')) return;
   const i = Store.get('inwards', el.dataset.id); if (!i) return;
   // the approver corrects it here; it stays with him for approval (it does not go back to Store)
@@ -516,7 +518,7 @@ ACTIONS['ia-del'] = el => { IA_UI.notes.splice(+el.dataset.k, 1); if (!IA_UI.not
 ACTIONS['ia-open'] = el => { IA_UI.act = el.dataset.a; VIEWS.invapproval.render(); };
 ACTIONS['ia-cancel'] = () => { IA_UI.act = null; VIEWS.invapproval.render(); };
 ACTIONS['ia-approve'] = el => {
-  if (!requirePerm('purchase', 'edit')) return;
+  if (!requirePerm('purchase', 'edit')) return; if (!canApproveInvoice()) { flash('Only an invoice approver can approve an invoice.', 'err'); return; }
   const i = Store.get('inwards', el.dataset.id); if (!i || i.status !== 'Pending GRN') return;
   if (i.by === ME.name && !isSuperAdmin()) { flash('You made this gate entry — someone else must approve the invoice.', 'err'); return; }
   const notes = IA_UI.notes.map(n => ({ inv_item: String(n.inv_item || '').trim(), code: String(n.code || '').trim(), note: String(n.note || '').trim() })).filter(n => n.inv_item || n.code || n.note);
@@ -528,6 +530,7 @@ ACTIONS['ia-approve'] = el => {
   IA_UI.view = null; IA_UI.notes = []; flash(esc(i.bill_no) + ' approved.' + ((i.qc || []).length ? ' QC check pending.' : ' Ready for GRN.')); VIEWS.invapproval.render();
 };
 ACTIONS['ia-confirm'] = el => {
+  if (!canApproveInvoice()) { flash('Only an invoice approver can hold or reject an invoice.', 'err'); return; }
   if (!requirePerm('purchase', 'edit')) return;
   const i = Store.get('inwards', el.dataset.id); if (!i) return;
   const rem = ($('#iaRem') || { value: '' }).value.trim();
