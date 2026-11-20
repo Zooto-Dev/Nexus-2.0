@@ -27,7 +27,10 @@ function lpLines() {
 }
 const lpPlans = () => Store.all('line_plans').filter(p => !p.cancelled);
 const lpActs = () => Store.all('line_actuals');
-function lpPlannedOn(jc, line) { return lpPlans().filter(p => norm(p.jc_no) === norm(jc) && p.line === line).reduce((a, p) => a + num(p.qty), 0); }
+// what is already spoken for on a line: plans (less the pairs moved out of them) plus anything that ran without a plan
+function lpPlannedOn(jc, line) { return lpPlans().filter(p => norm(p.jc_no) === norm(jc) && p.line === line).reduce((a, p) => a + num(p.qty) - num(p.carried_qty), 0) + lpActs().filter(a => a.sub && norm(a.jc_no) === norm(jc) && a.line === line).reduce((s, a) => s + num(a.qty) + num(a.rej), 0); }
+// the pairs of a plan that did not run and were not yet moved to another day
+function lpShortOf(p) { const a = lpActForPlan(p); return a ? Math.max(0, num(p.qty) - num(a.qty) - num(a.rej) - num(p.carried_qty)) : 0; }
 function lpRejOn(jc, line) { return lpActs().filter(a => norm(a.jc_no) === norm(jc) && a.line === line).reduce((s, a) => s + num(a.rej), 0); }
 // the last stage: the line ticked "Last stage" in Settings, else the last line in order
 function lpFinalLine() { const f = Store.all('prod_lines').find(l => l.active !== false && l.final); return f ? String(f.name).toUpperCase() : lpLines().slice(-1)[0]; }
@@ -92,6 +95,7 @@ function lpPlanDialog(plan, pre) {
     const j = jcBy(jc); if (!j) return 'Job card not found.';
     const lf = Math.max(0, num(j.qty) - lpPlannedOn(j.no, line) + (edit && plan.line === line && norm(plan.jc_no) === norm(jc) ? num(plan.qty) : 0));
     if (qty > lf + 1e-9) return 'Only ' + qtyFmt(lf) + ' of ' + jc + ' is left to plan on ' + line + '.';
+    if (edit && qty < num(plan.carried_qty) + lpDoneForPlan(plan) - 1e-9) return 'At least ' + qtyFmt(num(plan.carried_qty) + lpDoneForPlan(plan)) + ' — that much already ran or was moved.';
     const rec = edit ? plan : { id: uid(), no: nextNo('line_plans', 'PL'), by: ME.name, at: nowIso() };
     const was = edit ? plan.line + ' ' + fmtD(plan.date) + ' ' + plan.jc_no + ' × ' + qtyFmt(plan.qty) : '';
     Object.assign(rec, { line, date, week: lpMonday(date), jc_no: j.no, brand: j.brand || '', article: j.article || '', colour: j.colour || '', qty, kit: $('#lpKit', dd).value, note: $('#lpNote', dd).value.trim() });
@@ -116,9 +120,11 @@ ACTIONS['lp-del'] = el => {
 /* ---------- the four tabs ---------- */
 function lpChip(p) {
   const done = lpDoneForPlan(p); const past = p.date < todayYmd();
-  const st = done >= num(p.qty) - 1e-9 ? 'done' : done > 0 ? 'part' : past ? 'miss' : p.kit === 'Short' ? 'short' : '';
+  const left = num(p.qty) - num(p.carried_qty);   // the pairs this card still stands for after any move
+  const st = num(p.carried_qty) && done + num(p.carried_qty) >= num(p.qty) - 1e-9 ? 'moved' : done >= left - 1e-9 && left > 0 ? 'done' : done > 0 ? 'part' : past ? 'miss' : p.kit === 'Short' ? 'short' : '';
   return '<a class="lp-chip ' + st + '" data-act="lp-open" data-id="' + esc(p.id) + '" title="' + esc(p.jc_no + ' · ' + (p.brand || '') + ' · ' + (p.article || '') + ' ' + (p.colour || '') + (p.note ? ' — ' + p.note : '')) + '">' +
-    '<b>' + esc(p.jc_no) + '</b><span class="lp-art">' + esc((p.article || '') + (p.colour ? ' · ' + p.colour : '')) + '</span><span class="lp-q">' + (done ? qtyFmt(done) + ' / ' : '') + qtyFmt(p.qty) + '</span></a>';
+    '<b>' + esc(p.jc_no) + '</b><span class="lp-art">' + esc((p.article || '') + (p.colour ? ' · ' + p.colour : '')) + '</span><span class="lp-q">' + (done ? qtyFmt(done) + ' / ' : '') + qtyFmt(p.qty) + '</span>' +
+    (num(p.carried_qty) ? '<span class="lp-art">↪ ' + qtyFmt(p.carried_qty) + ' moved to ' + esc(fmtD(p.carried_to_date)) + '</span>' : '') + (p.carried_from ? '<span class="lp-art">↩ from ' + esc(fmtD(p.carried_from_date)) + '</span>' : '') + '</a>';
 }
 function lpTabPlan(edit) {
   const mon = LP_UI.week || (LP_UI.week = lpMonday()); const days = lpWeekDays(mon); const today = todayYmd();
@@ -133,10 +139,10 @@ function lpTabPlan(edit) {
     h += '<tr><td class="lp-line"><b>' + esc(line) + '</b></td>' + days.map(d => {
       const cell = mine.filter(p => p.date === d).sort((a, b) => a.no < b.no ? -1 : 1);
       return '<td class="lp-cell' + (d === today ? ' today' : '') + '">' + cell.map(lpChip).join('') + (edit ? '<a class="lp-plus" data-act="lp-add" data-line="' + esc(line) + '" data-date="' + d + '" title="Plan here">+</a>' : '') + '</td>';
-    }).join('') + '<td class="num"><b>' + qtyFmt(mine.reduce((a, p) => a + num(p.qty), 0)) + '</b><div class="small muted">' + qtyFmt(mine.reduce((a, p) => a + lpDoneForPlan(p), 0)) + ' made</div></td></tr>';
+    }).join('') + '<td class="num"><b>' + qtyFmt(mine.reduce((a, p) => a + num(p.qty) - num(p.carried_qty), 0)) + '</b><div class="small muted">' + qtyFmt(mine.reduce((a, p) => a + lpDoneForPlan(p), 0)) + ' made</div></td></tr>';
   });
   h += '</table></div>';
-  h += '<div class="lp-legend"><span><i class="lp-chip done"></i> made in full</span><span><i class="lp-chip part"></i> partly made</span><span><i class="lp-chip miss"></i> day passed, nothing entered</span><span><i class="lp-chip short"></i> material short</span><span><i class="lp-chip"></i> coming up</span> · click a card to change or remove it · <b>+</b> plans a job card on that line and day</div>';
+  h += '<div class="lp-legend"><span><i class="lp-chip done"></i> made in full</span><span><i class="lp-chip part"></i> partly made</span><span><i class="lp-chip miss"></i> day passed, nothing entered</span><span><i class="lp-chip short"></i> material short</span><span><i class="lp-chip"></i> coming up</span><span><i class="lp-chip moved"></i> moved to another day</span> · click a card to change or remove it · <b>+</b> plans a job card on that line and day · ↪ pairs that did not run were moved to another day (from the Daily tab)</div>';
   // what is still to be planned, for the line in view (or all)
   const rows = []; lpOpenJcs().forEach(j => lines.forEach(line => { const left = num(j.qty) - lpPlannedOn(j.no, line); if (left > 1e-9) rows.push({ j, line, left }); }));
   h += '<h2 style="margin:16px 0 6px">Still to plan <span class="muted small">— open job cards with quantity not yet on the board</span></h2>' +
@@ -163,12 +169,13 @@ function lpTabDaily(edit) {
     h += '<div class="card lp-day" data-line="' + esc(line) + '"><div class="lp-day-h"><b>' + esc(line) + '</b>' +
       '<span class="lp-pill">Planned <b>' + qtyFmt(planned) + '</b></span><span class="lp-pill ok">Good <b>' + qtyFmt(made) + '</b></span><span class="lp-pill bad">Rejected <b>' + qtyFmt(rej) + '</b></span>' + (saved ? '<span class="st Done">Saved</span>' : plans.length ? '<span class="st Pending">Not saved</span>' : '') + '<span class="grow"></span>' +
       (edit ? '<button class="btn sm" data-act="lp-sub" data-line="' + esc(line) + '">+ Ran something else</button> <button class="btn sm primary" data-act="lp-save-day" data-line="' + esc(line) + '">Save ' + esc(line) + '</button>' : '') + '</div>' +
-      '<div class="tbl-wrap"><table class="lp-dtab"><tr><th>Job Card</th><th>Article</th><th class="num">Planned</th><th class="num">Good made</th><th class="num">Rejected</th><th class="num">Short</th><th>Reason (needed when short or rejected)</th><th style="width:50px"></th></tr>' +
+      '<div class="tbl-wrap"><table class="lp-dtab"><tr><th>Job Card</th><th>Article</th><th class="num">Planned</th><th class="num">Good made</th><th class="num">Rejected</th><th class="num">Short</th><th>Reason (needed when short or rejected)</th><th style="width:150px"></th></tr>' +
       (plans.length ? plans.map(p => { const a = lpActForPlan(p); const v = a ? num(a.qty) : '', r = a ? num(a.rej) : ''; const short = a ? Math.max(0, num(p.qty) - num(a.qty) - num(a.rej)) : '';
         return '<tr data-plan="' + esc(p.id) + '"><td><b>' + esc(p.jc_no) + '</b></td><td>' + esc((p.article || '') + (p.colour ? ' · ' + p.colour : '')) + '</td><td class="num">' + qtyFmt(p.qty) + '</td>' +
           '<td class="num">' + (edit ? '<input type="number" min="0" step="1" class="right lp-made" value="' + esc(v) + '" data-planned="' + num(p.qty) + '">' : qtyFmt(v)) + '</td>' +
           '<td class="num">' + (edit ? '<input type="number" min="0" step="1" class="right lp-rej" value="' + esc(r) + '">' : qtyFmt(r)) + '</td>' +
-          '<td class="num lp-short ' + (short > 0 ? 'late-txt' : '') + '">' + (short === '' ? '' : qtyFmt(short)) + '</td><td>' + (edit ? '<input class="lp-why" value="' + esc(a ? a.reason || '' : '') + '" placeholder="e.g. material short, machine down, stitching fault">' : esc(a ? a.reason || '' : '')) + '</td><td></td></tr>'; }).join('')
+          '<td class="num lp-short ' + (short > 0 ? 'late-txt' : '') + '">' + (short === '' ? '' : qtyFmt(short)) + '</td><td>' + (edit ? '<input class="lp-why" value="' + esc(a ? a.reason || '' : '') + '" placeholder="e.g. material short, machine down, stitching fault">' : esc(a ? a.reason || '' : '')) + '</td>' +
+          '<td class="nowrap">' + (num(p.carried_qty) ? '<span class="small muted">↪ ' + qtyFmt(p.carried_qty) + ' moved to ' + esc(fmtD(p.carried_to_date)) + '</span>' : (edit && a && lpShortOf(p) > 0 ? '<button class="btn sm" data-act="lp-carry" data-id="' + esc(p.id) + '" title="Plan the pairs that did not run on another day">Move ' + qtyFmt(lpShortOf(p)) + ' →</button>' : '')) + '</td></tr>'; }).join('')
         : '<tr><td colspan="8" class="empty">Nothing planned on ' + esc(line) + ' for this day</td></tr>') +
       subs.map(a => '<tr class="lp-subrow" data-sub="' + esc(a.id) + '"><td><span class="st Pending">Not planned</span> <b>' + esc(a.jc_no) + '</b></td><td>' + esc((jcBy(a.jc_no) || {}).article || '') + '</td><td class="num muted">—</td><td class="num">' + (edit ? '<input type="number" min="0" step="1" class="right lp-made" value="' + esc(a.qty) + '">' : qtyFmt(a.qty)) + '</td><td class="num">' + (edit ? '<input type="number" min="0" step="1" class="right lp-rej" value="' + esc(a.rej || '') + '">' : qtyFmt(a.rej)) + '</td><td></td><td>' + (edit ? '<input class="lp-why" value="' + esc(a.reason || '') + '">' : esc(a.reason || '')) + '</td><td>' + (edit ? '<button class="btn ghost sm danger" data-act="lp-sub-del" data-id="' + esc(a.id) + '" data-confirm="Remove?">×</button>' : '') + '</td></tr>').join('') +
       '</table></div></div>';
@@ -190,18 +197,46 @@ ACTIONS['lp-save-day'] = el => {
   $$('tr[data-sub]', card).forEach(tr => { const a = Store.get('line_actuals', tr.dataset.sub); if (!a) return; a.qty = Math.max(0, num($('.lp-made', tr).value)); a.rej = Math.max(0, num($('.lp-rej', tr).value)); a.reason = $('.lp-why', tr).value.trim(); Store.put('line_actuals', a); n++; });
   audit('line_actual.save', line + ' ' + day, n + ' row(s)'); flash(line + ' saved for ' + fmtD(day) + '.'); VIEWS.lineplan.render();
 };
+ACTIONS['lp-carry'] = el => {
+  if (!requirePerm('production', 'edit')) return; const p = Store.get('line_plans', el.dataset.id); if (!p) return;
+  const left = lpShortOf(p); if (left <= 0) { flash('Nothing left to move.', 'err'); return; }
+  const body = '<div class="small muted" style="margin-bottom:8px"><b>' + esc(p.jc_no) + '</b> on ' + esc(p.line) + ', ' + esc(fmtD(p.date)) + ': planned ' + qtyFmt(p.qty) + ', ' + qtyFmt(left) + ' did not run. Plan those pairs again:</div><table class="jckv">' +
+    '<tr><td class="k">Pairs to move</td><td class="v"><input id="lpCqty" type="number" min="1" max="' + left + '" step="1" value="' + left + '" style="width:140px"></td></tr>' +
+    '<tr><td class="k">To date</td><td class="v"><input id="lpCdate" type="date" value="' + lpAdd(p.date, 1) + '"></td></tr>' +
+    '<tr><td class="k">On line</td><td class="v"><select id="lpCline">' + lpLines().map(l => '<option' + (l === p.line ? ' selected' : '') + '>' + esc(l) + '</option>').join('') + '</select></td></tr></table>';
+  lpDialog('Move to another day', body, 'Move', d => {
+    const qty = num($('#lpCqty', d).value), date = $('#lpCdate', d).value, line = $('#lpCline', d).value;
+    if (!(qty > 0) || qty > left + 1e-9) return 'Between 1 and ' + qtyFmt(left) + '.'; if (!date) return 'Pick the date.';
+    const n = Store.put('line_plans', { id: uid(), no: nextNo('line_plans', 'PL'), line, date, week: lpMonday(date), jc_no: p.jc_no, brand: p.brand, article: p.article, colour: p.colour, qty, kit: p.kit || '', note: p.note || '', carried_from: p.no, carried_from_date: p.date, by: ME.name, at: nowIso() });
+    p.carried_qty = num(p.carried_qty) + qty; p.carried_to = n.no; p.carried_to_date = date; Store.put('line_plans', p);
+    audit('line_plan.carry', p.no, qtyFmt(qty) + ' of ' + p.jc_no + ' moved from ' + p.line + ' ' + fmtD(p.date) + ' to ' + line + ' ' + fmtD(date) + ' (' + n.no + ')');
+    flash(qtyFmt(qty) + ' pairs of ' + p.jc_no + ' moved to ' + fmtD(date) + '.'); VIEWS.lineplan.render(); return '';
+  });
+};
 ACTIONS['lp-sub'] = el => {
   if (!requirePerm('production', 'edit')) return; const line = el.dataset.line; const day = LP_UI.day;
   const body = '<div class="small muted" style="margin-bottom:8px">Something ran on ' + esc(line) + ' on ' + esc(fmtD(day)) + ' that was not on the plan.</div><table class="jckv">' +
     '<tr><td class="k">Job Card</td><td class="v"><select id="lpSubJc"><option value="">Pick the job card…</option>' + lpOpenJcs().map(j => '<option value="' + esc(j.no) + '">' + esc(lpJcLabel(j)) + '</option>').join('') + '</select></td></tr>' +
     '<tr><td class="k">Good made (pairs)</td><td class="v"><input id="lpSubQty" type="number" min="0" step="1" style="width:140px"></td></tr>' +
     '<tr><td class="k">Rejected (pairs)</td><td class="v"><input id="lpSubRej" type="number" min="0" step="1" style="width:140px" value="0"></td></tr>' +
-    '<tr><td class="k">Why</td><td class="v"><input id="lpSubWhy" placeholder="e.g. planned card had no material"></td></tr></table>';
-  lpDialog('Ran something else', body, 'Add', d => {
-    const jc = $('#lpSubJc', d).value, qty = num($('#lpSubQty', d).value), rej = num($('#lpSubRej', d).value), why = $('#lpSubWhy', d).value.trim();
+    '<tr><td class="k">Why</td><td class="v"><input id="lpSubWhy" placeholder="e.g. planned card had no material"></td></tr>' +
+    '<tr><td class="k">Its own plan</td><td class="v"><select id="lpSubCut"><option value="">— pick the job card first —</option></select><div class="small muted">These pairs come out of that plan, so it is not run twice.</div></td></tr></table>';
+  const d = lpDialog('Ran something else', body, 'Add', dd => {
+    const jc = $('#lpSubJc', dd).value, qty = num($('#lpSubQty', dd).value), rej = num($('#lpSubRej', dd).value), why = $('#lpSubWhy', dd).value.trim(), cutId = $('#lpSubCut', dd).value;
     if (!jc) return 'Pick the job card.'; if (!(qty > 0 || rej > 0)) return 'Type the quantity.'; if (!why) return 'Write why it ran instead.';
-    Store.put('line_actuals', { id: uid(), date: day, line, jc_no: jc, plan_id: '', sub: true, planned: 0, qty, rej, short: 0, reason: why, by: ME.name, at: nowIso() });
-    audit('line_actual.sub', line + ' ' + day, jc + ' × ' + qtyFmt(qty) + (rej ? ' / rej ' + qtyFmt(rej) : '') + ' — ' + why); VIEWS.lineplan.render(); return '';
+    Store.put('line_actuals', { id: uid(), date: day, line, jc_no: jc, plan_id: '', sub: true, planned: 0, qty, rej, short: 0, reason: why, cut_plan: cutId || '', by: ME.name, at: nowIso() });
+    let note = '';
+    if (cutId) { const cp = Store.get('line_plans', cutId); if (cp) { const take = Math.min(num(cp.qty) - num(cp.carried_qty), qty + rej); const was = cp.qty; cp.qty = Math.max(0, num(cp.qty) - take);
+      if (cp.qty <= 0) { cp.cancelled = true; cp.cancelled_by = ME.name; cp.cancelled_at = nowIso(); cp.cancel_note = 'Ran early on ' + fmtD(day); }
+      cp.note = ((cp.note || '') + ' · ' + qtyFmt(take) + ' ran early on ' + fmtD(day)).replace(/^ · /, ''); Store.put('line_plans', cp);
+      note = ' — ' + qtyFmt(take) + ' taken out of ' + cp.no + ' (' + fmtD(cp.date) + ': ' + qtyFmt(was) + ' → ' + qtyFmt(cp.qty) + (cp.cancelled ? ', removed' : '') + ')'; } }
+    audit('line_actual.sub', line + ' ' + day, jc + ' × ' + qtyFmt(qty) + (rej ? ' / rej ' + qtyFmt(rej) : '') + ' — ' + why + note); VIEWS.lineplan.render(); return '';
+  });
+  // the job card's other plans on this line: the next one is picked by default
+  $('#lpSubJc', d).addEventListener('change', () => {
+    const jc = $('#lpSubJc', d).value; const sel = $('#lpSubCut', d);
+    const others = lpPlans().filter(p => norm(p.jc_no) === norm(jc) && p.line === line && p.date !== day && num(p.qty) - num(p.carried_qty) > 0 && lpDoneForPlan(p) <= 0).sort((a, b) => a.date < b.date ? -1 : 1);
+    sel.innerHTML = '<option value="">No — it has no plan on ' + esc(line) + ' / keep its plan as it is</option>' + others.map((p, i) => '<option value="' + esc(p.id) + '"' + (i === 0 ? ' selected' : '') + '>' + esc(fmtD(p.date) + ' · planned ' + qtyFmt(num(p.qty) - num(p.carried_qty)) + ' (' + p.no + ')') + '</option>').join('');
   });
 };
 ACTIONS['lp-sub-del'] = el => { const a = Store.get('line_actuals', el.dataset.id); if (!a || !requirePerm('production', 'edit')) return; Store.del('line_actuals', a.id); audit('line_actual.remove', a.line + ' ' + a.date, a.jc_no + ' × ' + qtyFmt(a.qty)); VIEWS.lineplan.render(); };
@@ -220,7 +255,7 @@ function lpTabSummary() {
   const today = todayYmd();
   const rows = lpLines().map(line => { const P = plans.filter(p => p.line === line), A = acts.filter(a => a.line === line);
     const due = P.filter(p => p.date <= today || lpActForPlan(p));
-    const planned = P.reduce((a, p) => a + num(p.qty), 0), duePlanned = due.reduce((a, p) => a + num(p.qty), 0);
+    const planned = P.reduce((a, p) => a + num(p.qty) - num(p.carried_qty), 0), duePlanned = due.reduce((a, p) => a + num(p.qty) - num(p.carried_qty), 0);
     const onPlan = A.filter(a => !a.sub).reduce((a, x) => a + num(x.qty), 0), sub = A.filter(a => a.sub).reduce((a, x) => a + num(x.qty), 0), rej = A.reduce((a, x) => a + num(x.rej), 0), short = Math.max(0, duePlanned - onPlan - A.filter(a => !a.sub).reduce((a, x) => a + num(x.rej), 0));
     return { line, planned, duePlanned, onPlan, sub, rej, short, total: onPlan + sub, adh: duePlanned ? Math.round(onPlan / duePlanned * 100) : null }; });
   const T = rows.reduce((t, r) => ({ planned: t.planned + r.planned, duePlanned: t.duePlanned + r.duePlanned, onPlan: t.onPlan + r.onPlan, sub: t.sub + r.sub, rej: t.rej + r.rej, short: t.short + r.short, total: t.total + r.total }), { planned: 0, duePlanned: 0, onPlan: 0, sub: 0, rej: 0, short: 0, total: 0 });
