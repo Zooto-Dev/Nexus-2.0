@@ -422,7 +422,9 @@ function accessLevel(dept, desig, mod) {
 }
 // Screen access: every screen can be set on its own (key 's:<screen>'); otherwise it follows its module.
 // Order: designation screen > designation module > department screen > department module.
-function navScreens() { const out = []; NAV.forEach(g => (g.items || [g]).forEach(i => { if (i.v && i.mod && !out.some(x => x.v === i.v)) out.push({ v: i.v, l: i.l, mod: i.mod, menu: g.menu || '' }); })); return out; }
+// rights that are not a screen (approvals) still need a row in Access: they are listed as virtual screens, keyed by their module
+const RIGHT_SCREENS = [{ v: 'approve', l: 'PO / requisition / invoice approval', mod: 'approve' }, { v: 'excess', l: 'Excess material approval', mod: 'excess' }, { v: 'issue_approve', l: 'Issue approval (Store Incharge)', mod: 'issue_approve' }];
+function navScreens() { const out = []; NAV.forEach(g => (g.items || [g]).forEach(i => { if (i.v && i.mod && !out.some(x => x.v === i.v)) out.push({ v: i.v, l: i.l, mod: i.mod, menu: g.menu || '' }); })); RIGHT_SCREENS.forEach(r => out.push(Object.assign({ menu: 'Approvals' }, r))); return out; }
 function screenMod(v) { const s = navScreens().find(x => x.v === v); return s ? s.mod : (VIEWS[v] || {}).mod; }
 function screenAccess(dept, desig, v, mod) {
   const a = accessOf(); const g = (a.desig || {})[(dept || '') + '|' + (desig || '')] || {}; const d = (a.dept || {})[dept || ''] || {}; const k = 's:' + v;
@@ -459,6 +461,8 @@ function can(mod, level) {             // level: 'view' | 'edit'
   // inside a screen, the screen's own setting decides for its module
   const cv = typeof curView === 'function' ? curView().v : ''; const onScreen = cv && screenMod(cv) === mod;
   if (onScreen && !r.perms) return lvlOk(accessFor(ME, cv, mod).lv, level);
+  // an approval right: whatever Access gives this person for it (person → designation → department → role)
+  if (RIGHT_SCREENS.some(x => x.mod === mod) && !r.perms) return lvlOk(accessFor(ME, mod, mod).lv, level);
   if (r.admin) return lvlOk(adminAccess('', mod), level);
   const p = r.perms ? (r.perms[mod] || 'none') : accessLevel(ME.department, ME.designation, mod);
   return level === 'edit' ? p === 'edit' : (p === 'view' || p === 'edit');

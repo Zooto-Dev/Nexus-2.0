@@ -301,6 +301,7 @@ VIEWS.roles = {
     const U = Store.get('users', T.user);
     const scr = navScreens();
     const groups = NAV.filter(g => g.items || g.v).map(g => ({ name: g.menu || g.l, items: (g.items || [g]).map(i => scr.find(x => x.v === i.v)).filter((x, k, arr) => x && x.mod !== 'users' && arr.indexOf(x) === k) })).filter(g => g.items.length);
+    groups.push({ name: 'Approvals', items: scr.filter(x => x.menu === 'Approvals') });   // rights without a screen: Edit = may approve
     const dm = (a.dept || {})[T.dept] || {}, gm = (a.desig || {})[T.dept + '|' + T.desig] || {}, ad = a.admin || {}, ru = a.role_user || {}, pu = (a.user || {})[T.user] || {};
     const mv = (o, x) => o['s:' + x.v] || (o[x.mod] && o[x.mod] !== 'none' ? o[x.mod] : '');
     const deptEff = x => mv(dm, x) || ru['s:' + x.v] || 'none';
