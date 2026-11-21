@@ -457,6 +457,8 @@ function accessFor(u, v, mod, skipPerson) {
   return { lv: 'none', src: 'Not set' };
 }
 function canScreen(v, level) {
+  // a sample is approved by the person who asked for it, so that screen opens for him without Purchase access
+  if (v === 'invapproval' && typeof mySampleInwards === 'function' && mySampleInwards().length) return true;
   const mod = screenMod(v); if (!mod) return false;
   const r = myRole(); if (!r) return false;
   if (mod === 'users') return !!r.system;
