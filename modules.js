@@ -87,7 +87,9 @@ function vendorSel(attr, cur) {
   return '<select ' + attr + '><option value=""></option>' + (cur && !v ? '<option value="' + esc(cur) + '" selected data-notven>' + esc(cur) + ' — not in Vendors</option>' : '') +
     vendorNames().map(n => '<option' + (v && v.name === n ? ' selected' : '') + '>' + esc(n) + '</option>').join('') + '</select>';
 }
-function supplierOf(text) { const v = vendorBy(text); return v ? v.name : String(text || '').trim(); }
+// Only a name from the Vendors master is a vendor. Anything else comes back blank and is reported,
+// so a pasted sheet can never invent a supplier.
+function supplierOf(text, bad) { const t = String(text || '').trim(); const v = vendorBy(t); if (v) return v.name; if (t && bad) bad.push(t); return ''; }
 function badSuppliers(lines) { return Array.from(new Set(lines.filter(l => l.supplier && !vendorBy(l.supplier)).map(l => l.supplier))); }
 function dlVendor() { return '<datalist id="dlVen">' + vendorNames().map(v => '<option value="' + esc(v) + '">').join('') + '</datalist>'; }
 // stk = good stock; rej = GRN rejection (goes back to the vendor);
@@ -722,8 +724,11 @@ VIEWS.sourcing = {
   mod: 'purchase', render() {
     masterView({
       col: 'sourcing', mod: 'purchase', title: 'Sourcing', view: VIEWS.sourcing, sort: 'material', paste: true,
-      cols: [{ k: 'material', l: 'Material', w: 140, upper: true }, { k: 'vendor', l: 'Vendor' }, { k: 'moq', l: 'MOQ', type: 'number', w: 80 }, { k: 'lead_days', l: 'Lead days', type: 'number', w: 80 }, { k: 'remark', l: 'Remark' }],
-      validate: d => !String(d.material || '').trim() ? 'Material is required.' : !String(d.vendor || '').trim() ? 'Vendor is required.' : (Store.all('sourcing').some(x => x.id !== d.id && norm(x.material) === norm(d.material) && norm(x.vendor) === norm(d.vendor)) ? 'This material+vendor already exists.' : '')
+      cols: [{ k: 'material', l: 'Material', w: 140, upper: true }, { k: 'vendor', l: 'Vendor', opts: () => [{ v: '', l: '' }].concat(vendorNames().map(n => ({ v: n, l: n }))) }, { k: 'moq', l: 'MOQ', type: 'number', w: 80 }, { k: 'lead_days', l: 'Lead days', type: 'number', w: 80 }, { k: 'remark', l: 'Remark' }],
+      normalize: d => { const v = vendorBy(d.vendor); if (v) d.vendor = v.name; const m = matBy(d.material); if (m) d.material = m.code; },
+      validate: d => !String(d.material || '').trim() ? 'Material is required.' : !matBy(d.material) ? 'Material ' + d.material + ' is not in the item master.' :
+        !String(d.vendor || '').trim() ? 'Vendor is required.' : !vendorBy(d.vendor) ? 'Vendor ' + d.vendor + ' is not in the Vendors master \u2014 add the vendor first.' :
+        (Store.all('sourcing').some(x => x.id !== d.id && norm(x.material) === norm(d.material) && norm(x.vendor) === norm(d.vendor)) ? 'This material+vendor already exists.' : '')
     });
     $('#main').insertAdjacentHTML('beforeend', '');
   }
@@ -1031,7 +1036,7 @@ ACTIONS['jcf-bomrow'] = () => { $('#jfBom').insertAdjacentHTML('beforeend', jcfB
 ACTIONS['jcf-bom-del'] = el => { el.closest('tr').remove(); jcfRecalc(); };
 ACTIONS['jcf-paste'] = () => $('#jfPasteBox').classList.toggle('hidden');
 function jcfImportText(text) {
-  let ok = 0, bad = [];
+  let ok = 0, bad = [], badSup = [];
   const matOf = c => Store.all('materials').find(x => norm(x.name) === norm(c) || norm(x.code) === norm(c));
   text.split(/\r?\n/).forEach(line => {
     const cells = line.split(/\t|\s*\|\s*/).map(x => x.trim());
@@ -1047,12 +1052,12 @@ function jcfImportText(text) {
       process: before[0] || '', section: before[1] || '',
       material: m.code, uom: m.uom,
       norms: ni >= 0 ? after[ni] : '',
-      supplier: supplierOf(after.find((c, k) => k !== ni && c && !isNum(c)) || '')
+      supplier: supplierOf(after.find((c, k) => k !== ni && c && !isNum(c)) || '', badSup)
     })); ok++;
   });
   if (ok) $$('#jfBom tr[data-bomrow]').forEach(tr => { if (!$('[data-b="mat"]', tr).value.trim() && !$('[data-b="norms"]', tr).value) tr.remove(); });
   jcfRecalc();
-  flash(ok + ' items imported.' + (bad.length ? ' Not matched: ' + esc(bad.join(', ')) : ''), bad.length ? 'err' : '');
+  flash(ok + ' items imported.' + (bad.length ? ' Not matched: ' + esc(bad.join(', ')) : '') + (badSup.length ? ' Supplier left blank, not in Vendors: ' + esc(Array.from(new Set(badSup)).join(', ')) : ''), (bad.length || badSup.length) ? 'err' : '');
 }
 ACTIONS['jcf-paste-go'] = () => { $('#jfPasteBox').classList.add('hidden'); jcfImportText($('#jfPaste').value); };
 ACTIONS['jc-new'] = () => { JC_UI.form = !JC_UI.form; VIEWS.jobcards.render(); };
@@ -1651,7 +1656,7 @@ ACTIONS['bom-line'] = () => { $('#nbTable').insertAdjacentHTML('beforeend', bomR
 ACTIONS['bom-line-del'] = el => { el.closest('tr').remove(); bomRecalc(); };
 ACTIONS['bom-paste-t'] = () => $('#nbPasteBox').classList.toggle('hidden');
 function bomImportText(text) {
-  let ok = 0, bad = [];
+  let ok = 0, bad = [], badSup = [];
   const matOf = c => Store.all('materials').find(x => norm(x.name) === norm(c) || norm(x.code) === norm(c));
   const isNum = c => /^\d*\.?\d+$/.test(c);
   text.split(/\r?\n/).forEach(line => {
@@ -1670,12 +1675,12 @@ function bomImportText(text) {
       section: before.length >= 2 ? before[before.length - 2] : '',
       category: before.length >= 1 ? before[before.length - 1] : (m.group || ''),
       material: m.code, uom: m.uom, qty: nums[0] || '', price: m.price || '',
-      supplier: supplierOf(txts[0] || ''), remark: txts[1] || ''
+      supplier: supplierOf(txts[0] || '', badSup), remark: txts[1] || ''
     })); ok++;
   });
   if (ok) $$('#nbTable tr[data-bline]').forEach(tr => { if (!$('[data-nb="mat"]', tr).value.trim() && !$('[data-nb="qty"]', tr).value) tr.remove(); });
   bomRecalc();
-  flash(ok + ' items imported.' + (bad.length ? ' Not matched: ' + esc(bad.join(', ')) : ''), bad.length ? 'err' : '');
+  flash(ok + ' items imported.' + (bad.length ? ' Not matched: ' + esc(bad.join(', ')) : '') + (badSup.length ? ' Supplier left blank, not in Vendors: ' + esc(Array.from(new Set(badSup)).join(', ')) : ''), (bad.length || badSup.length) ? 'err' : '');
 }
 ACTIONS['bom-paste-go'] = () => { $('#nbPasteBox').classList.add('hidden'); bomImportText($('#nbPaste').value); };
 ACTIONS['bom-save'] = () => {
