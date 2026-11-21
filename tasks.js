@@ -346,7 +346,12 @@ function escL1Card(who) {
         '<td class="noprint nowrap">' + (e.commit_at ? '' : '<button class="btn sm" data-act="esc-date" data-id="' + esc(e.id) + '">New date</button> ') + '<button class="btn sm primary" data-act="esc-resolve" data-id="' + esc(e.id) + '">Resolve</button></td></tr>'; }).join('') + '</table></div>';
   return '<div class="sa-lbl">First escalations — yours to clear</div>' + saCard({ title: 'First escalations', n: mine.length, tone: 'bad', ico: 'alert', link: '#/escalations', linkText: 'All escalations', empty: 'No first escalation is waiting with you', sub: mine.length ? 'give a new date or resolve — after one working day they go to the Super Admin' : '', body: body });
 }
-function saHomeHtml(afterStrip) {
+/* ================= The Super Admin home: one tab bar, one section per tab =================
+   Every section lives in exactly one tab, so nothing mixes. SX_UI.tab says which tab is open;
+   a doer row elsewhere can deep-link into the Score tab by setting it to 'score'. */
+const SA_TABS = [{ v: 'apr', l: 'Approvals' }, { v: 'esc', l: 'Escalations' }, { v: 'mny', l: 'Money' },
+  { v: 'exc', l: 'Excess' }, { v: 'dly', l: 'Delay' }, { v: 'score', l: 'Score' }, { v: 'req', l: 'My requests' }];
+function saHomeHtml(names) {
   if (!SA_UI.from) { const d = new Date(); SA_UI.from = ymdOf(new Date(d.getFullYear(), d.getMonth(), 1)); SA_UI.to = todayYmd(); }
   try { escRun(); } catch (e) { console.error(e); }
   const pa = paRows(); const tasks = allTasks(); const now = new Date();
@@ -355,29 +360,60 @@ function saHomeHtml(afterStrip) {
   const prq = Store.all('price_requests').filter(x => x.status === 'Pending').sort((a, b) => a.at < b.at ? -1 : 1);
   const escs = Store.all('escalations').filter(e => e.status === 'Open');
   const l2 = escs.filter(e => e.level === 2).sort((a, b) => a.planned < b.planned ? -1 : 1); const l1n = escs.length - l2.length;
+  const me = (ME && ME.doer) || '';
+  const l1mine = escs.filter(e => e.level === 1 && norm(e.l1 || '') === norm(me)).length;
   const delayed = tasks.filter(t => !t.done && !t.demo && t.status === 'Delayed' && t.doer !== 'SYSTEM');
   const score = scoreRows(SA_UI.from, SA_UI.to);
   const avg = score.length ? score.reduce((a, r) => a + r.score, 0) / score.length : null;
-  const card = (href, v, l, cls, ico) => '<a class="dk-c sa-t' + (num(v) ? ' on-' + (cls === 'late-txt' ? 'bad' : 'warn') : '') + '" href="' + href + '"><span class="sa-tt">' + saIco(ico || 'check') + '<span class="l">' + l + '</span></span><span class="v ' + (cls || '') + '">' + v + '</span></a>';
-  let h = '<div class="sa-lbl">Needs you now</div><div class="dk sa-k">' + card('#/excessapproval', exc.length, 'Excess approvals', exc.length ? 'late-txt' : '', 'box') + card('#/poapproval', poa.length, 'PO approvals', poa.length ? 'pend-txt' : '', 'file') + card('#/priceapproval', prq.length, 'Price approvals', prq.length ? 'pend-txt' : '', 'tag') +
-    card('#/escalations', l2.length, '2nd escalations', l2.length ? 'late-txt' : '', 'alert') + card('#/escalations', l1n, '1st escalations', l1n ? 'pend-txt' : '', 'alert') +
-    card('#/alltasks', delayed.length, 'Delayed tasks', delayed.length ? 'late-txt' : '', 'clock') + card('#/home', avg == null ? '—' : avg.toFixed(2), 'Team score', scoreCls(avg), 'trend').replace('href="#/home"', 'data-act="sx-tab" data-v="score"') + '</div>';
-  h += afterStrip || '';
+  const tab = SA_TABS.some(t => t.v === SX_UI.tab) ? SX_UI.tab : 'apr';
+  const card = (href, v, l, cls, ico, tab2) => '<a class="dk-c sa-t' + (num(v) ? ' on-' + (cls === 'late-txt' ? 'bad' : 'warn') : '') + '" ' +
+    (tab2 ? 'data-act="sx-tab" data-v="' + tab2 + '"' : 'href="' + href + '"') + '><span class="sa-tt">' + saIco(ico || 'check') + '<span class="l">' + l + '</span></span><span class="v ' + (cls || '') + '">' + v + '</span></a>';
+
+  // the strip stays above the tabs: one glance at everything, each tile opens the place it belongs to
+  let h = '<div class="sa-lbl">Needs you now</div><div class="dk sa-k">' +
+    card('#/excessapproval', exc.length, 'Excess approvals', exc.length ? 'late-txt' : '', 'box') +
+    card('#/poapproval', poa.length, 'PO approvals', poa.length ? 'pend-txt' : '', 'file') +
+    card('#/priceapproval', prq.length, 'Price approvals', prq.length ? 'pend-txt' : '', 'tag') +
+    card('', l2.length, '2nd escalations', l2.length ? 'late-txt' : '', 'alert', 'esc') +
+    card('', l1n, '1st escalations', l1n ? 'pend-txt' : '', 'alert', 'esc') +
+    card('#/alltasks', delayed.length, 'Delayed tasks', delayed.length ? 'late-txt' : '', 'clock') +
+    card('', avg == null ? '—' : avg.toFixed(2), 'Team score', scoreCls(avg), 'trend', 'score') + '</div>';
+
+  const nOf = { apr: exc.length + poa.length + prq.length, esc: l2.length + l1mine, dly: delayed.length };
+  h += '<div class="sa-tabbar">' + seg('sxTab', SA_TABS.map(t => ({ v: t.v, l: t.l + (nOf[t.v] ? ' ' + nOf[t.v] : '') })), tab) + '</div>';
+
   const tbl = (pg, head, rows, cols) => '<div class="tbl-wrap"><table class="nofilter nopage sa-tb" data-pg="' + pg + '"><tr>' + head.map(x => '<th' + (/^#|Delay|Total|Done|Late|Open|Avg|Score|On|Overdue|Level|%/.test(x) ? ' class="num"' : '') + '>' + x + '</th>').join('') + '</tr>' + (rows.length ? rows.join('') : '<tr><td colspan="' + cols + '" class="empty">Nothing pending</td></tr>') + '</table></div>';
   const dl = m => m ? '<span class="late-txt">' + fmtDelay(m) + '</span>' : '';
-  // approvals only the Super Admin gives
-  h += '<div class="sa-lbl">Approvals waiting with you</div><div class="dgrid sa-row">';
-  h += saCard({ title: 'Excess approvals', n: exc.length, tone: 'bad', ico: 'box', link: '#/excessapproval', empty: 'No excess material waiting', body:
-    tbl('sa_excess', ['GRN · Material', 'Vendor', 'Since', 'Planned', 'Delay'], exc.map(r => '<tr class="click" data-act="go" data-v="excessapproval"><td><b>' + esc(r.ref) + '</b></td><td>' + esc(r.party) + '</td><td class="nowrap">' + fmtDT(r.start) + '</td><td class="nowrap">' + fmtDT(r.planned) + '</td><td class="num">' + dl(r.delay) + '</td></tr>'), 5) });
-  h += saCard({ title: 'PO approvals', n: poa.length, ico: 'file', link: '#/poapproval', empty: 'No purchase order waiting', body:
-    tbl('sa_po', ['PO', 'Vendor', 'Since', 'Planned', 'Delay'], poa.map(r => '<tr class="click" data-act="go" data-v="poapproval"><td><b>' + esc(r.ref) + '</b></td><td>' + esc(r.party) + '</td><td class="nowrap">' + fmtDT(r.start) + '</td><td class="nowrap">' + fmtDT(r.planned) + '</td><td class="num">' + dl(r.delay) + '</td></tr>'), 5) });
-  h += '</div>';
-  if (prq.length) h += saCard({ title: 'Price approvals', n: prq.length, ico: 'tag', link: '#/priceapproval', body:
-    tbl('sa_price', ['Photo', 'Item', 'Current ₹', 'New ₹', 'Type', 'Asked by', 'Since', ''], prq.map(x => '<tr><td>' + photoThumb((matBy(x.material) || {}).photo) + '</td><td><b>' + esc(x.material) + '</b> <span class="muted">' + esc((matBy(x.material) || {}).name || '') + '</span></td><td class="num">' + (num(x.old_price) ? money(x.old_price) : '—') + '</td><td class="num"><b>' + money(x.new_price) + '</b></td><td>' + prType(x) + '</td><td>' + esc(x.by) + '</td><td class="nowrap">' + fmtDT(x.at) + '</td><td class="nowrap"><button class="btn sm primary" data-act="pr-ok" data-id="' + esc(x.id) + '">Approve</button><button class="btn sm" data-act="pr-no" data-id="' + esc(x.id) + '" data-confirm="Reject?">Reject</button></td></tr>'), 8) });
-  h += '<div class="sa-lbl">Escalations</div>' + saCard({ title: '2nd escalations', n: l2.length, tone: 'bad', ico: 'alert', link: '#/escalations', linkText: 'All', empty: 'No second escalation open', body:
-    tbl('sa_esc2', ['Ticket', 'Task', 'Reference', 'Doer', 'Planned', 'New date', ''], l2.map(e => '<tr><td><b>' + esc(e.no) + '</b></td><td>' + esc(e.task) + '<div class="muted small">' + esc(e.src) + '</div></td><td>' + (e.link ? '<a href="' + esc(e.link) + '">' + esc(e.ref) + '</a>' : esc(e.ref)) + '</td><td>' + esc(e.doer) + '</td><td class="nowrap">' + fmtDT(e.planned) + '</td><td class="nowrap">' + (e.commit_at ? fmtDT(e.commit_at) : '') + '</td><td><button class="btn sm primary" data-act="esc-resolve" data-id="' + esc(e.id) + '">Resolve</button></td></tr>'), 7) });
 
-  // who is holding work up, which process is slow
+  // ---- Approvals: only the ones the Super Admin gives ----
+  if (tab === 'apr') {
+    h += '<div class="sa-lbl">Approvals waiting with you</div><div class="dgrid sa-row">';
+    h += saCard({ title: 'Excess approvals', n: exc.length, tone: 'bad', ico: 'box', link: '#/excessapproval', empty: 'No excess material waiting', body:
+      tbl('sa_excess', ['GRN · Material', 'Vendor', 'Since', 'Planned', 'Delay'], exc.map(r => '<tr class="click" data-act="go" data-v="excessapproval"><td><b>' + esc(r.ref) + '</b></td><td>' + esc(r.party) + '</td><td class="nowrap">' + fmtDT(r.start) + '</td><td class="nowrap">' + fmtDT(r.planned) + '</td><td class="num">' + dl(r.delay) + '</td></tr>'), 5) });
+    h += saCard({ title: 'PO approvals', n: poa.length, ico: 'file', link: '#/poapproval', empty: 'No purchase order waiting', body:
+      tbl('sa_po', ['PO', 'Vendor', 'Since', 'Planned', 'Delay'], poa.map(r => '<tr class="click" data-act="go" data-v="poapproval"><td><b>' + esc(r.ref) + '</b></td><td>' + esc(r.party) + '</td><td class="nowrap">' + fmtDT(r.start) + '</td><td class="nowrap">' + fmtDT(r.planned) + '</td><td class="num">' + dl(r.delay) + '</td></tr>'), 5) });
+    h += '</div>';
+    h += saCard({ title: 'Price approvals', n: prq.length, ico: 'tag', link: '#/priceapproval', empty: 'No price waiting for approval', body:
+      tbl('sa_price', ['Photo', 'Item', 'Current ₹', 'New ₹', 'Type', 'Asked by', 'Since', ''], prq.map(x => '<tr><td>' + photoThumb((matBy(x.material) || {}).photo) + '</td><td><b>' + esc(x.material) + '</b> <span class="muted">' + esc((matBy(x.material) || {}).name || '') + '</span></td><td class="num">' + (num(x.old_price) ? money(x.old_price) : '—') + '</td><td class="num"><b>' + money(x.new_price) + '</b></td><td>' + prType(x) + '</td><td>' + esc(x.by) + '</td><td class="nowrap">' + fmtDT(x.at) + '</td><td class="nowrap"><button class="btn sm primary" data-act="pr-ok" data-id="' + esc(x.id) + '">Approve</button><button class="btn sm" data-act="pr-no" data-id="' + esc(x.id) + '" data-confirm="Reject?">Reject</button></td></tr>'), 8) });
+    return h;
+  }
+
+  // ---- Escalations: the first ones that are mine to clear, then the second ones ----
+  if (tab === 'esc') {
+    if (l1mine && typeof escL1Card === 'function') h += escL1Card(me);
+    h += '<div class="sa-lbl">Second escalations — only you can close these</div>' + saCard({ title: '2nd escalations', n: l2.length, tone: 'bad', ico: 'alert', link: '#/escalations', linkText: 'All escalations', empty: 'No second escalation open', body:
+      tbl('sa_esc2', ['Ticket', 'Task', 'Reference', 'Doer', 'Planned', 'New date', ''], l2.map(e => '<tr><td><b>' + esc(e.no) + '</b></td><td>' + esc(e.task) + '<div class="muted small">' + esc(e.src) + '</div></td><td>' + (e.link ? '<a href="' + esc(e.link) + '">' + esc(e.ref) + '</a>' : esc(e.ref)) + '</td><td>' + esc(e.doer) + '</td><td class="nowrap">' + fmtDT(e.planned) + '</td><td class="nowrap">' + (e.commit_at ? fmtDT(e.commit_at) : '') + '</td><td><button class="btn sm primary" data-act="esc-resolve" data-id="' + esc(e.id) + '">Resolve</button></td></tr>'), 7) });
+    if (l1n && !l1mine) h += '<div class="muted small">' + l1n + ' first escalation(s) are open with their Level 1 owner — they come to you after one working day. <a href="#/escalations">See all</a></div>';
+    return h;
+  }
+
+  // ---- Money, Excess, Score, My requests: each is a whole tab of its own ----
+  if (tab === 'mny') return h + (typeof pfHtml === 'function' ? pfHtml() : '');
+  if (tab === 'exc') return h + (typeof saExcessHtml === 'function' ? saExcessHtml() : '');
+  if (tab === 'score') return h + sxHtml();
+  if (tab === 'req') return h + myRequestsCard(names || new Set());
+
+  // ---- Delay: who is holding work up, which process is slow ----
   const byDoer = {};
   delayed.forEach(t => { const k = t.doer || 'NOT SET'; const x = byDoer[k] || (byDoer[k] = { doer: k, dept: t.dept, n: 0, sum: 0, max: 0, top: '' }); x.n++; x.sum += t.delay; if (t.delay > x.max) { x.max = t.delay; x.top = t.task + (t.ref ? ' · ' + t.ref : ''); } });
   const dRows = Object.values(byDoer).sort((a, b) => b.sum - a.sum);

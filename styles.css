@@ -1017,3 +1017,9 @@ th.lp-grp { border-bottom: 0; background: var(--accent-bg); color: var(--accent)
 .ord-doc-b { padding: 12px; overflow-x: auto; }
 .ord-doc-b .jcdoc { min-width: 760px; }
 @media print { .ord-doc-h { display: none; } .ord-doc { border: 0; } .ord-doc-b { padding: 0; } }
+
+/* ---- Super Admin home tab bar ---- */
+.sa-tabbar { margin: 2px 0 4px; }
+.sa-tabbar .seg { display: flex; max-width: 100%; overflow-x: auto; }
+.sa-tabbar .seg button { white-space: nowrap; }
+@media print { .sa-tabbar { display: none; } }

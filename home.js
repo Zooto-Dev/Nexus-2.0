@@ -36,7 +36,7 @@ function sxBuckets(from, to, gran) {
 }
 
 /* ---------- numbers ---------- */
-const SX_UI = { tab: 'today', view: 'dept', per: 'tm', from: '', to: '', dept: '', src: '', gran: 'auto', mx: 'dept', open: null };
+const SX_UI = { tab: 'apr', view: 'dept', per: 'tm', from: '', to: '', dept: '', src: '', gran: 'auto', mx: 'dept', open: null };
 function sxRows(from, to) { const src = SX_UI.src; return scoreRows(from, to, src ? allTasks().filter(t => t.src === src) : null); }
 const sxDeptOf = r => r.dept || 'No department';
 function sxAgg(list) {   // a group of score rows → one row
@@ -256,7 +256,7 @@ ACTIONS['sx-open'] = el => {
 };
 ACTIONS['sx-close'] = () => { SX_UI.open = null; VIEWS.home.render(); window.scrollTo(0, 0); };
 ACTIONS['sx-tasks'] = el => { Object.assign(AT_UI, { who: el.dataset.d || '', dept: el.dataset.dept || '', st: el.dataset.dept != null ? 'delayed' : 'all', from: el.dataset.f, to: el.dataset.to, tab: 'tasks' }); go('alltasks'); };
-ACTIONS['sx-tab'] = el => { SX_UI.tab = el.dataset.v; VIEWS.home.render(); };
+ACTIONS['sx-tab'] = el => { if (el.dataset.v !== 'score') SX_UI.open = null; SX_UI.tab = el.dataset.v; VIEWS.home.render(); window.scrollTo(0, 0); };
 function sxBind() {
   $('#main').addEventListener('change', e => {
     const id = e.target.id;
