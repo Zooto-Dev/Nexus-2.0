@@ -331,7 +331,7 @@ function saCard(o) {
     (o.sub ? '<span class="muted small">' + o.sub + '</span>' : '') + '<span class="grow"></span>' +
     (o.link ? '<a class="sa-open" href="' + o.link + '">' + (o.linkText || 'Open') + ' ›</a>' : '') + '</div>';
   if (!n && !o.always) return '<div class="dcard sa-ok">' + head + '<div class="sa-clear">' + esc(o.empty || 'Nothing pending') + '</div></div>';
-  return '<div class="dcard">' + head + (o.body || '') + '</div>';
+  return '<div class="dcard">' + head + (o.note ? '<div class="sa-note">' + esc(o.note) + '</div>' : '') + (o.body || '') + '</div>';
 }
 /* The first escalation belongs to the Level 1 owner (the PC): it opens her Home with both actions on
    the row. Only when she lets a working day pass does it become a second escalation for the Super Admin. */
@@ -351,6 +351,10 @@ function escL1Card(who) {
    a doer row elsewhere can deep-link into the Score tab by setting it to 'score'. */
 const SA_TABS = [{ v: 'apr', l: 'Approvals' }, { v: 'esc', l: 'Escalations' }, { v: 'mny', l: 'Money' },
   { v: 'exc', l: 'Excess' }, { v: 'dly', l: 'Delay' }, { v: 'score', l: 'Score' }, { v: 'req', l: 'My requests' }];
+function saTabBar(tab, n) {
+  return '<div class="sa-lbl">Section</div><div class="sa-tabbar">' + SA_TABS.map(t => '<button type="button" class="sa-tb-b' + (t.v === tab ? ' on' : '') +
+    '" data-act="sx-tab" data-v="' + t.v + '">' + esc(t.l) + (n[t.v] ? '<span class="sa-tb-n">' + qtyFmt(n[t.v]) + '</span>' : '') + '</button>').join('') + '</div>';
+}
 function saHomeHtml(names) {
   if (!SA_UI.from) { const d = new Date(); SA_UI.from = ymdOf(new Date(d.getFullYear(), d.getMonth(), 1)); SA_UI.to = todayYmd(); }
   try { escRun(); } catch (e) { console.error(e); }
@@ -363,24 +367,10 @@ function saHomeHtml(names) {
   const me = (ME && ME.doer) || '';
   const l1mine = escs.filter(e => e.level === 1 && norm(e.l1 || '') === norm(me)).length;
   const delayed = tasks.filter(t => !t.done && !t.demo && t.status === 'Delayed' && t.doer !== 'SYSTEM');
-  const score = scoreRows(SA_UI.from, SA_UI.to);
-  const avg = score.length ? score.reduce((a, r) => a + r.score, 0) / score.length : null;
   const tab = SA_TABS.some(t => t.v === SX_UI.tab) ? SX_UI.tab : 'apr';
-  const card = (href, v, l, cls, ico, tab2) => '<a class="dk-c sa-t' + (num(v) ? ' on-' + (cls === 'late-txt' ? 'bad' : 'warn') : '') + '" ' +
-    (tab2 ? 'data-act="sx-tab" data-v="' + tab2 + '"' : 'href="' + href + '"') + '><span class="sa-tt">' + saIco(ico || 'check') + '<span class="l">' + l + '</span></span><span class="v ' + (cls || '') + '">' + v + '</span></a>';
-
-  // the strip stays above the tabs: one glance at everything, each tile opens the place it belongs to
-  let h = '<div class="sa-lbl">Needs you now</div><div class="dk sa-k">' +
-    card('#/excessapproval', exc.length, 'Excess approvals', exc.length ? 'late-txt' : '', 'box') +
-    card('#/poapproval', poa.length, 'PO approvals', poa.length ? 'pend-txt' : '', 'file') +
-    card('#/priceapproval', prq.length, 'Price approvals', prq.length ? 'pend-txt' : '', 'tag') +
-    card('', l2.length, '2nd escalations', l2.length ? 'late-txt' : '', 'alert', 'esc') +
-    card('', l1n, '1st escalations', l1n ? 'pend-txt' : '', 'alert', 'esc') +
-    card('#/alltasks', delayed.length, 'Delayed tasks', delayed.length ? 'late-txt' : '', 'clock') +
-    card('', avg == null ? '—' : avg.toFixed(2), 'Team score', scoreCls(avg), 'trend', 'score') + '</div>';
-
-  const nOf = { apr: exc.length + poa.length + prq.length, esc: l2.length + l1mine, dly: delayed.length };
-  h += '<div class="sa-tabbar">' + seg('sxTab', SA_TABS.map(t => ({ v: t.v, l: t.l + (nOf[t.v] ? ' ' + nOf[t.v] : '') })), tab) + '</div>';
+  let exN = 0; try { exN = excessPurchaseRows().length + excessIssueRows().length; } catch (e) { }
+  const h0 = saTabBar(tab, { apr: exc.length + poa.length + prq.length, esc: l2.length + l1mine, exc: exN, dly: delayed.length });
+  let h = h0;
 
   const tbl = (pg, head, rows, cols) => '<div class="tbl-wrap"><table class="nofilter nopage sa-tb" data-pg="' + pg + '"><tr>' + head.map(x => '<th' + (/^#|Delay|Total|Done|Late|Open|Avg|Score|On|Overdue|Level|%/.test(x) ? ' class="num"' : '') + '>' + x + '</th>').join('') + '</tr>' + (rows.length ? rows.join('') : '<tr><td colspan="' + cols + '" class="empty">Nothing pending</td></tr>') + '</table></div>';
   const dl = m => m ? '<span class="late-txt">' + fmtDelay(m) + '</span>' : '';
@@ -388,12 +378,12 @@ function saHomeHtml(names) {
   // ---- Approvals: only the ones the Super Admin gives ----
   if (tab === 'apr') {
     h += '<div class="sa-lbl">Approvals waiting with you</div><div class="dgrid sa-row">';
-    h += saCard({ title: 'Excess approvals', n: exc.length, tone: 'bad', ico: 'box', link: '#/excessapproval', empty: 'No excess material waiting', body:
+    h += saCard({ title: 'Excess approvals', n: exc.length, tone: 'bad', ico: 'box', link: '#/excessapproval', empty: 'No excess material waiting', note: 'Material taken in above the purchase order.', body:
       tbl('sa_excess', ['GRN · Material', 'Vendor', 'Since', 'Planned', 'Delay'], exc.map(r => '<tr class="click" data-act="go" data-v="excessapproval"><td><b>' + esc(r.ref) + '</b></td><td>' + esc(r.party) + '</td><td class="nowrap">' + fmtDT(r.start) + '</td><td class="nowrap">' + fmtDT(r.planned) + '</td><td class="num">' + dl(r.delay) + '</td></tr>'), 5) });
-    h += saCard({ title: 'PO approvals', n: poa.length, ico: 'file', link: '#/poapproval', empty: 'No purchase order waiting', body:
+    h += saCard({ title: 'PO approvals', n: poa.length, ico: 'file', link: '#/poapproval', empty: 'No purchase order waiting', note: 'Purchase orders waiting for your approval.', body:
       tbl('sa_po', ['PO', 'Vendor', 'Since', 'Planned', 'Delay'], poa.map(r => '<tr class="click" data-act="go" data-v="poapproval"><td><b>' + esc(r.ref) + '</b></td><td>' + esc(r.party) + '</td><td class="nowrap">' + fmtDT(r.start) + '</td><td class="nowrap">' + fmtDT(r.planned) + '</td><td class="num">' + dl(r.delay) + '</td></tr>'), 5) });
     h += '</div>';
-    h += saCard({ title: 'Price approvals', n: prq.length, ico: 'tag', link: '#/priceapproval', empty: 'No price waiting for approval', body:
+    h += saCard({ title: 'Price approvals', n: prq.length, ico: 'tag', link: '#/priceapproval', empty: 'No price waiting for approval', note: 'An approved price goes straight into every BOM that uses the item.', body:
       tbl('sa_price', ['Photo', 'Item', 'Current ₹', 'New ₹', 'Type', 'Asked by', 'Since', ''], prq.map(x => '<tr><td>' + photoThumb((matBy(x.material) || {}).photo) + '</td><td><b>' + esc(x.material) + '</b> <span class="muted">' + esc((matBy(x.material) || {}).name || '') + '</span></td><td class="num">' + (num(x.old_price) ? money(x.old_price) : '—') + '</td><td class="num"><b>' + money(x.new_price) + '</b></td><td>' + prType(x) + '</td><td>' + esc(x.by) + '</td><td class="nowrap">' + fmtDT(x.at) + '</td><td class="nowrap"><button class="btn sm primary" data-act="pr-ok" data-id="' + esc(x.id) + '">Approve</button><button class="btn sm" data-act="pr-no" data-id="' + esc(x.id) + '" data-confirm="Reject?">Reject</button></td></tr>'), 8) });
     return h;
   }
@@ -401,7 +391,7 @@ function saHomeHtml(names) {
   // ---- Escalations: the first ones that are mine to clear, then the second ones ----
   if (tab === 'esc') {
     if (l1mine && typeof escL1Card === 'function') h += escL1Card(me);
-    h += '<div class="sa-lbl">Second escalations — only you can close these</div>' + saCard({ title: '2nd escalations', n: l2.length, tone: 'bad', ico: 'alert', link: '#/escalations', linkText: 'All escalations', empty: 'No second escalation open', body:
+    h += '<div class="sa-lbl">Second escalations — only you can close these</div>' + saCard({ title: '2nd escalations', n: l2.length, tone: 'bad', ico: 'alert', link: '#/escalations', linkText: 'All escalations', empty: 'No second escalation open', note: 'A first escalation that ran one working day past its new date lands here.', body:
       tbl('sa_esc2', ['Ticket', 'Task', 'Reference', 'Doer', 'Planned', 'New date', ''], l2.map(e => '<tr><td><b>' + esc(e.no) + '</b></td><td>' + esc(e.task) + '<div class="muted small">' + esc(e.src) + '</div></td><td>' + (e.link ? '<a href="' + esc(e.link) + '">' + esc(e.ref) + '</a>' : esc(e.ref)) + '</td><td>' + esc(e.doer) + '</td><td class="nowrap">' + fmtDT(e.planned) + '</td><td class="nowrap">' + (e.commit_at ? fmtDT(e.commit_at) : '') + '</td><td><button class="btn sm primary" data-act="esc-resolve" data-id="' + esc(e.id) + '">Resolve</button></td></tr>'), 7) });
     if (l1n && !l1mine) h += '<div class="muted small">' + l1n + ' first escalation(s) are open with their Level 1 owner — they come to you after one working day. <a href="#/escalations">See all</a></div>';
     return h;
@@ -423,9 +413,9 @@ function saHomeHtml(names) {
     x.total++; if (t.done) { x.done++; if (t.late) { x.late++; x.dsum += t.delay; } } else if (t.late) { x.open++; x.osum += t.delay; }
   });
   const pRows = Object.values(byProc).filter(x => x.late || x.open).sort((a, b) => (b.osum + b.dsum) - (a.osum + a.dsum));
-  h += '<div class="sa-lbl">Where the delay is</div><div class="dgrid sa-row"><div>' + saCard({ title: 'Held up by person', n: dRows.length, tone: 'bad', ico: 'person', link: '#/alltasks', linkText: 'Tasks', empty: 'Nobody is holding work up', body:
+  h += '<div class="sa-lbl">Where the delay is</div><div class="dgrid sa-row"><div>' + saCard({ title: 'Held up by person', n: dRows.length, tone: 'bad', ico: 'person', link: '#/alltasks', linkText: 'Tasks', empty: 'Nobody is holding work up', note: 'Open delayed tasks added up, longest first. Click a row for that person\'s full summary.', body:
     tbl('sa_doer', ['Doer', 'Department', 'Delayed', 'Total delay', 'Longest', 'Longest task'], dRows.map(x => '<tr class="click" data-act="sc-open" data-d="' + esc(x.doer === 'NOT SET' ? '' : x.doer) + '"><td><b>' + (x.doer === 'NOT SET' ? '<span class="late-txt">Not set</span>' : esc(x.doer)) + '</b></td><td>' + esc(x.dept || '') + '</td><td class="num">' + x.n + '</td><td class="num late-txt">' + fmtDelay(x.sum) + '</td><td class="num">' + fmtDelay(x.max) + '</td><td>' + esc(x.top) + '</td></tr>'), 6) }) + '</div>' +
-    '<div>' + saCard({ title: 'Slow processes', n: pRows.length, ico: 'flow', sub: fmtD(SA_UI.from) + ' – ' + fmtD(SA_UI.to), empty: 'No process ran late in this period', body:
+    '<div>' + saCard({ title: 'Slow processes', n: pRows.length, ico: 'flow', sub: fmtD(SA_UI.from) + ' – ' + fmtD(SA_UI.to), empty: 'No process ran late in this period', note: 'Which step of which flow runs late, not who runs it.', body:
     tbl('sa_proc', ['Process', 'Source', 'Total', 'Late %', 'Avg delay (done)', 'Open late', 'Avg delay (open)'], pRows.map(x => '<tr><td><b>' + esc(x.task) + '</b></td><td>' + esc(x.src) + '</td><td class="num">' + x.total + '</td><td class="num">' + Math.round((x.late + x.open) * 100 / x.total) + '%</td><td class="num">' + (x.late ? fmtDelay(Math.round(x.dsum / x.late)) : '') + '</td><td class="num' + (x.open ? ' late-txt' : '') + '">' + x.open + '</td><td class="num">' + (x.open ? fmtDelay(Math.round(x.osum / x.open)) : '') + '</td></tr>'), 7) }) + '</div></div>';
   return h;
 }
