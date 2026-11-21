@@ -513,7 +513,6 @@ ACTIONS['punch-save'] = async () => {
 
 /* ---------------- Orders list ---------------- */
 const ORD_UI = { f: 'open', q: '' };
-const ORD_DOC = {};   // which document each order line is showing: 'jc' (default) or 'bom'
 VIEWS.orders = {
   mod: 'orders', render(param) {
     if (param === 'late') ORD_UI.f = 'late'; else if (param) { ORD_UI.q = param; ORD_UI.f = 'all'; }
@@ -592,17 +591,17 @@ VIEWS.order = {
       let x = '<div class="ord-doc"><div class="ord-doc-h"><b>' + tag + '</b>' +
         (j ? '<span class="st Done">Job card ' + esc(j.no) + '</span> <span class="muted small">' + esc(j.status || '') + '</span>' : '<span class="st Pending">No job card yet</span>') +
         (b ? '<span class="st ' + (bomFinal(b) ? 'Done' : 'Pending') + '">BOM v' + b.version + (bomFinal(b) ? '' : ' ' + esc(b.status || '')) + '</span>' : '<span class="st Late">No approved BOM</span>') +
-        '<span class="grow"></span>' + seg('oddoc' + i, [{ v: 'jc', l: 'Job card' }, { v: 'bom', l: 'BOM' }], (ORD_DOC[i] || 'jc'), 'data-own') +
+        '<span class="grow"></span>' +
         (j ? ' <button class="btn sm" data-act="print-jc" data-id="' + esc(j.id) + '">Print job card</button>' : '') +
         (b ? ' <button class="btn sm" data-act="print-bom" data-id="' + esc(b.id) + '">Print BOM</button>' : '') + '</div>';
-      const want = ORD_DOC[i] || 'jc';
-      x += '<div class="ord-doc-b">' + (want === 'bom'
-        ? (b ? bomDocHtml(b) : '<div class="panel empty">No BOM for ' + esc(l.article) + ' yet — make it in Development → BOM.</div>')
-        : (j ? jcDocHtml(j) : '<div class="panel empty">No job card for this line yet — make it in Merchant → Job Card.</div>')) + '</div>';
+      // both documents, one under the other: the job card first, the BOM behind it
+      x += '<div class="ord-doc-b"><div class="ord-doc-t">Job card</div>' +
+        (j ? jcDocHtml(j) : '<div class="panel empty">No job card for this line yet — make it in Merchant → Job Card.</div>') +
+        '<div class="ord-doc-t">BOM</div>' +
+        (b ? bomDocHtml(b) : '<div class="panel empty">No BOM for ' + esc(l.article) + ' yet — make it in Development → BOM.</div>') + '</div>';
       return x + '</div>';
     }).join('') : '<div class="panel empty">This order has no article lines.</div>');
     setMain(h);
-    $$('[data-seg^="oddoc"]').forEach(el => el.addEventListener('segchange', e => { ORD_DOC[+el.dataset.seg.slice(5)] = e.detail; VIEWS.order.render(id); }));
     const sp = $('[data-seg="opri"]');
     if (sp) sp.addEventListener('segchange', e => {
       const old = o.priority || ''; o.priority = e.detail; Store.put('orders', o);
