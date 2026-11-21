@@ -342,6 +342,7 @@ function fyNo(col, tag, width) {
 // Approvals (PO approve/reject etc.) need Admin or Manager — plain edit access is not enough.
 function canApprove() { return isAdminRole() || can('approve', 'edit'); }
 function canApproveInvoice() { return isAdminRole() || can('inv_approve', 'edit'); }
+function canApproveBom() { return isAdminRole() || can('bom_approve', 'edit'); }
 function isSuperAdmin() { const r = myRole(); return !!(r && r.system); }
 function nextNo(col, prefix) {
   const yr = new Date().getFullYear(); const head = prefix + '-' + yr + '-';
@@ -395,6 +396,7 @@ const MODULES = [
   { key: 'masters', label: 'Brands, Articles & Materials' },
   { key: 'approve', label: 'PO approval' },
   { key: 'inv_approve', label: 'Invoice approval' },
+  { key: 'bom_approve', label: 'BOM approval (Development Head)' },
   { key: 'excess', label: 'Excess material approval' },
   { key: 'issue_approve', label: 'Issue approval (Store Incharge)' },
   { key: 'users', label: 'Users' },
@@ -429,7 +431,8 @@ const RIGHT_SCREENS = [
   { v: 'approve', l: 'PO approval (approve, reject, cancel, short close)', mod: 'approve' },
   { v: 'inv_approve', l: 'Invoice approval (approve, hold, reject, amend)', mod: 'inv_approve' },
   { v: 'issue_approve', l: 'Requisition issue approval (Store Incharge)', mod: 'issue_approve' },
-  { v: 'excess', l: 'Excess material approval', mod: 'excess' }];
+  { v: 'excess', l: 'Excess material approval', mod: 'excess' },
+  { v: 'bom_approve', l: 'BOM approval (Development Head)', mod: 'bom_approve' }];
 function navScreens() { const out = []; NAV.forEach(g => (g.items || [g]).forEach(i => { if (i.v && i.mod && !out.some(x => x.v === i.v)) out.push({ v: i.v, l: i.l, mod: i.mod, menu: g.menu || '' }); })); RIGHT_SCREENS.forEach(r => out.push(Object.assign({ menu: 'Approvals' }, r))); return out; }
 function screenMod(v) { const s = navScreens().find(x => x.v === v); return s ? s.mod : (VIEWS[v] || {}).mod; }
 function screenAccess(dept, desig, v, mod) {
@@ -724,6 +727,9 @@ const NAV = [
     { v: 'jobcards', l: 'Job Card', mod: 'merchant' },
     { v: 'swatch', l: 'Swatch Approval', mod: 'merchant' },
     { v: 'jccorrection', l: 'Job Card Correction', mod: 'merchant' },
+    { v: 'samplenew', l: 'Sample Entry', mod: 'merchant', edit: true },
+    { v: 'samples', l: 'Sample Tracker', mod: 'merchant' },
+    { v: 'articlemaster', l: 'Article Master', mod: 'merchant' },
     { v: 'customers', l: 'CDB', mod: 'masters' },
     { v: 'leads', l: 'Lead', mod: 'merchant' },
     { v: 'packaging', l: 'Packaging PPT', mod: 'merchant' }] },
@@ -738,8 +744,6 @@ const NAV = [
     { v: 'rejstock', l: 'Rejection Stock', mod: 'store' },
     { v: 'rtv', l: 'RTV', mod: 'store' }] },
   { menu: 'Development', items: [
-    { v: 'samplenew', l: 'Sample Entry', mod: 'development', edit: true },
-    { v: 'samples', l: 'Sample Tracker', mod: 'development' },
     { v: 'itemcreate', l: 'Item Creation', mod: 'development' },
     { v: 'bom', l: 'BOM', mod: 'development' },
     { v: 'boms', l: 'Created BOM', mod: 'development' }] },

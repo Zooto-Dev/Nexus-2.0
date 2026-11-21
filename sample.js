@@ -27,7 +27,7 @@ function smpState(s) {
 
 /* ---------------- Sample Entry (form) ---------------- */
 VIEWS.samplenew = {
-  mod: 'development', edit: true, render() {
+  mod: 'merchant', edit: true, render() {
     const proc = sdevProc();
     if (!proc) { setMain('<div class="panel">No active Sample Development flow. Activate one in FMS Builder first.</div>'); return; }
     if (!SMP_NEW) smpNewForm();
@@ -64,7 +64,7 @@ ACTIONS['sm-del'] = el => { SMP_NEW.lines.splice(+el.dataset.i, 1); VIEWS.sample
 ACTIONS['sm-img-x'] = el => { SMP_NEW.lines[+el.dataset.i].image = ''; VIEWS.samplenew.render(); };
 ACTIONS['sm-clear'] = () => { smpNewForm(); VIEWS.samplenew.render(); };
 ACTIONS['sm-save'] = () => {
-  if (!requirePerm('development', 'edit')) return;
+  if (!requirePerm('merchant', 'edit')) return;
   const S = SMP_NEW; const proc = sdevProc(); const msg = t => { $('#smMsg').innerHTML = '<span class="late-txt">' + esc(t) + '</span>'; };
   const lines = S.lines.filter(l => l.article || l.colour || l.size || l.image);
   const miss = [];
@@ -93,7 +93,7 @@ ACTIONS['sm-save'] = () => {
 
 /* ---------------- Sample Tracker (one row per sample) ---------------- */
 VIEWS.samples = {
-  mod: 'development', render() {
+  mod: 'merchant', render() {
     const q = norm(SMP_UI.q);
     const bs = brandScope(); const rows = Store.all('samples').filter(s => brandOk(s.brand, bs)).sort((a, b) => b.created_at < a.created_at ? -1 : 1).map(s => ({ s, st: smpState(s) })).filter(x => {
       if (q && !norm([x.s.no, x.s.batch_no, x.s.brand, x.s.article, x.s.colour, x.s.category].join(' ')).includes(q)) return false;
@@ -105,7 +105,7 @@ VIEWS.samples = {
     const cal = calInfo();
     let h = '<div class="toolbar">' + seg('smf', [{ v: 'open', l: 'Open' }, { v: 'late', l: 'Delayed' }, { v: 'hold', l: 'Hold' }, { v: 'rej', l: 'Rejected' }, { v: 'done', l: 'Completed' }, { v: 'all', l: 'All' }], SMP_UI.f) +
       '<input id="smQ" placeholder="Sample / batch / brand / article…" value="' + esc(SMP_UI.q) + '"><span class="muted small">' + rows.length + ' sample(s)</span><span class="grow"></span>' +
-      '<button class="btn" data-act="sm-csv">Export CSV</button>' + (can('development', 'edit') ? '<a class="btn primary" href="#/samplenew">+ Sample Entry</a>' : '') + '</div>';
+      '<button class="btn" data-act="sm-csv">Export CSV</button>' + (can('merchant', 'edit') ? '<a class="btn primary" href="#/samplenew">+ Sample Entry</a>' : '') + '</div>';
     h += '<div class="tbl-wrap"><table class="bomflat"><tr><th>Time Stamp</th><th>Sample ID</th><th>Batch ID</th><th>Image</th><th>Brand</th><th>Article</th><th>Colour</th><th>Size</th><th>Gender</th><th>Category</th><th>Remarks</th><th>Current Step</th><th>Doer</th><th>Planned</th><th class="num">Delay</th></tr>' +
       (rows.length ? rows.map(x => {
         const c = x.st.cur;
@@ -122,9 +122,9 @@ ACTIONS['sm-csv'] = () => downloadCsv('samples-' + todayYmd() + '.csv', [['Time 
 
 /* ---------------- One sample: details + FMS steps ---------------- */
 VIEWS.sample = {
-  mod: 'development', render(id) {
+  mod: 'merchant', render(id) {
     const s = Store.get('samples', id); if (!s) { setMain('<div class="panel empty">Sample not found.</div>'); return; }
-    const r = resolveOrder(s); const st = smpState(s); const edit = can('development', 'edit');
+    const r = resolveOrder(s); const st = smpState(s); const edit = can('merchant', 'edit');
     let h = '<div class="toolbar"><a href="#/samples">← Sample Tracker</a><span class="grow"></span>' + (edit ? '<button class="btn" data-act="sm-edit" data-id="' + esc(s.id) + '">Edit</button>' : '') + '</div>';
     h += '<div class="panel"><table class="jckv"><tr><td class="k">Sample ID</td><td class="v"><b>' + esc(s.no) + '</b></td><td class="k">Batch ID</td><td class="v">' + esc(s.batch_no || '') + '</td><td class="k">Time Stamp</td><td class="v">' + fmtDT(s.created_at) + '</td><td rowspan="4" class="c">' + (s.image ? '<a data-act="img-view" data-src="' + esc(s.image) + '"><img src="' + esc(s.image) + '" style="max-height:120px;border-radius:4px"></a>' : '') + '</td></tr>' +
       '<tr><td class="k">Brand</td><td class="v">' + esc(s.brand) + '</td><td class="k">Article</td><td class="v"><b>' + esc(s.article) + '</b></td><td class="k">Colour</td><td class="v">' + esc(s.colour) + '</td></tr>' +
@@ -157,11 +157,11 @@ function smpLeadRow(s, st, edit) {
   return '';
 }
 ACTIONS['sm-release'] = el => {
-  const s = Store.get('samples', el.dataset.id); if (!s || !requirePerm('development', 'edit')) return;
+  const s = Store.get('samples', el.dataset.id); if (!s || !requirePerm('merchant', 'edit')) return;
   s.extra = s.extra || {}; s.extra.manual_release = nowIso(); Store.put('samples', s); RES_CACHE.clear(); audit('sample.release', s.no, 'started before lead sample cleared'); VIEWS.sample.render(s.id);
 };
 ACTIONS['sm-edit'] = el => {
-  const s = Store.get('samples', el.dataset.id); if (!s || !requirePerm('development', 'edit')) return;
+  const s = Store.get('samples', el.dataset.id); if (!s || !requirePerm('merchant', 'edit')) return;
   formDialog('Edit ' + s.no, [{ k: 'article', l: 'Article', value: s.article, req: true }, { k: 'colour', l: 'Colour', value: s.colour, req: true }, { k: 'size', l: 'Size', value: s.size, req: true }], 'Save', v => {
     s.article = v.article; s.colour = v.colour.toUpperCase(); s.size = v.size; Store.put('samples', s); audit('sample.edit', s.no, v.article + ' · ' + v.colour + ' · ' + v.size); VIEWS.sample.render(s.id);
   });

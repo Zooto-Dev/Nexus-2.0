@@ -123,11 +123,15 @@ function netReqRows(vendor, excludePo) {
   const by = {};
   const row = code => { const k = norm(code); return by[k] || (by[k] = { material: (matBy(code) || {}).code || code, jcs: [], demand: 0, suppliers: new Set() }); };
   const frozen = new Set(Store.all('orders').filter(o => o.priority === 'Cancelled' || o.priority === 'On Hold').map(o => norm(o.no)));
-  Store.all('job_cards').filter(j => j.status !== 'Closed' && !frozen.has(norm(j.order_no || ''))).forEach(j => (j.lines || []).forEach(l => {
-    const bal = Math.max(0, num(l.required) - issuedToJc(j.no, l.material));
-    if (bal <= 0.0001) return;
-    const r = row(l.material); r.demand += bal; r.jcs.push({ jc: j.no, bal, supplier: l.supplier || '', brand: j.brand || '', article: j.article || '', colour: j.colour || '' }); if (l.supplier) r.suppliers.add(l.supplier);
-  }));
+  Store.all('job_cards').filter(j => j.status !== 'Closed' && !frozen.has(norm(j.order_no || ''))).forEach(j => {
+    // the same item may sit on two sections of one job card: its requirement is the sum, issued is counted once
+    const byMat = {}; (j.lines || []).forEach(l => { const k = norm(l.material); const g = byMat[k] || (byMat[k] = { material: l.material, required: 0, supplier: '' }); g.required += num(l.required); if (l.supplier && !g.supplier) g.supplier = l.supplier; });
+    Object.values(byMat).forEach(l => {
+      const bal = Math.max(0, l.required - issuedToJc(j.no, l.material));
+      if (bal <= 0.0001) return;
+      const r = row(l.material); r.demand += bal; r.jcs.push({ jc: j.no, bal, supplier: l.supplier || '', brand: j.brand || '', article: j.article || '', colour: j.colour || '' }); if (l.supplier) r.suppliers.add(l.supplier);
+    });
+  });
   // manual requirements (Purchase › Requirements): demand until received; the vendor Purchase picked is the supplier
   if (typeof activeReqs === 'function') activeReqs().forEach(q => {
     const r = row(q.material); r.demand += num(q.qty); r.jcs.push({ jc: q.no, bal: num(q.qty), supplier: q.vendor || '', brand: q.brand || '', article: '', colour: '', req: true }); if (q.vendor) r.suppliers.add(q.vendor);
@@ -750,8 +754,9 @@ const JC_UI = { f: 'open', form: false, open: null };
 let JCF = null;   // job card form state
 function jcOrderLine(o, idx) { return (o.lines || [])[idx] || {}; }
 // the same article can have a BOM for more than one brand: only the order's brand (or a BOM with no brand) may load
+const bomFinal = b => !b.status || b.status === 'Final';   // BOMs made before approval existed carry no status
 function jcBomFor(article, colour, brand, style) {
-  let all = Store.all('boms').filter(x => norm(x.article) === norm(article));
+  let all = Store.all('boms').filter(x => norm(x.article) === norm(article) && bomFinal(x));
   if (brand) all = all.filter(x => !x.brand || norm(x.brand) === norm(brand));
   const rank = x => (brand && x.brand && norm(x.brand) === norm(brand) ? 8 : 0) + (colour && x.colour && norm(x.colour) === norm(colour) ? 4 : 0) + (style && x.style && norm(x.style) === norm(style) ? 2 : 0);
   return all.sort((p, q) => rank(q) - rank(p) || (q.version || 0) - (p.version || 0))[0] || null;
@@ -1015,7 +1020,7 @@ function jcfFillFromOrder() {
   const b = jcBomFor(l.article, l.colour, o.customer_name || o.brand || '', l.style || '');
   $$('#jfBom tr[data-bomrow]').forEach(tr => tr.remove());
   if (b) { b.lines.forEach(x => $('#jfBom').insertAdjacentHTML('beforeend', jcfBomRow(x))); $('#jfBomTag').textContent = 'Auto-loaded from BOM (' + (b.brand ? b.brand + ' · ' : '') + b.article + (b.colour ? ' ' + b.colour : '') + ' v' + b.version + ', ' + b.lines.length + ' items)'; if (b.photo && !JCF.photo) { JCF.photo = b.photo; $('#jfPhotoTag').innerHTML = '<img src="' + b.photo + '">'; } }
-  else { $('#jfBom').insertAdjacentHTML('beforeend', jcfBomRow()); $('#jfBomTag').textContent = ''; flash('No Development BOM for this article — fill the rows manually or create one in Development.', 'err'); }
+  else { $('#jfBom').insertAdjacentHTML('beforeend', jcfBomRow()); $('#jfBomTag').textContent = ''; flash('No approved Development BOM for this article — fill the rows manually, or get the BOM approved by the Development Head.', 'err'); }
   const grew = jcfExpandAll();   // size-wise items open into one line per size of this order
   if (grew) $('#jfBomTag').textContent += (($('#jfBomTag').textContent ? ' · ' : '') + grew + ' size-wise item(s) opened per size');
   jcfRecalc();
@@ -1691,9 +1696,42 @@ ACTIONS['bom-save'] = () => {
   const dupKey = lines.map(l => norm(l.section + '|' + l.material)).filter((x, i, a2) => a2.indexOf(x) !== i);
   if (dupKey.length) { $('#nbMsg').innerHTML = '<span class="late-txt">Duplicate Section + Item — remove it.</span>'; return; }
   const ver = Store.all('boms').filter(b2 => norm(b2.article) === norm(art) && norm(b2.brand || '') === norm(brand) && norm(b2.style || '') === norm(style) && norm(b2.colour || '') === norm(col)).reduce((mx, b2) => Math.max(mx, b2.version), 0) + 1;
-  const b2 = Store.put('boms', { id: uid(), brand, article: art, style, colour: col, gender: gen, category: cat, size_run: $('#nbRun').value.trim(), mould_no: $('#nbMould').value.trim(), photo: (window.NBF || {}).photo || '', remark: $('#nbRem').value.trim().toUpperCase(), version: ver, lines, status: 'Final', by: ME.name, at: nowIso() });
+  const b2 = Store.put('boms', { id: uid(), brand, article: art, style, colour: col, gender: gen, category: cat, size_run: $('#nbRun').value.trim(), mould_no: $('#nbMould').value.trim(), photo: (window.NBF || {}).photo || '', remark: $('#nbRem').value.trim().toUpperCase(), version: ver, lines, status: 'Pending', by: ME.name, at: nowIso() });
   audit('bom.create', art + ' v' + ver, brand + (col ? ' · ' + col : '') + ' · ' + lines.length + ' items · RMC ₹' + money(lines.reduce((s2, l) => s2 + l.qty * l.price, 0)));
-  flash('BOM saved: ' + esc(art) + ' v' + ver + (ver > 1 ? ' (new version)' : '') + '.'); go('boms');
+  flash('BOM saved: ' + esc(art) + ' v' + ver + (ver > 1 ? ' (new version)' : '') + ' — waiting for the Development Head\'s approval.'); go('boms');
+};
+/* ---- BOM approval: the Development Head makes a BOM Final; until then no job card takes it ---- */
+ACTIONS['bom-approve'] = el => {
+  const b = Store.get('boms', el.dataset.id); if (!b) return;
+  if (!canApproveBom()) { flash('Only the Development Head can approve a BOM.', 'err'); return; }
+  b.status = 'Final'; b.approved_by = ME.name; b.approved_at = nowIso(); Store.put('boms', b);
+  audit('bom.approve', b.article + ' v' + b.version, (b.brand || '') + (b.colour ? ' · ' + b.colour : '') + ' · ' + b.lines.length + ' items');
+  flash(esc(b.article) + ' v' + b.version + ' approved — job cards will take this BOM now.'); VIEWS.boms.render();
+};
+ACTIONS['bom-reject'] = el => {
+  const b = Store.get('boms', el.dataset.id); if (!b) return;
+  if (!canApproveBom()) { flash('Only the Development Head can reject a BOM.', 'err'); return; }
+  reasonDialog('Reject BOM ' + b.article + ' v' + b.version, 'Reject', why => { b.status = 'Rejected'; b.reject_why = why; b.rejected_by = ME.name; b.rejected_at = nowIso(); Store.put('boms', b); audit('bom.reject', b.article + ' v' + b.version, why); flash('BOM rejected.'); VIEWS.boms.render(); return ''; }, true);
+};
+/* ---- Suppliers on a BOM can change later; every open job card made from it follows ---- */
+ACTIONS['bom-suppliers'] = el => {
+  const b = Store.get('boms', el.dataset.id); if (!b || !requirePerm('development', 'edit')) return;
+  const body = '<div class="small muted" style="margin-bottom:8px">' + esc(b.article) + ' v' + b.version + (b.brand ? ' · ' + esc(b.brand) : '') + (b.colour ? ' · ' + esc(b.colour) : '') + '. The new supplier goes on this BOM and on every open job card of this article.</div>' +
+    '<div class="tbl-wrap"><table><tr><th>Item</th><th>Section</th><th>Supplier</th></tr>' + b.lines.map((l, i) => '<tr><td>' + esc((matBy(l.material) || {}).name || l.material) + '</td><td>' + esc(l.section || '') + '</td><td>' + vendorSel('data-bsup="' + i + '"', l.supplier || '') + '</td></tr>').join('') + '</table></div>';
+  lpDialog('Change suppliers', body, 'Save suppliers', d => {
+    const changes = []; b.lines.forEach((l, i) => { const v = ($('[data-bsup="' + i + '"]', d) || { value: l.supplier }).value.trim(); if (v !== (l.supplier || '')) { changes.push({ material: l.material, from: l.supplier || '', to: v }); l.supplier = v; } });
+    if (!changes.length) return 'Nothing changed.';
+    const bad = badSuppliers(b.lines); if (bad.length) return 'Supplier not in Vendors master: ' + bad.join(', ');
+    b.supplier_log = (b.supplier_log || []).concat(changes.map(c => Object.assign({ by: ME.name, at: nowIso() }, c))); Store.put('boms', b);
+    // open job cards of this article (same brand; same colour when the BOM names one) follow
+    let jcs = 0, lines = 0;
+    Store.all('job_cards').filter(j => j.status !== 'Closed' && norm(j.article) === norm(b.article) && (!b.brand || norm(j.brand) === norm(b.brand)) && (!b.colour || norm(j.colour || '') === norm(b.colour))).forEach(j => {
+      let n = 0; (j.lines || []).forEach(l => { const c = changes.find(x => norm(x.material) === norm(l.material)); if (c && (l.supplier || '') !== c.to) { l.supplier = c.to; n++; } });
+      if (n) { Store.put('job_cards', j); jcs++; lines += n; }
+    });
+    audit('bom.suppliers', b.article + ' v' + b.version, changes.map(c => c.material + ': ' + (c.from || '—') + ' → ' + c.to).join('; ') + (jcs ? ' · ' + lines + ' line(s) on ' + jcs + ' job card(s) updated' : ''));
+    flash('Suppliers saved' + (jcs ? ' — ' + jcs + ' open job card(s) updated too.' : '.')); VIEWS.boms.render(); return '';
+  });
 };
 VIEWS.boms = {
   mod: 'development', render() {
@@ -1701,8 +1739,9 @@ VIEWS.boms = {
     const bs = brandScope(); Store.all('boms').filter(b2 => brandOk(b2.brand, bs)).forEach(b2 => { const k = norm(b2.article + '|' + (b2.brand || '') + '|' + (b2.style || '') + '|' + (b2.colour || '')); if (!byKey[k] || byKey[k].version < b2.version) byKey[k] = b2; });
     const rows = Object.values(byKey).sort((a2, b3) => a2.article.localeCompare(b3.article));
     setMain(subTitle('Created BOMs', 'latest version per article+brand+style+colour') + '<div class="toolbar"><span class="grow"></span>' + (can('development', 'edit') ? '<a class="btn primary" href="#/bom">+ Make BOM</a>' : '') + '</div>' +
-      '<div class="tbl-wrap"><table class="bomflat"><tr><th>Brand</th><th>Article</th><th>Style</th><th>Colour</th><th>Gender</th><th>Ver</th><th class="num">Sr</th><th>Process</th><th>Section</th><th>Category</th><th>Item Name</th><th>Item Code</th><th>UOM</th><th class="num">Norms</th><th class="num">Price</th><th class="num">Cost</th><th>Supplier</th><th>Remark</th><th>Date</th><th></th></tr>' +
-      (rows.length ? rows.map(b2 => b2.lines.map((l, i) => '<tr' + (i === 0 ? ' class="bomfirst"' : '') + '><td>' + esc(b2.brand || '') + '</td><td><b>' + esc(b2.article) + '</b></td><td>' + esc(b2.style || '') + '</td><td>' + esc(b2.colour || '') + '</td><td>' + esc(b2.gender || '') + '</td><td>v' + b2.version + '</td><td class="num">' + (i + 1) + '</td><td>' + esc(l.process || '') + '</td><td>' + esc(l.section || '') + '</td><td>' + esc(l.category || '') + '</td><td>' + esc((matBy(l.material) || {}).name || '') + '</td><td>' + esc(l.material) + '</td><td>' + esc(l.uom || '') + '</td><td class="num">' + l.qty + '</td><td class="num">' + (l.price ? money(l.price) : '') + '</td><td class="num">' + (l.price ? money(num(l.qty) * num(l.price)) : '') + '</td><td>' + esc(l.supplier || '') + '</td><td>' + esc(l.remark || '') + '</td><td>' + fmtD(b2.at) + '</td><td class="right">' + (i === 0 ? '<button class="btn sm ghost" data-act="print-bom" data-id="' + esc(b2.id) + '">Print</button>' : '') + '</td></tr>').join('')).join('') : '<tr><td colspan="20" class="empty">No BOMs yet</td></tr>') + '</table></div>');
+      '<div class="tbl-wrap"><table class="bomflat"><tr><th>Brand</th><th>Article</th><th>Style</th><th>Colour</th><th>Gender</th><th>Ver</th><th class="num">Sr</th><th>Process</th><th>Section</th><th>Category</th><th>Item Name</th><th>Item Code</th><th>UOM</th><th class="num">Norms</th><th class="num">Price</th><th class="num">Cost</th><th>Supplier</th><th>Remark</th><th>Date</th><th>Status</th><th class="noprint"></th></tr>' +
+      (rows.length ? rows.map(b2 => b2.lines.map((l, i) => '<tr' + (i === 0 ? ' class="bomfirst"' : '') + (b2.status === 'Pending' ? ' style="background:#fffbe6"' : b2.status === 'Rejected' ? ' class="muted"' : '') + '><td>' + esc(b2.brand || '') + '</td><td><b>' + esc(b2.article) + '</b></td><td>' + esc(b2.style || '') + '</td><td>' + esc(b2.colour || '') + '</td><td>' + esc(b2.gender || '') + '</td><td>v' + b2.version + '</td><td class="num">' + (i + 1) + '</td><td>' + esc(l.process || '') + '</td><td>' + esc(l.section || '') + '</td><td>' + esc(l.category || '') + '</td><td>' + esc((matBy(l.material) || {}).name || '') + '</td><td>' + esc(l.material) + '</td><td>' + esc(l.uom || '') + '</td><td class="num">' + l.qty + '</td><td class="num">' + (l.price ? money(l.price) : '') + '</td><td class="num">' + (l.price ? money(num(l.qty) * num(l.price)) : '') + '</td><td>' + esc(l.supplier || '') + '</td><td>' + esc(l.remark || '') + '</td><td>' + fmtD(b2.at) + '</td><td>' + (i === 0 ? '<span class="st ' + (b2.status === 'Pending' ? 'Pending' : b2.status === 'Rejected' ? 'Late' : 'Done') + '">' + esc(b2.status || 'Final') + '</span>' + (b2.approved_by ? '<div class="small muted">' + esc(b2.approved_by) + ' · ' + fmtD(b2.approved_at) + '</div>' : b2.reject_why ? '<div class="small late-txt">' + esc(b2.reject_why) + '</div>' : '') : '') + '</td>' +
+          '<td class="noprint nowrap right">' + (i === 0 ? ((b2.status === 'Pending' && canApproveBom() ? '<button class="btn sm primary" data-act="bom-approve" data-id="' + esc(b2.id) + '">Approve</button> <button class="btn sm" data-act="bom-reject" data-id="' + esc(b2.id) + '">Reject</button> ' : '') + (can('development', 'edit') && b2.status !== 'Rejected' ? '<button class="btn sm ghost" data-act="bom-suppliers" data-id="' + esc(b2.id) + '">Suppliers</button> ' : '') + '<button class="btn sm ghost" data-act="print-bom" data-id="' + esc(b2.id) + '">Print</button>') : '') + '</td></tr>').join('')).join('') : '<tr><td colspan="21" class="empty">No BOMs yet</td></tr>') + '</table></div>');
   }
 };
 

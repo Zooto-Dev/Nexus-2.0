@@ -6,7 +6,26 @@
 const PPT_UI = { tab: 'have', q: '', form: false };
 const pptKey = (brand, article) => norm(brand) + '|' + norm(article);
 const pptAll = () => Store.all('art_ppt');
-const pptOf = (brand, article) => pptAll().find(p => pptKey(p.brand, p.article) === pptKey(brand, article) && p.path);
+// a PPT is found by its own article, or by any other article of the same brand it was mapped to
+const pptOf = (brand, article) => pptAll().find(p => p.path && (pptKey(p.brand, p.article) === pptKey(brand, article) || (p.also || []).some(a => pptKey(p.brand, a) === pptKey(brand, article))));
+function pptBrandArticles(brand) {
+  const s = new Set(Store.all('items').filter(i => norm(i.brand || '') === norm(brand)).map(i => String(i.code).trim().toUpperCase()));
+  Store.all('orders').filter(o => norm(o.customer_name || o.brand || '') === norm(brand)).forEach(o => (o.lines || []).forEach(l => { if (l.article) s.add(String(l.article).trim().toUpperCase()); }));
+  return Array.from(s).sort();
+}
+ACTIONS['ppt-map'] = el => {
+  const p = Store.get('art_ppt', el.dataset.id); if (!p || !requirePerm('merchant', 'edit')) return;
+  const arts = pptBrandArticles(p.brand).filter(a => pptKey(p.brand, a) !== pptKey(p.brand, p.article));
+  const cur = new Set((p.also || []).map(a => String(a).toUpperCase()));
+  const body = '<div class="small muted" style="margin-bottom:8px">' + esc(p.name) + ' is the PPT of <b>' + esc(p.brand) + ' · ' + esc(p.article) + '</b>. Tick the other articles of ' + esc(p.brand) + ' that use the same packaging:</div>' +
+    (arts.length ? '<div style="max-height:320px;overflow:auto;columns:2">' + arts.map(a => '<label class="small" style="display:block;padding:3px 0"><input type="checkbox" data-pm="' + esc(a) + '"' + (cur.has(a) ? ' checked' : '') + '> ' + esc(a) + (pptOf(p.brand, a) && !cur.has(a) ? ' <span class="muted">(has its own PPT)</span>' : '') + '</label>').join('') + '</div>' : '<div class="muted">No other article of this brand yet.</div>');
+  lpDialog('Map PPT to more articles', body, 'Save mapping', d => {
+    const picked = $$('[data-pm]', d).filter(x => x.checked).map(x => x.dataset.pm);
+    p.also = picked; Store.put('art_ppt', p);
+    audit('ppt.map', p.brand + ' · ' + p.article, picked.length ? 'also used for ' + picked.join(', ') : 'no other article');
+    flash('PPT mapped to ' + picked.length + ' more article(s).'); VIEWS.packaging.render(); return '';
+  });
+};
 // the brand's merchant does it; with none in the CDB it goes to a senior merchant
 function pptDoer(brand) {
   const m = brandPeople(brand).merchant;
@@ -100,8 +119,8 @@ VIEWS.packaging = {
     } else {
       const list = pptAll().filter(p => p.path && (!q || norm(p.brand + ' ' + p.article).includes(q))).sort((a, b) => (a.brand + a.article).localeCompare(b.brand + b.article));
       h += '<div class="tbl-wrap"><table class="bomflat"><tr><th>Brand</th><th>Article</th><th>File</th><th>Uploaded by</th><th>Date</th><th class="num">Versions</th><th class="noprint"></th></tr>' +
-        (list.length ? list.map(p => '<tr><td>' + esc(p.brand) + '</td><td><b>' + esc(p.article) + '</b></td><td><a data-act="ppt-open" data-p="' + esc(p.path) + '">📎 ' + esc(p.name) + '</a></td><td>' + esc(p.by || '') + '</td><td class="nowrap">' + fmtDT(p.at) + '</td><td class="num">' + (1 + (p.versions || []).length) + '</td>' +
-          '<td class="noprint">' + (edit ? '<button class="btn sm" data-act="ppt-new" data-b="' + esc(p.brand) + '" data-a="' + esc(p.article) + '">Replace</button>' : '') + ((p.versions || []).length ? ' <a class="small" data-act="ppt-hist" data-id="' + esc(p.id) + '">History</a>' : '') + '</td></tr>').join('')
+        (list.length ? list.map(p => '<tr><td>' + esc(p.brand) + '</td><td><b>' + esc(p.article) + '</b>' + ((p.also || []).length ? '<div class="small muted">also ' + esc(p.also.join(', ')) + '</div>' : '') + '</td><td><a data-act="ppt-open" data-p="' + esc(p.path) + '">📎 ' + esc(p.name) + '</a></td><td>' + esc(p.by || '') + '</td><td class="nowrap">' + fmtDT(p.at) + '</td><td class="num">' + (1 + (p.versions || []).length) + '</td>' +
+          '<td class="noprint">' + (edit ? '<button class="btn sm" data-act="ppt-new" data-b="' + esc(p.brand) + '" data-a="' + esc(p.article) + '">Replace</button> <button class="btn sm ghost" data-act="ppt-map" data-id="' + esc(p.id) + '">Map' + ((p.also || []).length ? ' (' + p.also.length + ')' : '') + '</button>' : '') + ((p.versions || []).length ? ' <a class="small" data-act="ppt-hist" data-id="' + esc(p.id) + '">History</a>' : '') + '</td></tr>').join('')
           : '<tr><td colspan="7" class="empty">No packaging PPT uploaded yet</td></tr>') + '</table></div>';
     }
     setMain(h);
