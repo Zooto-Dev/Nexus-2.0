@@ -81,6 +81,9 @@ function escHash(s) { let h = 5381; for (let i = 0; i < s.length; i++) h = ((h <
 // involved = the doer, the Level 1 owner, and the Level 2 owner once the ticket reaches Level 2
 function escInvolved(t, doer) { if (!doer) return false; const d = norm(doer); return norm(t.doer || '') === d || norm(t.l1 || '') === d || (norm(t.l1 || '') === norm(ESC_L2) && isSuperDoer(doer)) || escIsL2(t, doer); }
 function escCanAct(t, level) { if (isSuperAdmin()) return true; const me = ME && ME.doer; return level === 1 ? escInvolved(t, me) : escIsL2(t, me || ''); }
+// who may close a ticket: the Super Admin, the Level 2 owner once it is there, and the Level 1 owner (the PC) while it is still Level 1
+const escIsL1 = t => !!(ME && ME.doer && norm(t.l1 || '') === norm(ME.doer));
+function escCanResolve(t) { return isSuperAdmin() || escIsL2(t, (ME && ME.doer) || '') || (t.level === 1 && escIsL1(t)); }
 function escLog(t, what) { t.history = (t.history || []).concat([{ at: nowIso(), by: ME ? ME.name : 'System', what }]); }
 let ESC_T = 0;
 function escRun(force) {
@@ -130,7 +133,7 @@ ACTIONS['esc-date'] = el => {
 };
 ACTIONS['esc-resolve'] = el => {
   const e = Store.get('escalations', el.dataset.id); if (!e || e.status !== 'Open') return;
-  if (!(isSuperAdmin() || escIsL2(e, ME.doer || ''))) { flash('Level 2 (Super Admin) resolves this.', 'err'); return; }
+  if (!escCanResolve(e)) { flash(e.level === 1 ? esc(e.l1 || 'The Level 1 owner') + ' or the Super Admin resolves a first escalation.' : 'Level 2 (Super Admin) resolves this.', 'err'); return; }
   formDialog(e.no + ' · Resolve', [{ k: 'why', l: 'Resolution', type: 'textarea', req: true }], 'Resolve', v => {
     e.status = 'Resolved'; e.resolved_at = nowIso(); e.result = 'Resolved by ' + ME.name; e.resolution = v.why; escLog(e, 'Resolved — ' + v.why);
     Store.put('escalations', e); audit('escalation.resolve', e.no, v.why); route();
@@ -248,7 +251,7 @@ VIEWS.escalations = {
       h += '<div class="tbl-wrap"><table class="bomflat"><tr><th>Ticket</th><th>Raised</th><th>Source</th><th>Task</th><th>Reference</th><th>Party</th><th>Doer</th><th>Planned</th><th class="num">Delay</th><th>Level</th><th>Level 1</th><th>New Date</th><th>Reason</th><th>Level 2</th><th>Status</th><th>Result</th><th></th></tr>' +
         (rows.length ? rows.map(e => {
           const end = e.resolved_at ? new Date(e.resolved_at) : now; let dl = 0; try { dl = cal.workMinutesBetween(new Date(e.planned), end); } catch (x) {}
-          const acts = e.status !== 'Open' ? '' : (e.level === 1 && !e.commit_at && escCanAct(e, 1) ? '<button class="btn sm" data-act="esc-date" data-id="' + esc(e.id) + '">New date</button> ' : '') + ((isSuperAdmin() || escIsL2(e, me)) ? '<button class="btn sm primary" data-act="esc-resolve" data-id="' + esc(e.id) + '">Resolve</button>' : '');
+          const acts = e.status !== 'Open' ? '' : (e.level === 1 && !e.commit_at && escCanAct(e, 1) ? '<button class="btn sm" data-act="esc-date" data-id="' + esc(e.id) + '">New date</button> ' : '') + (escCanResolve(e) ? '<button class="btn sm primary" data-act="esc-resolve" data-id="' + esc(e.id) + '">Resolve</button>' : '');
           return '<tr><td><b>' + esc(e.no) + '</b></td><td class="nowrap">' + fmtDT(e.raised_at) + '</td><td>' + esc(e.src) + '</td><td>' + esc(e.task) + '</td><td>' + (e.link ? '<a href="' + esc(e.link) + '">' + esc(e.ref) + '</a>' : esc(e.ref)) + '</td><td>' + esc(e.party) + '</td><td>' + esc(e.doer) + '</td>' +
             '<td class="nowrap">' + fmtDT(e.planned) + '</td><td class="num late-txt">' + (dl ? fmtDelay(dl) : '') + '</td><td><span class="st ' + (e.status !== 'Open' ? 'Done' : e.level === 2 ? 'Late' : 'Pending') + '">L' + e.level + '</span></td><td>' + esc(e.l1) + '</td>' +
             '<td class="nowrap">' + (e.commit_at ? fmtDT(e.commit_at) : '') + '</td><td>' + esc(e.commit_why || '') + '</td><td>' + esc(e.l2) + '</td><td>' + esc(e.status) + '</td><td>' + esc(e.result || '') + (e.resolution ? ' — ' + esc(e.resolution) : '') + '</td><td class="nowrap">' + acts + ' <a class="small" data-act="esc-hist" data-id="' + esc(e.id) + '">Log</a></td></tr>';
@@ -329,6 +332,19 @@ function saCard(o) {
     (o.link ? '<a class="sa-open" href="' + o.link + '">' + (o.linkText || 'Open') + ' ›</a>' : '') + '</div>';
   if (!n && !o.always) return '<div class="dcard sa-ok">' + head + '<div class="sa-clear">' + esc(o.empty || 'Nothing pending') + '</div></div>';
   return '<div class="dcard">' + head + (o.body || '') + '</div>';
+}
+/* The first escalation belongs to the Level 1 owner (the PC): it opens her Home with both actions on
+   the row. Only when she lets a working day pass does it become a second escalation for the Super Admin. */
+function escL1Card(who) {
+  const mine = Store.all('escalations').filter(e => e.status === 'Open' && e.level === 1 && norm(e.l1 || '') === norm(who || ''))
+    .sort((a, b) => (a.planned || '') < (b.planned || '') ? -1 : 1);
+  const cal = calInfo(); const now = new Date();
+  const body = '<div class="tbl-wrap"><table class="nofilter nopage sa-tb"><tr><th>Ticket</th><th>Task</th><th>Reference</th><th>Doer</th><th>Planned</th><th class="num">Delay</th><th>New date</th><th class="noprint"></th></tr>' +
+    mine.map(e => { let dl = 0; try { dl = cal.workMinutesBetween(new Date(e.planned), now); } catch (x) { }
+      return '<tr><td><b>' + esc(e.no) + '</b></td><td>' + esc(e.task) + '<div class="muted small">' + esc(e.src) + '</div></td><td>' + (e.link ? '<a href="' + esc(e.link) + '">' + esc(e.ref) + '</a>' : esc(e.ref)) + '</td><td>' + esc(e.doer || '') + '</td><td class="nowrap">' + fmtDT(e.planned) + '</td><td class="num late-txt">' + (dl ? fmtDelay(dl) : '') + '</td>' +
+        '<td class="nowrap">' + (e.commit_at ? fmtDT(e.commit_at) + '<div class="muted small">' + esc(e.commit_why || '') + '</div>' : '<span class="muted">not given</span>') + '</td>' +
+        '<td class="noprint nowrap">' + (e.commit_at ? '' : '<button class="btn sm" data-act="esc-date" data-id="' + esc(e.id) + '">New date</button> ') + '<button class="btn sm primary" data-act="esc-resolve" data-id="' + esc(e.id) + '">Resolve</button></td></tr>'; }).join('') + '</table></div>';
+  return '<div class="sa-lbl">First escalations — yours to clear</div>' + saCard({ title: 'First escalations', n: mine.length, tone: 'bad', ico: 'alert', link: '#/escalations', linkText: 'All escalations', empty: 'No first escalation is waiting with you', sub: mine.length ? 'give a new date or resolve — after one working day they go to the Super Admin' : '', body: body });
 }
 function saHomeHtml(afterStrip) {
   if (!SA_UI.from) { const d = new Date(); SA_UI.from = ymdOf(new Date(d.getFullYear(), d.getMonth(), 1)); SA_UI.to = todayYmd(); }

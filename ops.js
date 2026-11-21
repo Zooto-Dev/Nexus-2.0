@@ -140,7 +140,7 @@ VIEWS.home = {
     // Super Admin looking at their own Home: approvals, 2nd escalations, MIS score, bottlenecks
     if (sa && self) {
       h = h.replace('<span class="grow"></span>', '<span class="grow"></span>' + seg('sxTab', [{ v: 'today', l: 'Today' }, { v: 'score', l: 'Score' }], SX_UI.tab));
-      h += SX_UI.tab === 'score' ? sxHtml() : saHomeHtml((typeof pfHtml === 'function' ? pfHtml() : '') + (typeof saExcessHtml === 'function' ? saExcessHtml() : '')) + myRequestsCard(names);
+      h += SX_UI.tab === 'score' ? sxHtml() : saHomeHtml((typeof escL1Card === 'function' && Store.all('escalations').some(e => e.status === 'Open' && e.level === 1 && norm(e.l1 || '') === norm(who)) ? escL1Card(who) : '') + (typeof pfHtml === 'function' ? pfHtml() : '') + (typeof saExcessHtml === 'function' ? saExcessHtml() : '')) + myRequestsCard(names);
       setMain(h);
       onSeg(e => { const k = e.target.dataset.seg;
         if (k === 'mrf') MR_UI.f = e.detail; else if (k === 'sxTab') SX_UI.tab = e.detail; else if (k === 'sxView') SX_UI.view = e.detail; else if (k === 'sxGran') SX_UI.gran = e.detail; else if (k === 'sxMx') SX_UI.mx = e.detail;
@@ -164,6 +164,7 @@ VIEWS.home = {
       '<a class="dk-c" data-act="ht-held"><span class="l">Held up</span><span class="v ' + (D.held.length ? 'late-txt' : '') + '">' + D.held.length + '</span><span class="s">others waiting on ' + (self ? 'you' : esc(who)) + '</span></a></div>';
 
     // main grid: tasks | score, held up, escalations
+    if (typeof escL1Card === 'function' && Store.all('escalations').some(e => e.status === 'Open' && e.level === 1 && norm(e.l1 || '') === norm(who))) h += escL1Card(who);
     h += '<div class="dgrid hgrid"><div>' + homeTaskTable(T) + '</div><div>';
     h += myScoreCard(who);
     const heldShow = HT_UI.heldAll ? D.held : D.held.slice(0, 6);
