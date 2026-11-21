@@ -1010,3 +1010,10 @@ th.lp-grp { border-bottom: 0; background: var(--accent-bg); color: var(--accent)
 
 .sa-row > .dcard.sa-ok, .dgrid > .dcard.sa-ok { height: auto; align-self: start; }
 .sa-row > div > .dcard.sa-ok { height: auto; }
+
+/* ---- the job card / BOM document on the order page ---- */
+.ord-doc { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); margin-bottom: 14px; overflow: hidden; }
+.ord-doc-h { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 10px 12px; border-bottom: 1px solid var(--line2); background: #fbfcfe; }
+.ord-doc-b { padding: 12px; overflow-x: auto; }
+.ord-doc-b .jcdoc { min-width: 760px; }
+@media print { .ord-doc-h { display: none; } .ord-doc { border: 0; } .ord-doc-b { padding: 0; } }

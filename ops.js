@@ -512,6 +512,7 @@ ACTIONS['punch-save'] = async () => {
 
 /* ---------------- Orders list ---------------- */
 const ORD_UI = { f: 'open', q: '' };
+const ORD_DOC = {};   // which document each order line is showing: 'jc' (default) or 'bom'
 VIEWS.orders = {
   mod: 'orders', render(param) {
     if (param === 'late') ORD_UI.f = 'late'; else if (param) { ORD_UI.q = param; ORD_UI.f = 'all'; }
@@ -568,16 +569,6 @@ VIEWS.order = {
     const dsp = Store.all('dispatches').filter(x => x.order_id === o.id);
     if (dsp.length) h += '<h2>Dispatches</h2><div class="tbl-wrap"><table class="bomflat"><tr><th>No</th><th>Date</th><th class="num">Qty</th><th>Invoice</th><th>Vehicle</th><th>Transporter</th><th>LR</th><th>Status</th></tr>' +
       dsp.map(x => '<tr' + (x.cancelled ? ' class="muted"' : '') + '><td>' + esc(x.no) + '</td><td>' + fmtD(x.date) + '</td><td class="num">' + qtyFmt(x.lines.reduce((s, l) => s + num(l.qty), 0)) + '</td><td>' + esc(x.invoice_no) + '</td><td>' + esc(x.vehicle) + '</td><td>' + esc(x.transporter) + '</td><td>' + esc(x.lr_no) + '</td><td>' + (x.cancelled ? 'Cancelled' : 'Dispatched') + '</td></tr>').join('') + '</table></div>';
-    // every job card of this order with its material lines, and the BOM it came from
-    const jcl = (o.lines || []).map(l => ({ l, j: l.jc_no && jcBy(l.jc_no), b: jcBomFor(l.article, l.colour, o.customer_name || o.brand || '', l.style || '') }));
-    h += '<h2>Job cards &amp; BOM</h2>' + jcl.map(({ l, j, b }) => {
-      let x = '<div class="panel" style="margin-bottom:10px"><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><b>' + esc(l.article) + (l.colour ? ' · ' + esc(l.colour) : '') + '</b> · ' + qtyFmt(l.qty) + ' pairs' +
-        (j ? ' <a href="#/jobcards" class="st Done">Job card ' + esc(j.no) + '</a> <span class="muted small">' + esc(j.status || '') + ' · ' + (j.lines || []).length + ' items</span>' : ' <span class="st Pending">No job card yet</span>') +
-        (b ? ' <span class="st ' + (bomFinal(b) ? 'Done' : 'Pending') + '">BOM v' + b.version + '</span>' : ' <span class="st Late">No approved BOM</span>') + '</div>';
-      if (j && (j.lines || []).length) x += '<div class="tbl-wrap" style="margin-top:8px"><table class="nopage nofilter"><tr><th>Section</th><th>Item</th><th>UOM</th><th class="num">Norms</th><th class="num">Required</th><th class="num">Issued</th><th>Supplier</th></tr>' + j.lines.map(q => '<tr><td>' + esc(q.section || '') + '</td><td>' + esc((matBy(q.material) || {}).name || q.material) + (q.size ? ' <span class="szbadge">' + esc(q.size) + '</span>' : '') + '</td><td>' + esc(q.uom || '') + '</td><td class="num">' + qtyFmt(q.norms) + '</td><td class="num">' + qtyFmt(q.required) + '</td><td class="num">' + qtyFmt(issuedToJc(j.no, q.material)) + '</td><td>' + esc(q.supplier || '') + '</td></tr>').join('') + '</table></div>';
-      else if (b) x += '<div class="tbl-wrap" style="margin-top:8px"><table class="nopage nofilter"><tr><th>Section</th><th>Item</th><th>UOM</th><th class="num">Norms</th><th class="num">Price</th><th>Supplier</th></tr>' + b.lines.map(q => '<tr><td>' + esc(q.section || '') + '</td><td>' + esc((matBy(q.material) || {}).name || q.material) + '</td><td>' + esc(q.uom || '') + '</td><td class="num">' + qtyFmt(q.qty) + '</td><td class="num">' + money(q.price) + '</td><td>' + esc(q.supplier || '') + '</td></tr>').join('') + '</table></div>';
-      return x + '</div>';
-    }).join('');
     h += '</div><div><h2 style="margin-top:0">FMS timeline</h2>';
     if (!r) h += '<div class="panel">Flow not found for this order.</div>';
     else {
@@ -593,7 +584,24 @@ VIEWS.order = {
         }).join('') + '</table></div>';
     }
     h += '</div></div>';
+    // every job card of this order, and the BOM behind it, in the same format they print in
+    const jcl = (o.lines || []).map(l => ({ l, j: l.jc_no && jcBy(l.jc_no), b: jcBomFor(l.article, l.colour, o.customer_name || o.brand || '', l.style || '') }));
+    h += '<h2>Job card &amp; BOM</h2>' + (jcl.length ? jcl.map(({ l, j, b }, i) => {
+      const tag = esc(l.article) + (l.colour ? ' · ' + esc(l.colour) : '') + ' · ' + qtyFmt(l.qty) + ' pairs';
+      let x = '<div class="ord-doc"><div class="ord-doc-h"><b>' + tag + '</b>' +
+        (j ? '<span class="st Done">Job card ' + esc(j.no) + '</span> <span class="muted small">' + esc(j.status || '') + '</span>' : '<span class="st Pending">No job card yet</span>') +
+        (b ? '<span class="st ' + (bomFinal(b) ? 'Done' : 'Pending') + '">BOM v' + b.version + (bomFinal(b) ? '' : ' ' + esc(b.status || '')) + '</span>' : '<span class="st Late">No approved BOM</span>') +
+        '<span class="grow"></span>' + seg('oddoc' + i, [{ v: 'jc', l: 'Job card' }, { v: 'bom', l: 'BOM' }], (ORD_DOC[i] || 'jc'), 'data-own') +
+        (j ? ' <button class="btn sm" data-act="print-jc" data-id="' + esc(j.id) + '">Print job card</button>' : '') +
+        (b ? ' <button class="btn sm" data-act="print-bom" data-id="' + esc(b.id) + '">Print BOM</button>' : '') + '</div>';
+      const want = ORD_DOC[i] || 'jc';
+      x += '<div class="ord-doc-b">' + (want === 'bom'
+        ? (b ? bomDocHtml(b) : '<div class="panel empty">No BOM for ' + esc(l.article) + ' yet — make it in Development → BOM.</div>')
+        : (j ? jcDocHtml(j) : '<div class="panel empty">No job card for this line yet — make it in Merchant → Job Card.</div>')) + '</div>';
+      return x + '</div>';
+    }).join('') : '<div class="panel empty">This order has no article lines.</div>');
     setMain(h);
+    $$('[data-seg^="oddoc"]').forEach(el => el.addEventListener('segchange', e => { ORD_DOC[+el.dataset.seg.slice(5)] = e.detail; VIEWS.order.render(id); }));
     const sp = $('[data-seg="opri"]');
     if (sp) sp.addEventListener('segchange', e => {
       const old = o.priority || ''; o.priority = e.detail; Store.put('orders', o);
