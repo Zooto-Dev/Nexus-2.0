@@ -961,3 +961,19 @@ th.lp-grp { border-bottom: 0; background: var(--accent-bg); color: var(--accent)
 .lp-mp { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); margin-right: 8px; } .lp-mp input { width: 64px; height: 28px; }
 .lp-dpr th, .lp-dpr td { white-space: nowrap; padding: 4px 8px; } .lp-dpr .lp-pack { background: #eef2f8; } .lp-dpr tr.lp-nil td { background: #fffbe6; color: var(--muted); } .lp-dpr tr.lp-today td { outline: 1px solid var(--accent); }
 .lp-dpr tr.lp-avg td { background: #e9eef7; }
+
+/* ---- Where the money is ---- */
+.pf .pf-b { padding: 12px 14px 14px; }
+.pf-tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 12px; }
+.pf-two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr); gap: 16px; align-items: start; }
+.pf-h { font-size: 13px; font-weight: 700; margin: 0 0 6px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.pf-sc { width: 100%; height: auto; }
+.pf-zone { font-size: 9.5px; font-weight: 700; letter-spacing: .06em; fill: #6b7482; }
+.pf-zone2 { font-size: 9px; fill: #98a2ae; }
+.pf-med { stroke: #c3ccd8; stroke-width: 1; stroke-dasharray: 4 3; }
+.pf-zero { stroke: #d03b3b; stroke-width: 1; }
+.pf-grid { stroke: #eef1f5; stroke-width: 1; }
+.pf-axl { font-size: 10.5px; fill: #6b7482; font-weight: 600; }
+.pf-dotl { font-size: 9.5px; font-weight: 700; fill: #1c2430; pointer-events: none; paint-order: stroke; stroke: #fff; stroke-width: 3px; stroke-linejoin: round; }
+.pf-gap { margin-top: 10px; background: #fffbe6; border: 1px solid #f3e4b0; border-radius: 8px; padding: 8px 12px; font-size: 12.5px; }
+@media (max-width: 1100px) { .pf-two { grid-template-columns: 1fr; } .pf-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

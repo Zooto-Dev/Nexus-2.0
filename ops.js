@@ -140,12 +140,13 @@ VIEWS.home = {
     // Super Admin looking at their own Home: approvals, 2nd escalations, MIS score, bottlenecks
     if (sa && self) {
       h = h.replace('<span class="grow"></span>', '<span class="grow"></span>' + seg('sxTab', [{ v: 'today', l: 'Today' }, { v: 'score', l: 'Score' }], SX_UI.tab));
-      h += SX_UI.tab === 'score' ? sxHtml() : (typeof saExcessHtml === 'function' ? saExcessHtml() : '') + saHomeHtml() + myRequestsCard(names);
+      h += SX_UI.tab === 'score' ? sxHtml() : (typeof pfHtml === 'function' ? pfHtml() : '') + (typeof saExcessHtml === 'function' ? saExcessHtml() : '') + saHomeHtml() + myRequestsCard(names);
       setMain(h);
       onSeg(e => { const k = e.target.dataset.seg;
-        if (k === 'mrf') MR_UI.f = e.detail; else if (k === 'sxTab') SX_UI.tab = e.detail; else if (k === 'sxView') SX_UI.view = e.detail; else if (k === 'sxGran') SX_UI.gran = e.detail; else if (k === 'sxMx') SX_UI.mx = e.detail; else return;
+        if (k === 'mrf') MR_UI.f = e.detail; else if (k === 'sxTab') SX_UI.tab = e.detail; else if (k === 'sxView') SX_UI.view = e.detail; else if (k === 'sxGran') SX_UI.gran = e.detail; else if (k === 'sxMx') SX_UI.mx = e.detail;
+        else if (k === 'pfPer') PF_UI.per = e.detail; else if (k === 'pfSort') PF_UI.sort = e.detail; else return;
         VIEWS.home.render(); });
-      sxBind();
+      sxBind(); if (typeof pfBind === 'function') pfBind();
       const w0 = $('#htWho'); if (w0) w0.addEventListener('change', () => { HT_UI.who = w0.value; VIEWS.home.render(); });
       $('#main').addEventListener('change', e => { if (e.target.id === 'saFrom' || e.target.id === 'saTo') { SA_UI[e.target.id === 'saFrom' ? 'from' : 'to'] = e.target.value; VIEWS.home.render(); } });
       return;
