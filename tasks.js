@@ -349,7 +349,7 @@ function escL1Card(who) {
 /* ================= The Super Admin home: one tab bar, one section per tab =================
    Every section lives in exactly one tab, so nothing mixes. SX_UI.tab says which tab is open;
    a doer row elsewhere can deep-link into the Score tab by setting it to 'score'. */
-const SA_TABS = [{ v: 'apr', l: 'Approvals' }, { v: 'esc', l: 'Escalations' }, { v: 'mny', l: 'Money' },
+const SA_TABS = [{ v: 'apr', l: 'Approvals' }, { v: 'esc', l: 'Escalations' }, { v: 'mny', l: 'COGS' },
   { v: 'exc', l: 'Excess' }, { v: 'dly', l: 'Delay' }, { v: 'score', l: 'Score' }, { v: 'req', l: 'My requests' }];
 function saTabBar(tab, n) {
   return '<div class="sa-lbl">Section</div><div class="sa-tabbar">' + SA_TABS.map(t => '<button type="button" class="sa-tb-b' + (t.v === tab ? ' on' : '') +
