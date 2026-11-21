@@ -977,3 +977,36 @@ th.lp-grp { border-bottom: 0; background: var(--accent-bg); color: var(--accent)
 .pf-dotl { font-size: 9.5px; font-weight: 700; fill: #1c2430; pointer-events: none; paint-order: stroke; stroke: #fff; stroke-width: 3px; stroke-linejoin: round; }
 .pf-gap { margin-top: 10px; background: #fffbe6; border: 1px solid #f3e4b0; border-radius: 8px; padding: 8px 12px; font-size: 12.5px; }
 @media (max-width: 1100px) { .pf-two { grid-template-columns: 1fr; } .pf-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* ---- Super Admin Home: one rhythm for labels, cards and the action strip ---- */
+.sa-lbl { font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--faint); margin: 18px 2px 8px; }
+.sa-lbl:first-child { margin-top: 2px; }
+.dk.sa-k { grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 10px; }
+.sa-t { padding: 11px 13px; gap: 6px; position: relative; overflow: hidden; }
+.sa-t .sa-tt { display: flex; align-items: center; gap: 6px; color: var(--faint); }
+.sa-t .l { font-size: 10.5px; letter-spacing: .03em; }
+.sa-t .v { font-size: 26px; font-variant-numeric: tabular-nums; }
+.sa-t .sa-ic { width: 15px; height: 15px; flex: none; }
+.sa-t::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: transparent; }
+.sa-t.on-bad::before { background: var(--late); } .sa-t.on-warn::before { background: var(--pending); }
+.sa-t.on-bad .sa-tt, .sa-t.on-warn .sa-tt { color: var(--muted); }
+.dh3.sa-h { gap: 9px; padding: 11px 14px; }
+.dh3.sa-h b { font-size: 13.5px; }
+.sa-hi { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 7px; flex: none; }
+.sa-hi .sa-ic { width: 15px; height: 15px; }
+.sa-hi.ok { background: var(--done-bg); color: var(--done); }
+.sa-hi.warn { background: var(--pending-bg); color: var(--pending); }
+.sa-hi.bad { background: var(--late-bg); color: var(--late); }
+.sa-open { font-size: 12px; font-weight: 600; color: var(--accent); white-space: nowrap; }
+.dcard.sa-ok { background: var(--panel); }
+.dcard.sa-ok .dh3 { border-bottom: 0; }
+.sa-clear { padding: 0 14px 12px 49px; margin-top: -4px; font-size: 12.5px; color: var(--muted); }
+.sa-clear.warn { color: var(--text); }
+.sa-tb th { font-size: 11.5px; letter-spacing: .02em; }
+.sa-tb td, .sa-tb th { padding-top: 7px; padding-bottom: 7px; }
+.sa-tb td.num, .sa-tb th.num { font-variant-numeric: tabular-nums; }
+@media (max-width: 1200px) { .dk.sa-k { grid-template-columns: repeat(4, 1fr); } }
+@media (max-width: 760px) { .dk.sa-k { grid-template-columns: repeat(2, 1fr); } .sa-t .v { font-size: 22px; } }
+
+.sa-row > .dcard.sa-ok, .dgrid > .dcard.sa-ok { height: auto; align-self: start; }
+.sa-row > div > .dcard.sa-ok { height: auto; }

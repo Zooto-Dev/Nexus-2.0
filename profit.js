@@ -93,7 +93,9 @@ function pfHtml() {
   const verdict = r => r.margin < 0 ? '<span class="st Late">Loss</span>' : r.qty >= medQ && r.margin > medM ? '<span class="st Done">Best</span>' : r.margin > medM ? '<span class="st Done">Sell more</span>' : r.qty >= medQ ? '<span class="st Pending">Thin margin</span>' : '<span class="muted">Low on both</span>';
   const tile = (l, v, s, tone) => '<div class="dt' + (tone ? ' dt-' + tone : '') + '"><span class="dt-l">' + l + '</span><b class="dt-v">' + v + '</b><span class="dt-s">' + s + '</span></div>';
 
-  let h = '<div class="dcard pf"><div class="dh3"><b>Where the money is</b><span class="muted small">by article · selling price − COGS</span><span class="grow"></span>' +
+  if (!ok.length) return '<div class="sa-lbl">Money</div><div class="dcard sa-ok"><div class="dh3 sa-h"><span class="sa-hi warn">' + (typeof saIco === 'function' ? saIco('trend') : '') + '</span><b>Where the money is</b><span class="muted small">not set up yet</span><span class="grow"></span><a class="sa-open" href="#/articlemaster">Article Master ›</a></div>' +
+    '<div class="sa-clear warn">Put a <b>selling price</b> on each article and get its <b>BOM approved</b> — margin per pair and money made show up here.' + (gap.length ? ' <span class="muted">' + gap.length + ' article(s) waiting: ' + esc(gap.slice(0, 4).map(r => r.article + ' (' + r.why + ')').join(', ')) + (gap.length > 4 ? ' …' : '') + '</span>' : '') + '</div></div>';
+  let h = '<div class="sa-lbl">Money</div><div class="dcard pf"><div class="dh3 sa-h"><span class="sa-hi ok">' + (typeof saIco === 'function' ? saIco('trend') : '') + '</span><b>Where the money is</b><span class="muted small">by article · selling price − COGS</span><span class="grow"></span>' +
     seg('pfPer', PF_PERIODS, PF_UI.per) +
     '<select id="pfBrand"><option value="">All brands</option>' + brands.map(b => '<option' + (b === PF_UI.brand ? ' selected' : '') + '>' + esc(b) + '</option>').join('') + '</select>' +
     '<button class="btn sm" data-act="pf-csv">CSV</button></div><div class="pf-b">';
@@ -102,9 +104,7 @@ function pfHtml() {
     tile('Gross margin', pfINR(tot), 'before overheads', tot > 0 ? 'good' : 'crit') +
     tile('Margin', (rev ? (tot / rev * 100).toFixed(1) + '%' : '—'), 'of the order value', rev && tot / rev > 0.2 ? 'good' : rev && tot / rev > 0.1 ? 'warn' : 'crit') + '</div>';
 
-  if (!ok.length) {
-    h += '<div class="panel empty">No article can be measured yet. An article needs a <b>selling price</b> (Merchant → Article Master, or the Articles master) and an <b>approved BOM</b>.</div>';
-  } else {
+  {
     h += '<div class="pf-two"><div><div class="pf-h">Money made, by article <span class="muted small">margin per pair × pairs ordered</span></div>' +
       vzBars(ok.filter(r => r.total > 0).slice(0, 8).map(r => ({ label: r.article + ' · ' + r.brand, value: r.total, sub: qtyFmt(r.qty) + ' pairs × ' + pfINR(r.margin) + '/pair' })), pfINR, { aria: 'Total margin by article', empty: 'Nothing with a margin yet' }) + '</div>' +
       '<div><div class="pf-h">Work against reward <span class="muted small">one bubble per article · bubble size = money made</span></div>' + pfQuadrant(ok, medQ, medM) + '</div></div>';

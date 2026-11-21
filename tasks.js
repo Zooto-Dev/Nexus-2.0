@@ -306,7 +306,31 @@ ACTIONS['sc-csv'] = () => downloadCsv('scorecard-' + todayYmd() + '.csv', [['Doe
 
 /* ================= Super Admin Home ================= */
 const SA_UI = { from: '', to: '' };
-function saHomeHtml() {
+/* The Super Admin's Home is read top to bottom: what needs you now, what the money looks like,
+   where the delays are. A card with nothing in it collapses to one green line instead of an empty
+   table, so the page is as long as the work actually is. */
+const SA_ICO = {
+  check: '<path d="M20 6 9 17l-5-5"/>', file: '<path d="M7 3h7l5 5v13H7z"/><path d="M14 3v5h5"/>',
+  tag: '<path d="M3 12 12 3h8v8l-9 9z"/><circle cx="16.4" cy="7.6" r="1.3"/>',
+  alert: '<path d="M12 4 2.5 20h19z"/><path d="M12 10v4"/><circle cx="12" cy="17" r=".9" fill="currentColor" stroke="none"/>',
+  clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
+  trend: '<path d="M3 17l6-6 4 4 7-7"/><path d="M16 8h5v5"/>',
+  person: '<circle cx="12" cy="8" r="3.5"/><path d="M5 20c0-3.6 3.1-5.5 7-5.5s7 1.9 7 5.5"/>',
+  flow: '<rect x="3" y="4" width="7" height="5" rx="1.5"/><rect x="14" y="15" width="7" height="5" rx="1.5"/><path d="M6.5 9v5.5a3 3 0 0 0 3 3H14"/>',
+  box: '<path d="M4 8.5 12 4l8 4.5v7L12 20l-8-4.5z"/><path d="M4 8.5 12 13l8-4.5M12 13v7"/>'
+};
+const saIco = k => '<svg class="sa-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' + (SA_ICO[k] || '') + '</svg>';
+/* one card for the whole dashboard: nothing pending -> a single green line */
+function saCard(o) {
+  const n = num(o.n), tone = n ? (o.tone || 'warn') : 'ok';
+  const head = '<div class="dh3 sa-h"><span class="sa-hi ' + tone + '">' + saIco(o.ico || 'check') + '</span><b>' + esc(o.title) + '</b>' +
+    (n ? '<span class="n' + (o.tone === 'bad' ? ' red' : '') + '">' + qtyFmt(n) + '</span>' : '') +
+    (o.sub ? '<span class="muted small">' + o.sub + '</span>' : '') + '<span class="grow"></span>' +
+    (o.link ? '<a class="sa-open" href="' + o.link + '">' + (o.linkText || 'Open') + ' ›</a>' : '') + '</div>';
+  if (!n && !o.always) return '<div class="dcard sa-ok">' + head + '<div class="sa-clear">' + esc(o.empty || 'Nothing pending') + '</div></div>';
+  return '<div class="dcard">' + head + (o.body || '') + '</div>';
+}
+function saHomeHtml(afterStrip) {
   if (!SA_UI.from) { const d = new Date(); SA_UI.from = ymdOf(new Date(d.getFullYear(), d.getMonth(), 1)); SA_UI.to = todayYmd(); }
   try { escRun(); } catch (e) { console.error(e); }
   const pa = paRows(); const tasks = allTasks(); const now = new Date();
@@ -318,23 +342,24 @@ function saHomeHtml() {
   const delayed = tasks.filter(t => !t.done && !t.demo && t.status === 'Delayed' && t.doer !== 'SYSTEM');
   const score = scoreRows(SA_UI.from, SA_UI.to);
   const avg = score.length ? score.reduce((a, r) => a + r.score, 0) / score.length : null;
-  const card = (href, v, l, cls) => '<a class="dk-c" href="' + href + '"><span class="l">' + l + '</span><span class="v ' + (cls || '') + '">' + v + '</span></a>';
-  let h = '<div class="dk sa-k">' + card('#/excessapproval', exc.length, 'Excess approvals', exc.length ? 'late-txt' : '') + card('#/poapproval', poa.length, 'PO approvals', poa.length ? 'pend-txt' : '') + card('#/priceapproval', prq.length, 'Price approvals', prq.length ? 'pend-txt' : '') +
-    card('#/escalations', l2.length, '2nd escalations', l2.length ? 'late-txt' : '') + card('#/escalations', l1n, '1st escalations', l1n ? 'pend-txt' : '') +
-    card('#/alltasks', delayed.length, 'Delayed tasks', delayed.length ? 'late-txt' : '') + card('#/home', avg == null ? '—' : avg.toFixed(2), 'Team score', scoreCls(avg)).replace('href="#/home"', 'data-act="sx-tab" data-v="score"') + '</div>';
-  const tbl = (pg, head, rows, cols) => '<div class="tbl-wrap"><table data-pg="' + pg + '"><tr>' + head.map(x => '<th' + (/^#|Delay|Total|Done|Late|Open|Avg|Score|On|Overdue|Level|%/.test(x) ? ' class="num"' : '') + '>' + x + '</th>').join('') + '</tr>' + (rows.length ? rows.join('') : '<tr><td colspan="' + cols + '" class="empty">Nothing pending</td></tr>') + '</table></div>';
+  const card = (href, v, l, cls, ico) => '<a class="dk-c sa-t' + (num(v) ? ' on-' + (cls === 'late-txt' ? 'bad' : 'warn') : '') + '" href="' + href + '"><span class="sa-tt">' + saIco(ico || 'check') + '<span class="l">' + l + '</span></span><span class="v ' + (cls || '') + '">' + v + '</span></a>';
+  let h = '<div class="sa-lbl">Needs you now</div><div class="dk sa-k">' + card('#/excessapproval', exc.length, 'Excess approvals', exc.length ? 'late-txt' : '', 'box') + card('#/poapproval', poa.length, 'PO approvals', poa.length ? 'pend-txt' : '', 'file') + card('#/priceapproval', prq.length, 'Price approvals', prq.length ? 'pend-txt' : '', 'tag') +
+    card('#/escalations', l2.length, '2nd escalations', l2.length ? 'late-txt' : '', 'alert') + card('#/escalations', l1n, '1st escalations', l1n ? 'pend-txt' : '', 'alert') +
+    card('#/alltasks', delayed.length, 'Delayed tasks', delayed.length ? 'late-txt' : '', 'clock') + card('#/home', avg == null ? '—' : avg.toFixed(2), 'Team score', scoreCls(avg), 'trend').replace('href="#/home"', 'data-act="sx-tab" data-v="score"') + '</div>';
+  h += afterStrip || '';
+  const tbl = (pg, head, rows, cols) => '<div class="tbl-wrap"><table class="nofilter nopage sa-tb" data-pg="' + pg + '"><tr>' + head.map(x => '<th' + (/^#|Delay|Total|Done|Late|Open|Avg|Score|On|Overdue|Level|%/.test(x) ? ' class="num"' : '') + '>' + x + '</th>').join('') + '</tr>' + (rows.length ? rows.join('') : '<tr><td colspan="' + cols + '" class="empty">Nothing pending</td></tr>') + '</table></div>';
   const dl = m => m ? '<span class="late-txt">' + fmtDelay(m) + '</span>' : '';
   // approvals only the Super Admin gives
-  h += '<div class="dgrid sa-row">';
-  h += '<div class="dcard"><div class="dh3">Excess approvals<span class="n' + (exc.length ? ' red' : '') + '">' + exc.length + '</span><span class="grow"></span><a class="small" href="#/excessapproval">Open</a></div>' +
-    tbl('sa_excess', ['GRN · Material', 'Vendor', 'Since', 'Planned', 'Delay'], exc.map(r => '<tr class="click" data-act="go" data-v="excessapproval"><td><b>' + esc(r.ref) + '</b></td><td>' + esc(r.party) + '</td><td class="nowrap">' + fmtDT(r.start) + '</td><td class="nowrap">' + fmtDT(r.planned) + '</td><td class="num">' + dl(r.delay) + '</td></tr>'), 5) + '</div>';
-  h += '<div class="dcard"><div class="dh3">PO approvals<span class="n">' + poa.length + '</span><span class="grow"></span><a class="small" href="#/poapproval">Open</a></div>' +
-    tbl('sa_po', ['PO', 'Vendor', 'Since', 'Planned', 'Delay'], poa.map(r => '<tr class="click" data-act="go" data-v="poapproval"><td><b>' + esc(r.ref) + '</b></td><td>' + esc(r.party) + '</td><td class="nowrap">' + fmtDT(r.start) + '</td><td class="nowrap">' + fmtDT(r.planned) + '</td><td class="num">' + dl(r.delay) + '</td></tr>'), 5) + '</div>';
+  h += '<div class="sa-lbl">Approvals waiting with you</div><div class="dgrid sa-row">';
+  h += saCard({ title: 'Excess approvals', n: exc.length, tone: 'bad', ico: 'box', link: '#/excessapproval', empty: 'No excess material waiting', body:
+    tbl('sa_excess', ['GRN · Material', 'Vendor', 'Since', 'Planned', 'Delay'], exc.map(r => '<tr class="click" data-act="go" data-v="excessapproval"><td><b>' + esc(r.ref) + '</b></td><td>' + esc(r.party) + '</td><td class="nowrap">' + fmtDT(r.start) + '</td><td class="nowrap">' + fmtDT(r.planned) + '</td><td class="num">' + dl(r.delay) + '</td></tr>'), 5) });
+  h += saCard({ title: 'PO approvals', n: poa.length, ico: 'file', link: '#/poapproval', empty: 'No purchase order waiting', body:
+    tbl('sa_po', ['PO', 'Vendor', 'Since', 'Planned', 'Delay'], poa.map(r => '<tr class="click" data-act="go" data-v="poapproval"><td><b>' + esc(r.ref) + '</b></td><td>' + esc(r.party) + '</td><td class="nowrap">' + fmtDT(r.start) + '</td><td class="nowrap">' + fmtDT(r.planned) + '</td><td class="num">' + dl(r.delay) + '</td></tr>'), 5) });
   h += '</div>';
-  if (prq.length) h += '<div class="dcard"><div class="dh3">Price approvals<span class="n">' + prq.length + '</span><span class="grow"></span><a class="small" href="#/priceapproval">Open</a></div>' +
-    tbl('sa_price', ['Photo', 'Item', 'Current ₹', 'New ₹', 'Type', 'Asked by', 'Since', ''], prq.map(x => '<tr><td>' + photoThumb((matBy(x.material) || {}).photo) + '</td><td><b>' + esc(x.material) + '</b> <span class="muted">' + esc((matBy(x.material) || {}).name || '') + '</span></td><td class="num">' + (num(x.old_price) ? money(x.old_price) : '—') + '</td><td class="num"><b>' + money(x.new_price) + '</b></td><td>' + prType(x) + '</td><td>' + esc(x.by) + '</td><td class="nowrap">' + fmtDT(x.at) + '</td><td class="nowrap"><button class="btn sm primary" data-act="pr-ok" data-id="' + esc(x.id) + '">Approve</button><button class="btn sm" data-act="pr-no" data-id="' + esc(x.id) + '" data-confirm="Reject?">Reject</button></td></tr>'), 8) + '</div>';
-  h += '<div class="dcard"><div class="dh3">2nd escalations<span class="n' + (l2.length ? ' red' : '') + '">' + l2.length + '</span><span class="grow"></span><a class="small" href="#/escalations">All</a></div>' +
-    tbl('sa_esc2', ['Ticket', 'Task', 'Reference', 'Doer', 'Planned', 'New date', ''], l2.map(e => '<tr><td><b>' + esc(e.no) + '</b></td><td>' + esc(e.task) + '<div class="muted small">' + esc(e.src) + '</div></td><td>' + (e.link ? '<a href="' + esc(e.link) + '">' + esc(e.ref) + '</a>' : esc(e.ref)) + '</td><td>' + esc(e.doer) + '</td><td class="nowrap">' + fmtDT(e.planned) + '</td><td class="nowrap">' + (e.commit_at ? fmtDT(e.commit_at) : '') + '</td><td><button class="btn sm primary" data-act="esc-resolve" data-id="' + esc(e.id) + '">Resolve</button></td></tr>'), 7) + '</div>';
+  if (prq.length) h += saCard({ title: 'Price approvals', n: prq.length, ico: 'tag', link: '#/priceapproval', body:
+    tbl('sa_price', ['Photo', 'Item', 'Current ₹', 'New ₹', 'Type', 'Asked by', 'Since', ''], prq.map(x => '<tr><td>' + photoThumb((matBy(x.material) || {}).photo) + '</td><td><b>' + esc(x.material) + '</b> <span class="muted">' + esc((matBy(x.material) || {}).name || '') + '</span></td><td class="num">' + (num(x.old_price) ? money(x.old_price) : '—') + '</td><td class="num"><b>' + money(x.new_price) + '</b></td><td>' + prType(x) + '</td><td>' + esc(x.by) + '</td><td class="nowrap">' + fmtDT(x.at) + '</td><td class="nowrap"><button class="btn sm primary" data-act="pr-ok" data-id="' + esc(x.id) + '">Approve</button><button class="btn sm" data-act="pr-no" data-id="' + esc(x.id) + '" data-confirm="Reject?">Reject</button></td></tr>'), 8) });
+  h += '<div class="sa-lbl">Escalations</div>' + saCard({ title: '2nd escalations', n: l2.length, tone: 'bad', ico: 'alert', link: '#/escalations', linkText: 'All', empty: 'No second escalation open', body:
+    tbl('sa_esc2', ['Ticket', 'Task', 'Reference', 'Doer', 'Planned', 'New date', ''], l2.map(e => '<tr><td><b>' + esc(e.no) + '</b></td><td>' + esc(e.task) + '<div class="muted small">' + esc(e.src) + '</div></td><td>' + (e.link ? '<a href="' + esc(e.link) + '">' + esc(e.ref) + '</a>' : esc(e.ref)) + '</td><td>' + esc(e.doer) + '</td><td class="nowrap">' + fmtDT(e.planned) + '</td><td class="nowrap">' + (e.commit_at ? fmtDT(e.commit_at) : '') + '</td><td><button class="btn sm primary" data-act="esc-resolve" data-id="' + esc(e.id) + '">Resolve</button></td></tr>'), 7) });
 
   // who is holding work up, which process is slow
   const byDoer = {};
@@ -346,10 +371,10 @@ function saHomeHtml() {
     x.total++; if (t.done) { x.done++; if (t.late) { x.late++; x.dsum += t.delay; } } else if (t.late) { x.open++; x.osum += t.delay; }
   });
   const pRows = Object.values(byProc).filter(x => x.late || x.open).sort((a, b) => (b.osum + b.dsum) - (a.osum + a.dsum));
-  h += '<div class="dgrid sa-row"><div><div class="dcard"><div class="dh3">Held up by person<span class="n' + (dRows.length ? ' red' : '') + '">' + dRows.length + '</span></div>' +
-    tbl('sa_doer', ['Doer', 'Department', 'Delayed', 'Total delay', 'Longest', 'Longest task'], dRows.map(x => '<tr class="click" data-act="sc-open" data-d="' + esc(x.doer === 'NOT SET' ? '' : x.doer) + '"><td><b>' + (x.doer === 'NOT SET' ? '<span class="late-txt">Not set</span>' : esc(x.doer)) + '</b></td><td>' + esc(x.dept || '') + '</td><td class="num">' + x.n + '</td><td class="num late-txt">' + fmtDelay(x.sum) + '</td><td class="num">' + fmtDelay(x.max) + '</td><td>' + esc(x.top) + '</td></tr>'), 6) + '</div></div>' +
-    '<div><div class="dcard"><div class="dh3">Slow processes<span class="n">' + pRows.length + '</span></div>' +
-    tbl('sa_proc', ['Process', 'Source', 'Total', 'Late %', 'Avg delay (done)', 'Open late', 'Avg delay (open)'], pRows.map(x => '<tr><td><b>' + esc(x.task) + '</b></td><td>' + esc(x.src) + '</td><td class="num">' + x.total + '</td><td class="num">' + Math.round((x.late + x.open) * 100 / x.total) + '%</td><td class="num">' + (x.late ? fmtDelay(Math.round(x.dsum / x.late)) : '') + '</td><td class="num' + (x.open ? ' late-txt' : '') + '">' + x.open + '</td><td class="num">' + (x.open ? fmtDelay(Math.round(x.osum / x.open)) : '') + '</td></tr>'), 7) + '</div></div></div>';
+  h += '<div class="sa-lbl">Where the delay is</div><div class="dgrid sa-row"><div>' + saCard({ title: 'Held up by person', n: dRows.length, tone: 'bad', ico: 'person', link: '#/alltasks', linkText: 'Tasks', empty: 'Nobody is holding work up', body:
+    tbl('sa_doer', ['Doer', 'Department', 'Delayed', 'Total delay', 'Longest', 'Longest task'], dRows.map(x => '<tr class="click" data-act="sc-open" data-d="' + esc(x.doer === 'NOT SET' ? '' : x.doer) + '"><td><b>' + (x.doer === 'NOT SET' ? '<span class="late-txt">Not set</span>' : esc(x.doer)) + '</b></td><td>' + esc(x.dept || '') + '</td><td class="num">' + x.n + '</td><td class="num late-txt">' + fmtDelay(x.sum) + '</td><td class="num">' + fmtDelay(x.max) + '</td><td>' + esc(x.top) + '</td></tr>'), 6) }) + '</div>' +
+    '<div>' + saCard({ title: 'Slow processes', n: pRows.length, ico: 'flow', sub: fmtD(SA_UI.from) + ' – ' + fmtD(SA_UI.to), empty: 'No process ran late in this period', body:
+    tbl('sa_proc', ['Process', 'Source', 'Total', 'Late %', 'Avg delay (done)', 'Open late', 'Avg delay (open)'], pRows.map(x => '<tr><td><b>' + esc(x.task) + '</b></td><td>' + esc(x.src) + '</td><td class="num">' + x.total + '</td><td class="num">' + Math.round((x.late + x.open) * 100 / x.total) + '%</td><td class="num">' + (x.late ? fmtDelay(Math.round(x.dsum / x.late)) : '') + '</td><td class="num' + (x.open ? ' late-txt' : '') + '">' + x.open + '</td><td class="num">' + (x.open ? fmtDelay(Math.round(x.osum / x.open)) : '') + '</td></tr>'), 7) }) + '</div></div>';
   return h;
 }
 
@@ -402,7 +427,8 @@ function myRequestsCard(names) {
   const n = k => k === 'all' ? all.length : all.filter(x => x.status === k || (k === 'Approved' && x.status === 'Closed')).length;
   const rows = all.filter(x => MR_UI.f === 'all' || x.status === MR_UI.f || (MR_UI.f === 'Approved' && x.status === 'Closed') || (MR_UI.f === 'Pending' && (x.status === 'Hold' || x.status === 'Amend')));
   const cls = { Pending: 'Pending', Hold: 'Pending', Amend: 'Late', Approved: 'Done', Closed: 'Done', Rejected: 'Cancelled' };
-  return '<div class="dcard"><div class="dh3">My requests<span class="grow"></span>' + seg('mrf', [{ v: 'Pending', l: 'Pending ' + (n('Pending') + n('Hold') + n('Amend')) }, { v: 'Approved', l: 'Approved ' + n('Approved') }, { v: 'Rejected', l: 'Rejected ' + n('Rejected') }, { v: 'all', l: 'All ' + n('all') }], MR_UI.f) + '</div>' +
+  if (!all.length) return '<div class="sa-lbl">My requests</div><div class="dcard sa-ok"><div class="dh3 sa-h"><span class="sa-hi ok">' + saIco('check') + '</span><b>My requests</b><span class="grow"></span></div><div class="sa-clear">You have nothing waiting with anyone</div></div>';
+  return '<div class="sa-lbl">My requests</div><div class="dcard"><div class="dh3 sa-h"><span class="sa-hi warn">' + saIco('file') + '</span><b>My requests</b><span class="grow"></span>' + seg('mrf', [{ v: 'Pending', l: 'Pending ' + (n('Pending') + n('Hold') + n('Amend')) }, { v: 'Approved', l: 'Approved ' + n('Approved') }, { v: 'Rejected', l: 'Rejected ' + n('Rejected') }, { v: 'all', l: 'All ' + n('all') }], MR_UI.f) + '</div>' +
     '<div class="tbl-wrap"><table data-pg="home_requests"><tr><th>Request</th><th>Reference</th><th>Party</th><th>Detail</th><th>Sent on</th><th>Status</th><th>By</th><th>On</th><th>Remark</th><th></th></tr>' +
     (rows.length ? rows.map(x => '<tr><td>' + esc(x.kind) + '</td><td><a href="' + esc(x.link) + '"><b>' + esc(x.ref) + '</b></a></td><td>' + esc(x.party || '') + '</td><td>' + esc(x.detail || '') + '</td><td class="nowrap">' + fmtDT(x.at) + '</td>' +
       '<td><span class="st ' + (cls[x.status] || 'Waiting') + '">' + esc(x.status) + '</span></td><td>' + esc(x.by || '') + '</td><td class="nowrap">' + (x.when ? fmtDT(x.when) : '') + '</td><td>' + esc(x.remark || '') + '</td><td><a class="small" data-act="mr-hist" data-i="' + all.indexOf(x) + '">History</a></td></tr>').join('')
