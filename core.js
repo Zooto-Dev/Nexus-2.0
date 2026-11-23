@@ -721,6 +721,7 @@ const NAV = [
     { v: 'priceapproval', l: 'Price Approval', mod: 'purchase' },
     { v: 'invapproval', l: 'Invoice Approval', mod: 'purchase' },
     { v: 'vendors', l: 'Vendors', mod: 'purchase' },
+    { v: 'vendormock', l: 'Mock run — vendor contacts', mod: 'purchase', sa: true },
     { v: 'vendorreq', l: 'Vendor Requests', mod: 'purchase' }] },
   { menu: 'Merchant', items: [
     { v: 'merchantdash', l: 'Merchant Dashboard', mod: 'merchant' },
