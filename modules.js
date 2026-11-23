@@ -2072,10 +2072,10 @@ VIEWS.vendors = {
   }
 };
 // the lookup itself: the GST number goes to the nx-gst function, the provider key stays there
-async function gstLookup(gstin) {
+async function gstLookup(gstin, debug) {
   if (!CLOUD || !SB) return { err: 'GST lookup works only when you are signed in to the cloud.' };
   try {
-    const { data, error } = await SB.functions.invoke('nx-gst', { body: { gstin } });
+    const { data, error } = await SB.functions.invoke('nx-gst', { body: { gstin, debug: !!debug } });
     let msg = data && data.error;
     if (error) { msg = error.message; try { const j = await error.context.json(); msg = j.error || msg; } catch (e) { } }
     return msg ? { err: msg } : { d: data };
@@ -2088,19 +2088,21 @@ function gstLine(d) {
 // a new vendor straight from a GST No
 ACTIONS['gst-new'] = () => {
   if (!requirePerm('purchase', 'edit')) return;
-  formDialog('New vendor from GST No', [{ k: 'g', l: 'GST No', req: true }], 'Look up', v => {
-    const g = String(v.g || '').trim().toUpperCase(); const bad = gstinError(g);
-    if (bad) return bad;
-    if (Store.all('vendors').some(x => norm(x.gstin) === norm(g))) return 'This GST No is already on a vendor.';
-    gstNewGo(g);       // the dialog closes; the answer comes back as the next dialog
-    return '';
-  });
+  formDialog('New vendor from GST No', [{ k: 'g', l: 'GST No', req: true }]
+    .concat(isSuperAdmin() ? [{ k: 'dbg', l: 'Also show the service reply', type: 'select', options: ['No', 'Yes'], value: 'No' }] : []), 'Look up', v => {
+      const g = String(v.g || '').trim().toUpperCase(); const bad = gstinError(g);
+      if (bad) return bad;
+      if (Store.all('vendors').some(x => norm(x.gstin) === norm(g))) return 'This GST No is already on a vendor.';
+      gstNewGo(g, v.dbg === 'Yes');       // the dialog closes; the answer comes back as the next dialog
+      return '';
+    });
 };
-async function gstNewGo(g) {
+async function gstNewGo(g, debug) {
   flash('Looking up ' + esc(g) + '…');
-  const { err, d } = await gstLookup(g);
+  const { err, d } = await gstLookup(g, debug);
   if (err) { flash(esc(err), 'err'); return; }
   audit('vendors.gst_lookup', g, gstLine(d) || 'no details');
+  if (d && d.raw) { const t = document.createElement('div'); t.className = 'dlg-back'; t.innerHTML = '<div class="dlg"><div class="dlg-h">Service reply for ' + esc(g) + '</div><div style="padding:10px"><textarea class="mono" rows="18" style="width:100%" readonly>' + esc(JSON.stringify(d.raw, null, 1)) + '</textarea></div><div class="dlg-f"><span class="grow"></span><button class="btn" data-fx-cancel>Close</button></div></div>'; document.body.appendChild(t); t.addEventListener('click', ev => { if (ev.target.closest('[data-fx-cancel]')) t.remove(); }); }
   formDialog('Vendor from ' + g, [
     { k: 'found', l: 'GST record', type: 'static', value: gstLine(d) || 'no details came back' },
     { k: 'name', l: 'Vendor Name', value: d.name || '', req: true },
