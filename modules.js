@@ -2063,10 +2063,78 @@ VIEWS.vendors = {
       // the state comes from the GST No (first 2 digits)
       normalize: (d, k) => { d.gstin = String(d.gstin || '').trim().toUpperCase(); const st = gstState(d.gstin); if (st && !gstinError(d.gstin) && k !== 'state') d.state = st; d.pan = gstPan(d.gstin); d.mobile = String(d.mobile || '').replace(/\D/g, '').replace(/^(91|0)(?=\d{10}$)/, ''); d.email = String(d.email || '').trim().toLowerCase(); },
       validate: d => uniq('vendors', 'name', 'Vendor')(d) || gstinError(d.gstin) || (d.gstin && d.state && gstState(d.gstin) !== d.state ? 'State does not match the GST No (' + d.gstin.slice(0, 2) + ' = ' + gstState(d.gstin) + ').' : '') || mobileError(d.mobile) || emailSyntaxError(d.email),
-      inUse: d => Store.all('purchase_orders').some(p => norm(p.vendor) === norm(d.name)) ? 'Vendor has POs — cannot delete.' : ''
+      inUse: d => Store.all('purchase_orders').some(p => norm(p.vendor) === norm(d.name)) ? 'Vendor has POs — cannot delete.' : '',
+      // one lookup per row: it fills the address and flags a cancelled GST, and never renames the
+      // vendor by itself — POs, GRNs and BOMs carry the vendor's name, so a rename is the user's call
+      extra: d => d.gstin && !gstinError(d.gstin) && can('purchase', 'edit') ? '<button class="btn ghost sm" data-act="gst-fill" data-id="' + esc(d.id) + '" title="Fill the address from the GST No">GST</button> ' : ''
     });
-    $('#main').insertAdjacentHTML('beforeend', '');
+    if (CLOUD && can('purchase', 'edit')) { const tb = $('#main .toolbar'); if (tb) tb.insertAdjacentHTML('beforeend', '<button class="btn primary" data-act="gst-new">+ GST se vendor</button>'); }
   }
+};
+// the lookup itself: the GST number goes to the nx-gst function, the provider key stays there
+async function gstLookup(gstin) {
+  if (!CLOUD || !SB) return { err: 'GST lookup works only when you are signed in to the cloud.' };
+  try {
+    const { data, error } = await SB.functions.invoke('nx-gst', { body: { gstin } });
+    let msg = data && data.error;
+    if (error) { msg = error.message; try { const j = await error.context.json(); msg = j.error || msg; } catch (e) { } }
+    return msg ? { err: msg } : { d: data };
+  } catch (e) { return { err: e.message }; }
+}
+function gstLine(d) {
+  return [d.legal_name && 'Legal name: ' + d.legal_name, d.trade_name && 'Trade name: ' + d.trade_name,
+    d.status && 'Status: ' + d.status, d.type, d.registered_on && 'Registered ' + d.registered_on].filter(Boolean).join(' · ');
+}
+// a new vendor straight from a GST No
+ACTIONS['gst-new'] = () => {
+  if (!requirePerm('purchase', 'edit')) return;
+  formDialog('New vendor from GST No', [{ k: 'g', l: 'GST No', req: true }], 'Look up', v => {
+    const g = String(v.g || '').trim().toUpperCase(); const bad = gstinError(g);
+    if (bad) return bad;
+    if (Store.all('vendors').some(x => norm(x.gstin) === norm(g))) return 'This GST No is already on a vendor.';
+    gstNewGo(g);       // the dialog closes; the answer comes back as the next dialog
+    return '';
+  });
+};
+async function gstNewGo(g) {
+  flash('Looking up ' + esc(g) + '…');
+  const { err, d } = await gstLookup(g);
+  if (err) { flash(esc(err), 'err'); return; }
+  audit('vendors.gst_lookup', g, gstLine(d) || 'no details');
+  formDialog('Vendor from ' + g, [
+    { k: 'found', l: 'GST record', type: 'static', value: gstLine(d) || 'no details came back' },
+    { k: 'name', l: 'Vendor Name', value: d.name || '', req: true },
+    { k: 'address', l: 'Address', type: 'textarea', value: d.address || '' },
+    { k: 'state', l: 'State', type: 'select', options: stateNames(), value: d.state || '' },
+    { k: 'email', l: 'Email ID', value: '' }, { k: 'mobile', l: 'Mobile No.', value: '' }
+  ], 'Save vendor', w => {
+    const doc = { id: uid(), name: String(w.name || '').trim(), address: String(w.address || '').trim(), gstin: g, pan: gstPan(g), state: w.state || '', email: String(w.email || '').trim().toLowerCase(), mobile: String(w.mobile || '').replace(/\D/g, ''), qc_required: '' };
+    const e2 = uniq('vendors', 'name', 'Vendor')(doc) || mobileError(doc.mobile) || emailSyntaxError(doc.email);
+    if (e2) return e2;
+    Store.put('vendors', doc); audit('vendors.create', doc.name, g + ' · from GST lookup' + (d.cancelled ? ' · GST CANCELLED' : ''));
+    flash('Vendor <b>' + esc(doc.name) + '</b> saved.' + (d.cancelled ? ' <span class="late-txt">This GST No is ' + esc(d.status) + '.</span>' : ''), d.cancelled ? 'err' : '');
+    VIEWS.vendors.render();
+    return '';
+  });
+}
+// an existing vendor: fill the address and state, say what the GST record calls it, never rename on its own
+ACTIONS['gst-fill'] = async el => {
+  if (!requirePerm('purchase', 'edit')) return;
+  const v = Store.get('vendors', el.dataset.id); if (!v) return;
+  el.disabled = true; flash('Looking up ' + esc(v.gstin) + '…');
+  const { err, d } = await gstLookup(v.gstin); el.disabled = false;
+  if (err) { flash(esc(err), 'err'); return; }
+  audit('vendors.gst_lookup', v.gstin, v.name + ' — ' + (gstLine(d) || 'no details'));
+  const changed = [];
+  if (d.address && norm(d.address) !== norm(v.address || '')) { v.address = d.address; changed.push('address'); }
+  if (d.state && d.state !== v.state) { v.state = d.state; changed.push('state'); }
+  if (!v.pan) { v.pan = d.pan || gstPan(v.gstin); changed.push('PAN'); }
+  if (changed.length) { Store.put('vendors', v); audit('vendors.edit', v.name, 'From GST lookup: ' + changed.join(', ')); }
+  const nameDiff = d.name && norm(d.name) !== norm(v.name);
+  flash((changed.length ? 'Filled: ' + esc(changed.join(', ')) + '. ' : 'Nothing to change. ') + esc(gstLine(d)) +
+    (nameDiff ? '<br>GST record says <b>' + esc(d.name) + '</b> — the name here is kept, because POs and GRNs carry it. Change it by hand if you want.' : '') +
+    (d.cancelled ? '<br><span class="late-txt">This GST No is ' + esc(d.status) + ' — do not raise a new PO on it.</span>' : ''), d.cancelled ? 'err' : '');
+  VIEWS.vendors.render();
 };
 
 
