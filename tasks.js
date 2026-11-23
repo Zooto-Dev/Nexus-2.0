@@ -51,7 +51,7 @@ function allTasks(force) {
   });
   // Checklist / Delegation (last 90 days up to next 7)
   clRows(ymdOf(new Date(Date.now() - 90 * 86400000)), ymdOf(new Date(Date.now() + 7 * 86400000))).forEach(r => {
-    push({ key: 'cl|' + r.t.id + '|' + r.ymd, src: r.type, task: r.task, ref: r.type === 'Delegation' ? '' : r.freq, party: r.t.party || '', doer: String(r.doer || '').toUpperCase(), owner: String(r.doer || '').toUpperCase(),
+    push({ key: 'cl|' + r.t.id + '|' + r.ymd, src: r.t.auto ? 'Auto' + (r.t.auto_from ? ' · ' + r.t.auto_from : '') : (r.t.src ? clSrcLabel(r.t) : r.type), task: r.task, ref: r.type === 'Delegation' ? '' : r.freq, party: r.t.party || '', doer: String(r.doer || '').toUpperCase(), owner: String(r.doer || '').toUpperCase(),
       planned: r.planned, actual: r.actual, link: '#/checklist', demo: !!r.t.demo, tid: r.t.id });
   });
   // Nexus activities
@@ -67,7 +67,10 @@ function allTasks(force) {
 function tasksOf(doer) { return allTasks().filter(t => norm(t.doer) === norm(doer)); }
 
 /* ================= escalations ================= */
-const ESC_DEF = { after: 510 };   // working minutes of delay before Level 1 = 1 working day (09:00–17:30)
+// after: working minutes of delay before Level 1 = 1 working day (09:00–17:30)
+// after_commit_days: once a new date is given at Level 1, the ticket sits with the Level 1 owner for
+// this many days past that date before it becomes a second escalation.
+const ESC_DEF = { after: 510, after_commit_days: 3 };
 function escCfg() { return Object.assign({}, ESC_DEF, settings().esc || {}); }
 // Level 2 = every Super Admin; Level 1 = department override, else the common Level 1 owner (the PC), else the department head
 const ESC_L2 = 'SUPER ADMIN';
@@ -111,9 +114,10 @@ function escRun(force) {
       e.history = (e.history || []).concat([{ at: nowIso(), by: 'System', what: 'Resolved — ' + e.result }]); ch = true;
     } else if (e.level === 1) {
       const due = e.commit_at ? new Date(e.commit_at) : null;
-      if ((due && now > due) || (!due && wm(new Date(e.raised_at), now) > cfg.after)) {
+      const days = num(cfg.after_commit_days) || 3;
+      if ((due && now - due > days * 86400000) || (!due && wm(new Date(e.raised_at), now) > cfg.after)) {
         e.level = 2; e.l2_at = nowIso();
-        e.history = (e.history || []).concat([{ at: nowIso(), by: 'System', what: 'Level 2 — ' + (due ? 'not done by new date ' + fmtDT(due) : 'no new date given in 1 working day') }]); ch = true;
+        e.history = (e.history || []).concat([{ at: nowIso(), by: 'System', what: 'Level 2 — ' + (due ? days + ' days past the new date ' + fmtDT(due) : 'no new date given in 1 working day') }]); ch = true;
       }
     }
     if (ch) Store.put('escalations', e);
@@ -342,7 +346,7 @@ function escL1Card(who) {
   const body = '<div class="tbl-wrap"><table class="nofilter nopage sa-tb"><tr><th>Ticket</th><th>Task</th><th>Reference</th><th>Doer</th><th>Planned</th><th class="num">Delay</th><th>New date</th><th class="noprint"></th></tr>' +
     mine.map(e => { let dl = 0; try { dl = cal.workMinutesBetween(new Date(e.planned), now); } catch (x) { }
       return '<tr><td><b>' + esc(e.no) + '</b></td><td>' + esc(e.task) + '<div class="muted small">' + esc(e.src) + '</div></td><td>' + (e.link ? '<a href="' + esc(e.link) + '">' + esc(e.ref) + '</a>' : esc(e.ref)) + '</td><td>' + esc(e.doer || '') + '</td><td class="nowrap">' + fmtDT(e.planned) + '</td><td class="num late-txt">' + (dl ? fmtDelay(dl) : '') + '</td>' +
-        '<td class="nowrap">' + (e.commit_at ? fmtDT(e.commit_at) + '<div class="muted small">' + esc(e.commit_why || '') + '</div>' : '<span class="muted">not given</span>') + '</td>' +
+        '<td class="nowrap">' + (e.commit_at ? fmtDT(e.commit_at) + '<div class="muted small">' + esc(e.commit_why || '') + '</div><div class="muted small">goes up ' + fmtD(ymdOf(new Date(new Date(e.commit_at).getTime() + (num(escCfg().after_commit_days) || 3) * 86400000))) + '</div>' : '<span class="muted">not given</span>') + '</td>' +
         '<td class="noprint nowrap">' + (e.commit_at ? '' : '<button class="btn sm" data-act="esc-date" data-id="' + esc(e.id) + '">New date</button> ') + '<button class="btn sm primary" data-act="esc-resolve" data-id="' + esc(e.id) + '">Resolve</button></td></tr>'; }).join('') + '</table></div>';
   return '<div class="sa-lbl">First escalations — yours to clear</div>' + saCard({ title: 'First escalations', n: mine.length, tone: 'bad', ico: 'alert', link: '#/escalations', linkText: 'All escalations', empty: 'No first escalation is waiting with you', sub: mine.length ? 'give a new date or resolve — after one working day they go to the Super Admin' : '', body: body });
 }

@@ -774,11 +774,11 @@ ACTIONS['grn-save'] = async el => {
   iw.status = 'GRN Done'; Store.put('inwards', iw);
   const totRej = calc.reduce((x, c) => x + c.rej, 0), totShort = calc.reduce((x, c) => x + c.short, 0), totEx = calc.reduce((x, c) => x + c.excess, 0);
   if (totRej > 0 || totShort > 0) autoTask('Debit Note — ' + iw.bill_no + ' (' + p.vendor + '): reject ' + qtyFmt(totRej) + ', short ' + qtyFmt(totShort), autoDoer('debit_note', 'ACCOUNTS'), 0,
-    { kind: 'debit_note', vendor: p.vendor, invoice: iw.bill_no || '', items: calc.filter(c => c.rej || c.short).map(c => ((matBy(c.l.material) || {}).name || c.l.material)).join(', ').slice(0, 300), party: p.vendor, ref: iw.bill_no || '' });
+    { kind: 'debit_note', auto_from: 'GRN', vendor: p.vendor, invoice: iw.bill_no || '', items: calc.filter(c => c.rej || c.short).map(c => ((matBy(c.l.material) || {}).name || c.l.material)).join(', ').slice(0, 300), party: p.vendor, ref: iw.bill_no || '' });
   const totOver = calc.reduce((x, c) => x + c.over, 0);
-  if (totOver > 0) autoTask('RTV without invoice — ' + p.vendor + ' inv ' + iw.bill_no + ': ' + calc.filter(c => c.over).map(c => c.l.material + ' × ' + qtyFmt(c.over)).join(', ') + ' (received above the invoice)', autoDoer('rtv', 'STORE'), 1);
-  if (totRej > 0) autoTask('RTV — ' + p.vendor + ' inv ' + iw.bill_no + ': ' + calc.filter(c => c.rej).map(c => c.l.material + ' × ' + qtyFmt(c.rej)).join(', '), autoDoer('rtv', 'STORE'), 1);
-  autoTask('Tally Entry — GRN ' + g.no + ' (' + p.vendor + ', inv ' + iw.bill_no + ')', autoDoer('tally_entry', 'ACCOUNTS'), 1);
+  if (totOver > 0) autoTask('RTV without invoice — ' + p.vendor + ' inv ' + iw.bill_no + ': ' + calc.filter(c => c.over).map(c => c.l.material + ' × ' + qtyFmt(c.over)).join(', ') + ' (received above the invoice)', autoDoer('rtv', 'STORE'), 1, null, 'GRN');
+  if (totRej > 0) autoTask('RTV — ' + p.vendor + ' inv ' + iw.bill_no + ': ' + calc.filter(c => c.rej).map(c => c.l.material + ' × ' + qtyFmt(c.rej)).join(', '), autoDoer('rtv', 'STORE'), 1, null, 'GRN');
+  autoTask('Tally Entry — GRN ' + g.no + ' (' + p.vendor + ', inv ' + iw.bill_no + ')', autoDoer('tally_entry', 'ACCOUNTS'), 1, null, 'GRN');
   audit('grn.create', g.no, iw.no + ' · ' + p.no + ' · inv ' + iw.bill_no + ' · GRN ' + qtyFmt(calc.reduce((x, c) => x + c.grn, 0)) + (totRej ? ' / rej ' + qtyFmt(totRej) : '') + (totShort ? ' / short ' + qtyFmt(totShort) : '') + (totEx ? ' / excess ' + qtyFmt(totEx) : '') + (totOver ? ' / no invoice ' + qtyFmt(totOver) : ''));
   Object.assign(U, { ven: '', po: '', inw: '', rows: [], why: '' });
   VIEWS.grn.render();

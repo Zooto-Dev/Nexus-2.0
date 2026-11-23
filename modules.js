@@ -179,9 +179,9 @@ function poStatus(po) {
 function poStCls(st) { return st === 'Received' || st === 'Short Closed' ? 'Done' : st === 'Partial' ? 'Pending' : st === 'Cancelled' || st === 'Rejected' ? 'Cancelled' : st === 'Pending Approval' || st === 'Amend' ? 'Late' : 'Waiting'; }
 // GRN, followup and inwarding run only against APPROVED POs.
 function openPOs() { return Store.all('purchase_orders').filter(p => !p.cancelled && p.approval === 'Approved' && poPending(p) > 0); }
-function autoTask(title, doer, dueDays, extra) {
+function autoTask(title, doer, dueDays, extra, from) {
   const due = new Date(Date.now() + (dueDays || 0) * 86400000); if (due.getDay() === 0) due.setDate(due.getDate() + 1); // Sunday -> Monday
-  Store.put('checklist', Object.assign({ id: uid(), title, doer, freq: 'Once', due: ymdOf(due), done: {}, active: true, by: 'auto', auto: true }, extra || {}));
+  Store.put('checklist', Object.assign({ id: uid(), title, doer, freq: 'Once', due: ymdOf(due), done: {}, active: true, by: 'auto', auto: true, auto_from: from || '' }, extra || {}));
 }
 // Standard letterhead document printer used by every report
 function printDoc(o) {
