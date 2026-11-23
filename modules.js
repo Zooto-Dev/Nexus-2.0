@@ -2058,7 +2058,7 @@ VIEWS.vendors = {
   mod: 'purchase', render() {
     masterView({
       col: 'vendors', mod: 'purchase', title: 'Vendors', view: VIEWS.vendors, sort: 'name', paste: true,
-      cols: [{ k: 'name', l: 'Vendor Name', ph: 'e.g. ABC Textiles' }, { k: 'address', l: 'Address' }, { k: 'gstin', l: 'GST No', w: 160, upper: true }, { k: 'pan', l: 'PAN', w: 110, lock: true, noPaste: true }, { k: 'state', l: 'State', w: 150, opts: () => [{ v: '', l: '' }].concat(stateNames().map(n => ({ v: n, l: n }))) }, { k: 'email', l: 'Email ID', w: 180 }, { k: 'mobile', l: 'Mobile No.', w: 120 }, { k: 'real_email', l: 'Real Email', w: 180, noPaste: true }, { k: 'real_mobile', l: 'Real Mobile', w: 120, noPaste: true }, { k: 'qc_required', l: 'QC Report', w: 90, opts: () => [{ v: '', l: 'No' }, { v: 'Yes', l: 'Yes' }] }],
+      cols: [{ k: 'name', l: 'Vendor Name', ph: 'e.g. ABC Textiles' }, { k: 'address', l: 'Address' }, { k: 'gstin', l: 'GST No', w: 160, upper: true }, { k: 'pan', l: 'PAN', w: 110, lock: true, noPaste: true }, { k: 'gst_status', l: 'GST check', w: 120, lock: true, noPaste: true, fmt: v => v || 'not checked' }, { k: 'state', l: 'State', w: 150, opts: () => [{ v: '', l: '' }].concat(stateNames().map(n => ({ v: n, l: n }))) }, { k: 'email', l: 'Email ID', w: 180 }, { k: 'mobile', l: 'Mobile No.', w: 120 }, { k: 'real_email', l: 'Real Email', w: 180, noPaste: true }, { k: 'real_mobile', l: 'Real Mobile', w: 120, noPaste: true }, { k: 'qc_required', l: 'QC Report', w: 90, opts: () => [{ v: '', l: 'No' }, { v: 'Yes', l: 'Yes' }] }],
       emailKey: 'email',
       // the state comes from the GST No (first 2 digits)
       normalize: (d, k) => { d.gstin = String(d.gstin || '').trim().toUpperCase(); const st = gstState(d.gstin); if (st && !gstinError(d.gstin) && k !== 'state') d.state = st; d.pan = gstPan(d.gstin); d.mobile = String(d.mobile || '').replace(/\D/g, '').replace(/^(91|0)(?=\d{10}$)/, ''); d.real_mobile = String(d.real_mobile || '').replace(/\D/g, '').replace(/^(91|0)(?=\d{10}$)/, ''); d.real_email = String(d.real_email || '').trim().toLowerCase(); d.email = String(d.email || '').trim().toLowerCase(); },
@@ -2068,9 +2068,67 @@ VIEWS.vendors = {
       // vendor by itself — POs, GRNs and BOMs carry the vendor's name, so a rename is the user's call
       extra: d => d.gstin && !gstinError(d.gstin) && can('purchase', 'edit') ? '<button class="btn ghost sm" data-act="gst-fill" data-id="' + esc(d.id) + '" title="Fill the address from the GST No">GST</button> ' : ''
     });
-    if (CLOUD && can('purchase', 'edit')) { const tb = $('#main .toolbar'); if (tb) tb.insertAdjacentHTML('beforeend', '<button class="btn primary" data-act="gst-new">+ GST se vendor</button>'); }
+    if (CLOUD && can('purchase', 'edit')) {
+      const tb = $('#main .toolbar');
+      if (tb) tb.insertAdjacentHTML('beforeend', '<span class="muted small">' + gstLeft().length + ' still to verify</span>' +
+        '<button class="btn" data-act="gst-verify">Verify on GST</button><button class="btn primary" data-act="gst-new">+ GST se vendor</button>');
+    }
   }
 };
+// a vendor still to be checked: it has a GST No of its own and no answer from the service yet
+function gstLeft() { return Store.all('vendors').filter(v => v.gstin && !gstinError(v.gstin) && !v.gst_checked_at); }
+// one vendor against the GST record: the address, state and status come back, the name never changes by itself
+async function gstVerifyOne(v, debug) {
+  const { err, d } = await gstLookup(v.gstin, debug);
+  if (err) { v.gst_error = err; v.gst_checked_at = ''; Store.put('vendors', v); return { err }; }
+  const was = { address: v.address || '', state: v.state || '' };
+  v.gst_name = d.name || ''; v.gst_legal_name = d.legal_name || ''; v.gst_status = d.status || 'Active';
+  v.gst_registered_on = d.registered_on || ''; v.gst_type = d.type || '';
+  v.gst_checked_at = nowIso(); v.gst_checked_by = ME.name; v.gst_error = '';
+  if (d.address) v.address = d.address;
+  if (d.state) v.state = d.state;
+  if (!v.pan) v.pan = d.pan || gstPan(v.gstin);
+  Store.put('vendors', v);
+  const changed = [];
+  if (norm(was.address) !== norm(v.address)) changed.push('address');
+  if (norm(was.state) !== norm(v.state)) changed.push('state');
+  const nameDiff = d.name && norm(d.name) !== norm(v.name);
+  audit('vendors.gst_verify', v.name, v.gstin + ' · ' + (d.status || 'Active') + (changed.length ? ' · filled ' + changed.join(', ') : '') + (nameDiff ? ' · GST record says ' + d.name : ''));
+  return { d, changed, nameDiff, cancelled: !!d.cancelled };
+}
+// every vendor, as many at a time as you say — one credit per number, so it asks first
+ACTIONS['gst-verify'] = () => {
+  if (!requirePerm('purchase', 'edit')) return;
+  const left = gstLeft(); const bad = Store.all('vendors').filter(v => v.gstin_raw && !v.gstin);
+  if (!left.length) { flash('Every vendor with a GST No has been checked.' + (bad.length ? ' ' + bad.length + ' still have no usable GST No — fix those numbers first.' : '')); return; }
+  formDialog('Verify vendors on GST', [
+    { k: 'n', l: 'How many now', type: 'number', value: Math.min(50, left.length), req: true },
+    { k: 'note', l: 'Waiting', type: 'static', value: left.length + ' vendor(s) still to check. Each one costs a credit.' +
+      (bad.length ? ' ' + bad.length + ' more have a GST No that is not usable — they are left out.' : '') }
+  ], 'Start', v => {
+    const n = Math.max(1, Math.min(num(v.n) || 1, left.length));
+    gstVerifyRun(left.slice(0, n));
+    return '';
+  });
+};
+async function gstVerifyRun(list) {
+  let ok = 0, fail = 0; const cancelled = [], renamed = [], errs = [];
+  for (let i = 0; i < list.length; i++) {
+    const v = list[i];
+    flash('Verifying ' + (i + 1) + ' of ' + list.length + ' — ' + esc(v.name) + '…');
+    const r = await gstVerifyOne(v);
+    if (r.err) { fail++; errs.push(v.name + ': ' + r.err); if (fail >= 3 && ok === 0) break; }
+    else { ok++; if (r.cancelled) cancelled.push(v.name + ' (' + v.gst_status + ')'); if (r.nameDiff) renamed.push(v.name + ' → ' + v.gst_name); }
+    await new Promise(res => setTimeout(res, 250));
+  }
+  audit('vendors.gst_verify_run', '', list.length + ' asked · ' + ok + ' verified · ' + fail + ' failed');
+  const left = gstLeft().length;
+  flash('<b>' + ok + ' verified</b>' + (fail ? ', ' + fail + ' failed' : '') + '. ' + left + ' still to go.' +
+    (cancelled.length ? '<br><span class="late-txt">GST not active: ' + esc(cancelled.slice(0, 10).join(', ')) + (cancelled.length > 10 ? ' and ' + (cancelled.length - 10) + ' more' : '') + '</span>' : '') +
+    (renamed.length ? '<br>GST record has a different name for ' + renamed.length + ' vendor(s) — see the Real/GST columns.' : '') +
+    (errs.length ? '<br>' + esc(errs.slice(0, 3).join(' | ')) : ''), (fail || cancelled.length) ? 'err' : '');
+  VIEWS.vendors.render();
+}
 // the lookup itself: the GST number goes to the nx-gst function, the provider key stays there
 async function gstLookup(gstin, debug) {
   if (!CLOUD || !SB) return { err: 'GST lookup works only when you are signed in to the cloud.' };
