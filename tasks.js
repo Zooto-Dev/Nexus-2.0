@@ -364,7 +364,9 @@ function saHomeHtml(names) {
   try { escRun(); } catch (e) { console.error(e); }
   const pa = paRows(); const tasks = allTasks(); const now = new Date();
   const exc = pa.filter(r => r.k === 'excess' && !r.actual).sort((a, b) => b.delay - a.delay);
-  const poa = pa.filter(r => r.k === 'po_approval' && !r.actual).sort((a, b) => b.delay - a.delay);
+  const poAll = pa.filter(r => r.k === 'po_approval' && !r.actual);
+  const poa = poAll.filter(r => !/amend/i.test(r.result || '')).sort((a, b) => b.delay - a.delay);
+  const poAmend = poAll.filter(r => /amend/i.test(r.result || '')).sort((a, b) => b.delay - a.delay);
   const prq = Store.all('price_requests').filter(x => x.status === 'Pending').sort((a, b) => a.at < b.at ? -1 : 1);
   const escs = Store.all('escalations').filter(e => e.status === 'Open');
   const l2 = escs.filter(e => e.level === 2).sort((a, b) => a.planned < b.planned ? -1 : 1); const l1n = escs.length - l2.length;
@@ -387,6 +389,9 @@ function saHomeHtml(names) {
     h += saCard({ title: 'PO approvals', n: poa.length, ico: 'file', link: '#/poapproval', empty: 'No purchase order waiting', note: 'Purchase orders waiting for your approval.', body:
       tbl('sa_po', ['PO', 'Vendor', 'Since', 'Planned', 'Delay'], poa.map(r => '<tr class="click" data-act="go" data-v="poapproval"><td><b>' + esc(r.ref) + '</b></td><td>' + esc(r.party) + '</td><td class="nowrap">' + fmtDT(r.start) + '</td><td class="nowrap">' + fmtDT(r.planned) + '</td><td class="num">' + dl(r.delay) + '</td></tr>'), 5) });
     h += '</div>';
+    if (poAmend.length) h += saCard({ title: 'PO sent back for amendment', n: poAmend.length, ico: 'file', link: '#/po', linkText: 'Purchase orders',
+      note: 'These are not with you — Purchase has to correct them and send them again. Until then the PO Approval screen will not show them.', body:
+      tbl('sa_po_amend', ['PO', 'Vendor', 'Raised by', 'Since', 'Waiting'], poAmend.map(r => '<tr class="click" data-act="go" data-v="po"><td><b>' + esc(r.ref) + '</b></td><td>' + esc(r.party) + '</td><td>' + esc(((Store.all('purchase_orders').find(p => norm(p.no) === norm(r.ref)) || {}).created_by) || '') + '</td><td class="nowrap">' + fmtDT(r.start) + '</td><td class="num">' + dl(r.delay) + '</td></tr>'), 5) });
     h += saCard({ title: 'Price approvals', n: prq.length, ico: 'tag', link: '#/priceapproval', empty: 'No price waiting for approval', note: 'An approved price goes straight into every BOM that uses the item.', body:
       tbl('sa_price', ['Photo', 'Item', 'Current ₹', 'New ₹', 'Type', 'Asked by', 'Since', ''], prq.map(x => '<tr><td>' + photoThumb((matBy(x.material) || {}).photo) + '</td><td><b>' + esc(x.material) + '</b> <span class="muted">' + esc((matBy(x.material) || {}).name || '') + '</span></td><td class="num">' + (num(x.old_price) ? money(x.old_price) : '—') + '</td><td class="num"><b>' + money(x.new_price) + '</b></td><td>' + prType(x) + '</td><td>' + esc(x.by) + '</td><td class="nowrap">' + fmtDT(x.at) + '</td><td class="nowrap"><button class="btn sm primary" data-act="pr-ok" data-id="' + esc(x.id) + '">Approve</button><button class="btn sm" data-act="pr-no" data-id="' + esc(x.id) + '" data-confirm="Reject?">Reject</button></td></tr>'), 8) });
     return h;

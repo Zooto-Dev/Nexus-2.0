@@ -93,9 +93,15 @@ VIEWS.poapproval = {
     const p = PA_UI.view ? list.find(x => x.id === PA_UI.view) : null;
     if (!p) {
       PA_UI.view = null;
-      setMain('<div class="tbl-wrap"><table><tr><th>PO No</th><th>PO Date</th><th>Vendor</th><th>Expected</th><th>Raised By</th><th></th></tr>' +
+      const amend = Store.all('purchase_orders').filter(x => !x.cancelled && x.approval === 'Amend').sort((a, b) => (a.at || '') < (b.at || '') ? -1 : 1);
+      let h = '<h2>Waiting for your approval</h2><div class="tbl-wrap"><table><tr><th>PO No</th><th>PO Date</th><th>Vendor</th><th>Expected</th><th>Raised By</th><th></th></tr>' +
         (list.length ? list.map(x => '<tr><td><b>' + esc(x.no) + '</b></td><td>' + fmtD(x.date) + '</td><td>' + esc(x.vendor) + '</td><td>' + fmtD(x.expected) + '</td><td>' + esc(x.created_by || '') + '</td><td class="right"><button class="btn sm primary" data-act="pa-view" data-id="' + esc(x.id) + '">View</button></td></tr>').join('')
-          : '<tr><td colspan="6" class="empty">No purchase orders waiting for approval</td></tr>') + '</table></div>');
+          : '<tr><td colspan="6" class="empty">No purchase orders waiting for approval</td></tr>') + '</table></div>';
+      if (amend.length) h += '<h2>Sent back for amendment — with Purchase, not with you</h2>' +
+        '<div class="tbl-wrap"><table><tr><th>PO No</th><th>PO Date</th><th>Vendor</th><th>Raised By</th><th>What to amend</th><th>Sent back by</th><th>Sent back at</th></tr>' +
+        amend.map(x => { const a = (x.amend_log || []).slice(-1)[0] || {}; return '<tr><td><b>' + esc(x.no) + '</b></td><td>' + fmtD(x.date) + '</td><td>' + esc(x.vendor) + '</td><td>' + esc(x.created_by || '') + '</td><td>' + esc(a.remark || '') + '</td><td>' + esc(a.by || '') + '</td><td class="nowrap">' + fmtDT(a.at) + '</td></tr>'; }).join('') + '</table></div>' +
+        '<div class="muted small">Purchase opens the PO from Purchase &rsaquo; Purchase Orders, presses Edit, corrects it and sends it again. It comes back here only then.</div>';
+      setMain(h);
       return;
     }
     const ok = canApprovePo(p);
