@@ -1077,5 +1077,7 @@ function gstinError(g) {
   return '';
 }
 function gstState(g) { return GST_STATES[String(g || '').slice(0, 2)] || ''; }
+// characters 3-12 of a GST No are the holder's PAN, so it needs no lookup
+function gstPan(g) { g = String(g || '').trim().toUpperCase(); return !gstinError(g) && g.length === 15 ? g.slice(2, 12) : ''; }
 function mobileError(m) { m = String(m || '').trim(); return !m || /^[6-9][0-9]{9}$/.test(m) ? '' : 'Mobile No. must be 10 digits starting with 6–9.'; }
 function emailSyntaxError(e) { e = String(e || '').trim(); return !e || /^[^@\s,;<>"]+@[^@\s,;<>"]+\.[A-Za-z]{2,}$/.test(e) ? '' : 'Email ID is not valid.'; }

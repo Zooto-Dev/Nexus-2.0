@@ -2058,10 +2058,10 @@ VIEWS.vendors = {
   mod: 'purchase', render() {
     masterView({
       col: 'vendors', mod: 'purchase', title: 'Vendors', view: VIEWS.vendors, sort: 'name', paste: true,
-      cols: [{ k: 'name', l: 'Vendor Name', ph: 'e.g. ABC Textiles' }, { k: 'address', l: 'Address' }, { k: 'gstin', l: 'GST No', w: 160, upper: true }, { k: 'state', l: 'State', w: 150, opts: () => [{ v: '', l: '' }].concat(stateNames().map(n => ({ v: n, l: n }))) }, { k: 'email', l: 'Email ID', w: 180 }, { k: 'mobile', l: 'Mobile No.', w: 120 }, { k: 'qc_required', l: 'QC Report', w: 90, opts: () => [{ v: '', l: 'No' }, { v: 'Yes', l: 'Yes' }] }],
+      cols: [{ k: 'name', l: 'Vendor Name', ph: 'e.g. ABC Textiles' }, { k: 'address', l: 'Address' }, { k: 'gstin', l: 'GST No', w: 160, upper: true }, { k: 'pan', l: 'PAN', w: 110, lock: true, noPaste: true }, { k: 'state', l: 'State', w: 150, opts: () => [{ v: '', l: '' }].concat(stateNames().map(n => ({ v: n, l: n }))) }, { k: 'email', l: 'Email ID', w: 180 }, { k: 'mobile', l: 'Mobile No.', w: 120 }, { k: 'qc_required', l: 'QC Report', w: 90, opts: () => [{ v: '', l: 'No' }, { v: 'Yes', l: 'Yes' }] }],
       emailKey: 'email',
       // the state comes from the GST No (first 2 digits)
-      normalize: (d, k) => { d.gstin = String(d.gstin || '').trim().toUpperCase(); const st = gstState(d.gstin); if (st && !gstinError(d.gstin) && k !== 'state') d.state = st; d.mobile = String(d.mobile || '').replace(/\D/g, '').replace(/^(91|0)(?=\d{10}$)/, ''); d.email = String(d.email || '').trim().toLowerCase(); },
+      normalize: (d, k) => { d.gstin = String(d.gstin || '').trim().toUpperCase(); const st = gstState(d.gstin); if (st && !gstinError(d.gstin) && k !== 'state') d.state = st; d.pan = gstPan(d.gstin); d.mobile = String(d.mobile || '').replace(/\D/g, '').replace(/^(91|0)(?=\d{10}$)/, ''); d.email = String(d.email || '').trim().toLowerCase(); },
       validate: d => uniq('vendors', 'name', 'Vendor')(d) || gstinError(d.gstin) || (d.gstin && d.state && gstState(d.gstin) !== d.state ? 'State does not match the GST No (' + d.gstin.slice(0, 2) + ' = ' + gstState(d.gstin) + ').' : '') || mobileError(d.mobile) || emailSyntaxError(d.email),
       inUse: d => Store.all('purchase_orders').some(p => norm(p.vendor) === norm(d.name)) ? 'Vendor has POs — cannot delete.' : ''
     });
