@@ -9,6 +9,7 @@ const ACT_LINK = { po_raise: 'po', po_approval: 'poapproval', inward: 'inward', 
 const ACT_FIELD = { po_raise: 'brand', po_approval: 'vendor', inward: 'vendor', invoice: 'vendor', qc: 'vendor', swatch: 'vendor', grn: 'vendor', excess: 'vendor', issuance: '', issue_approval: '', rtv: 'vendor' };
 function actRules(k) { return ((settings().act_doer || {})[k] || []).filter(r => r.doer); }
 function actDoer(r) {
+  if (r.amend && (r.owners || []).length && r.owners[0]) return String(r.owners[0]).toUpperCase();
   if (r.k === 'swatch' && (r.owners || []).length) return doerOfName(r.owners[0]);
   const def = actRules(r.k).find(x => !x.field);
   if (def) return def.doer;
@@ -58,7 +59,7 @@ function allTasks(force) {
   paRows().forEach(r => {
     if (!r.planned || r.status === 'Waiting') return;
     const owner = actDoer(r);
-    push({ key: 'pa|' + r.k + '|' + r.ref, src: 'Nexus', task: r.act, ref: r.ref, party: r.party || '', doer: owner || (r.actual ? doerOfName(r.by) : ''), owner, by: r.by || '',
+    push({ key: 'pa|' + r.k + '|' + r.ref, src: 'Nexus', task: r.act + (r.amend ? ' — correction' + (r.amend_with ? ' by ' + r.amend_with : '') : ''), ref: r.ref, party: r.party || '', doer: owner || (r.actual ? doerOfName(r.by) : ''), owner, by: r.by || '',
       planned: r.planned, actual: r.actual || null, link: '#/' + (ACT_LINK[r.k] || 'planactual'), grp: paDef(r.k).grp, k: r.k });
   });
   AT_CACHE = { t: Date.now(), rows: out };
@@ -363,10 +364,13 @@ function saHomeHtml(names) {
   if (!SA_UI.from) { const d = new Date(); SA_UI.from = ymdOf(new Date(d.getFullYear(), d.getMonth(), 1)); SA_UI.to = todayYmd(); }
   try { escRun(); } catch (e) { console.error(e); }
   const pa = paRows(); const tasks = allTasks(); const now = new Date();
-  const exc = pa.filter(r => r.k === 'excess' && !r.actual).sort((a, b) => b.delay - a.delay);
+  const excAll = pa.filter(r => r.k === 'excess' && !r.actual);
+  const exc = excAll.filter(r => !r.amend).sort((a, b) => b.delay - a.delay);
+  const excAmend = excAll.filter(r => r.amend).sort((a, b) => b.delay - a.delay);
   const poAll = pa.filter(r => r.k === 'po_approval' && !r.actual);
-  const poa = poAll.filter(r => !/amend/i.test(r.result || '')).sort((a, b) => b.delay - a.delay);
-  const poAmend = poAll.filter(r => /amend/i.test(r.result || '')).sort((a, b) => b.delay - a.delay);
+  const poa = poAll.filter(r => !r.amend).sort((a, b) => b.delay - a.delay);
+  const poAmend = poAll.filter(r => r.amend).sort((a, b) => b.delay - a.delay);
+  const invAmend = pa.filter(r => r.k === 'invoice' && !r.actual && r.amend).sort((a, b) => b.delay - a.delay);
   const prq = Store.all('price_requests').filter(x => x.status === 'Pending').sort((a, b) => a.at < b.at ? -1 : 1);
   const escs = Store.all('escalations').filter(e => e.status === 'Open');
   const l2 = escs.filter(e => e.level === 2).sort((a, b) => a.planned < b.planned ? -1 : 1); const l1n = escs.length - l2.length;
@@ -389,9 +393,10 @@ function saHomeHtml(names) {
     h += saCard({ title: 'PO approvals', n: poa.length, ico: 'file', link: '#/poapproval', empty: 'No purchase order waiting', note: 'Purchase orders waiting for your approval.', body:
       tbl('sa_po', ['PO', 'Vendor', 'Since', 'Planned', 'Delay'], poa.map(r => '<tr class="click" data-act="go" data-v="poapproval"><td><b>' + esc(r.ref) + '</b></td><td>' + esc(r.party) + '</td><td class="nowrap">' + fmtDT(r.start) + '</td><td class="nowrap">' + fmtDT(r.planned) + '</td><td class="num">' + dl(r.delay) + '</td></tr>'), 5) });
     h += '</div>';
-    if (poAmend.length) h += saCard({ title: 'PO sent back for amendment', n: poAmend.length, ico: 'file', link: '#/po', linkText: 'Purchase orders',
-      note: 'These are not with you — Purchase has to correct them and send them again. Until then the PO Approval screen will not show them.', body:
-      tbl('sa_po_amend', ['PO', 'Vendor', 'Raised by', 'Since', 'Waiting'], poAmend.map(r => '<tr class="click" data-act="go" data-v="po"><td><b>' + esc(r.ref) + '</b></td><td>' + esc(r.party) + '</td><td>' + esc(((Store.all('purchase_orders').find(p => norm(p.no) === norm(r.ref)) || {}).created_by) || '') + '</td><td class="nowrap">' + fmtDT(r.start) + '</td><td class="num">' + dl(r.delay) + '</td></tr>'), 5) });
+    const back = poAmend.map(r => ({ r, what: 'PO', to: '#/po' })).concat(invAmend.map(r => ({ r, what: 'Invoice', to: '#/inward' })), excAmend.map(r => ({ r, what: 'Excess', to: '#/grn' })));
+    if (back.length) h += saCard({ title: 'Sent back for correction', n: back.length, ico: 'file', link: '#/alltasks', linkText: 'Tasks',
+      note: 'These are not with you — the person who raised them has to correct and send them again, so the approval screens do not show them.', body:
+      tbl('sa_amend', ['What', 'Reference', 'Party', 'With', 'Since', 'Waiting'], back.map(({ r, what, to }) => '<tr class="click" data-act="go" data-v="' + to.slice(2) + '"><td>' + what + '</td><td><b>' + esc(r.ref) + '</b></td><td>' + esc(r.party || '') + '</td><td>' + esc(r.amend_with || '') + '</td><td class="nowrap">' + fmtDT(r.start) + '</td><td class="num">' + dl(r.delay) + '</td></tr>'), 6) });
     h += saCard({ title: 'Price approvals', n: prq.length, ico: 'tag', link: '#/priceapproval', empty: 'No price waiting for approval', note: 'An approved price goes straight into every BOM that uses the item.', body:
       tbl('sa_price', ['Photo', 'Item', 'Current ₹', 'New ₹', 'Type', 'Asked by', 'Since', ''], prq.map(x => '<tr><td>' + photoThumb((matBy(x.material) || {}).photo) + '</td><td><b>' + esc(x.material) + '</b> <span class="muted">' + esc((matBy(x.material) || {}).name || '') + '</span></td><td class="num">' + (num(x.old_price) ? money(x.old_price) : '—') + '</td><td class="num"><b>' + money(x.new_price) + '</b></td><td>' + prType(x) + '</td><td>' + esc(x.by) + '</td><td class="nowrap">' + fmtDT(x.at) + '</td><td class="nowrap"><button class="btn sm primary" data-act="pr-ok" data-id="' + esc(x.id) + '">Approve</button><button class="btn sm" data-act="pr-no" data-id="' + esc(x.id) + '" data-confirm="Reject?">Reject</button></td></tr>'), 8) });
     return h;

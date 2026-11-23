@@ -36,7 +36,9 @@ function paRows() {
   pos.forEach(p => {
     const at = ts(p.at || p.created_at || p.date);
     const done = p.approval === 'Approved' || p.approval === 'Rejected';
-    add('po_approval', { ref: p.no, party: p.vendor, start: at, actual: done ? ts(p.approved_at) : null, by: done ? p.approved_by : '', result: p.approval || '', owners: [] });
+    const amd = p.approval === 'Amend';
+    add('po_approval', { ref: p.no, party: p.vendor, start: at, actual: done ? ts(p.approved_at) : null, by: done ? p.approved_by : '', result: p.approval || '',
+      owners: amd && p.created_by ? [doerOfName(p.created_by)] : [], amend: amd, amend_with: amd ? (p.created_by || '') : '' });
     if (p.approval === 'Approved') {
       const ins = Store.all('inwards').filter(i => norm(i.po_no) === norm(p.no)).sort((a, b) => (a.at || '') < (b.at || '') ? -1 : 1);
       const open = (p.lines || []).some((l, k) => poLinePending(p, l, k) > 0);
@@ -48,7 +50,9 @@ function paRows() {
   Store.all('inwards').forEach(i => {
     const at = ts(i.at || i.date);
     const invDone = i.inv_status === 'Approved' || i.inv_status === 'Rejected';
-    add('invoice', { ref: i.no, party: i.vendor, start: at, actual: invDone ? ts(i.inv_at) : null, by: invDone ? i.inv_by : '', result: i.inv_status || '' });
+    const invAmd = i.inv_status === 'Amend';
+    add('invoice', { ref: i.no, party: i.vendor, start: at, actual: invDone ? ts(i.inv_at) : null, by: invDone ? i.inv_by : '', result: i.inv_status || '',
+      owners: invAmd && i.by ? [doerOfName(i.by)] : [], amend: invAmd, amend_with: invAmd ? (i.by || '') : '' });
     if (i.inv_status !== 'Approved') return;
     (i.qc || []).forEach(q => {
       add('qc', { ref: i.no + ' · ' + q.material, party: i.vendor, start: ts(i.inv_at), actual: q.result ? ts(q.at) : null, by: q.result ? q.by : '', result: q.result || '' });
@@ -64,7 +68,9 @@ function paRows() {
   Store.all('grns').forEach(g => (g.lines || []).forEach(l => {
     if (!(num(l.excess) > 0) || !l.excess_status) return;
     const done = l.excess_status === 'Approved' || l.excess_status === 'Rejected';
-    add('excess', { ref: g.no + ' · ' + l.material, party: g.vendor, start: ts(g.at || g.date), actual: done ? ts(l.excess_at) : null, by: done ? l.excess_by : '', result: l.excess_status });
+    const exAmd = l.excess_status === 'Amend';
+    add('excess', { ref: g.no + ' · ' + l.material, party: g.vendor, start: ts(g.at || g.date), actual: done ? ts(l.excess_at) : null, by: done ? l.excess_by : '', result: l.excess_status,
+      owners: exAmd && g.by ? [doerOfName(g.by)] : [], amend: exAmd, amend_with: exAmd ? (g.by || '') : '' });
   }));
   Store.all('requisitions').forEach(r => {
     if (r.status === 'Rejected') return;
