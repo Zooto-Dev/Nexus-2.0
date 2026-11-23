@@ -846,10 +846,10 @@ td, th { vertical-align: middle; }
 .icgrid td .muted.small, .icgrid td label { display: block; margin-top: 4px; }
 /* Super Admin Home: equal tiles; cards in one row share one height, nothing left hanging */
 .dk.sa-k { grid-template-columns: repeat(7, minmax(0, 1fr)); }
-.sa-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; align-items: stretch; margin-bottom: 14px; }
-.sa-row > .dcard, .sa-row > div > .dcard { margin: 0; height: 100%; }
-.sa-row > div { display: flex; flex-direction: column; }
-@media (max-width: 1000px) { .sa-row { grid-template-columns: 1fr; } .dk.sa-k { grid-template-columns: repeat(3, 1fr); } }
+/* a table reads across, so two of them never sit side by side: every card takes the full width */
+.sa-row { display: flex; flex-direction: column; gap: 14px; margin-bottom: 14px; }
+.sa-row > .dcard, .sa-row > div > .dcard { margin: 0; }
+@media (max-width: 1000px) { .dk.sa-k { grid-template-columns: repeat(3, 1fr); } }
 .ac-t tr.ac-m td { background: #f6f8fc; border-top: 1px solid var(--line); }
 .ac-t tr.ac-s td:first-child { padding-left: 30px; }
 .ac-t .ac-ind { color: var(--faint); font-size: 12px; }
@@ -1010,6 +1010,9 @@ th.lp-grp { border-bottom: 0; background: var(--accent-bg); color: var(--accent)
 
 .sa-row > .dcard.sa-ok, .dgrid > .dcard.sa-ok { height: auto; align-self: start; }
 .sa-row > div > .dcard.sa-ok { height: auto; }
+/* the excess and delay sections on the Super Admin home stack the same way */
+.sa-stack { display: flex; flex-direction: column; gap: 14px; margin-bottom: 14px; }
+.sa-stack > .dcard { margin: 0; }
 
 /* ---- the job card / BOM document on the order page ---- */
 .ord-doc { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); margin-bottom: 14px; overflow: hidden; }

@@ -381,7 +381,7 @@ function saHomeHtml(names) {
 
   // ---- Approvals: only the ones the Super Admin gives ----
   if (tab === 'apr') {
-    h += '<div class="sa-lbl">Approvals waiting with you</div><div class="dgrid sa-row">';
+    h += '<div class="sa-lbl">Approvals waiting with you</div><div class="sa-stack">';
     h += saCard({ title: 'Excess approvals', n: exc.length, tone: 'bad', ico: 'box', link: '#/excessapproval', empty: 'No excess material waiting', note: 'Material taken in above the purchase order.', body:
       tbl('sa_excess', ['GRN · Material', 'Vendor', 'Since', 'Planned', 'Delay'], exc.map(r => '<tr class="click" data-act="go" data-v="excessapproval"><td><b>' + esc(r.ref) + '</b></td><td>' + esc(r.party) + '</td><td class="nowrap">' + fmtDT(r.start) + '</td><td class="nowrap">' + fmtDT(r.planned) + '</td><td class="num">' + dl(r.delay) + '</td></tr>'), 5) });
     h += saCard({ title: 'PO approvals', n: poa.length, ico: 'file', link: '#/poapproval', empty: 'No purchase order waiting', note: 'Purchase orders waiting for your approval.', body:
@@ -417,7 +417,7 @@ function saHomeHtml(names) {
     x.total++; if (t.done) { x.done++; if (t.late) { x.late++; x.dsum += t.delay; } } else if (t.late) { x.open++; x.osum += t.delay; }
   });
   const pRows = Object.values(byProc).filter(x => x.late || x.open).sort((a, b) => (b.osum + b.dsum) - (a.osum + a.dsum));
-  h += '<div class="sa-lbl">Where the delay is</div><div class="dgrid sa-row"><div>' + saCard({ title: 'Held up by person', n: dRows.length, tone: 'bad', ico: 'person', link: '#/alltasks', linkText: 'Tasks', empty: 'Nobody is holding work up', note: 'Open delayed tasks added up, longest first. Click a row for that person\'s full summary.', body:
+  h += '<div class="sa-lbl">Where the delay is</div><div class="sa-stack"><div>' + saCard({ title: 'Held up by person', n: dRows.length, tone: 'bad', ico: 'person', link: '#/alltasks', linkText: 'Tasks', empty: 'Nobody is holding work up', note: 'Open delayed tasks added up, longest first. Click a row for that person\'s full summary.', body:
     tbl('sa_doer', ['Doer', 'Department', 'Delayed', 'Total delay', 'Longest', 'Longest task'], dRows.map(x => '<tr class="click" data-act="sc-open" data-d="' + esc(x.doer === 'NOT SET' ? '' : x.doer) + '"><td><b>' + (x.doer === 'NOT SET' ? '<span class="late-txt">Not set</span>' : esc(x.doer)) + '</b></td><td>' + esc(x.dept || '') + '</td><td class="num">' + x.n + '</td><td class="num late-txt">' + fmtDelay(x.sum) + '</td><td class="num">' + fmtDelay(x.max) + '</td><td>' + esc(x.top) + '</td></tr>'), 6) }) + '</div>' +
     '<div>' + saCard({ title: 'Slow processes', n: pRows.length, ico: 'flow', sub: fmtD(SA_UI.from) + ' – ' + fmtD(SA_UI.to), empty: 'No process ran late in this period', note: 'Which step of which flow runs late, not who runs it.', body:
     tbl('sa_proc', ['Process', 'Source', 'Total', 'Late %', 'Avg delay (done)', 'Open late', 'Avg delay (open)'], pRows.map(x => '<tr><td><b>' + esc(x.task) + '</b></td><td>' + esc(x.src) + '</td><td class="num">' + x.total + '</td><td class="num">' + Math.round((x.late + x.open) * 100 / x.total) + '%</td><td class="num">' + (x.late ? fmtDelay(Math.round(x.dsum / x.late)) : '') + '</td><td class="num' + (x.open ? ' late-txt' : '') + '">' + x.open + '</td><td class="num">' + (x.open ? fmtDelay(Math.round(x.osum / x.open)) : '') + '</td></tr>'), 7) }) + '</div></div>';
