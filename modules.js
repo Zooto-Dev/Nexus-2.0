@@ -871,6 +871,10 @@ function jcfDecorate() {
   });
 }
 document.addEventListener('input', e => { if (e.target.id === 'jfRem' && window.JCF) JCF.rem = e.target.value; });
+// item names typed in a BOM / job card must be in the Item master exactly — "Pen 2" for "Pen" is refused, not dropped
+function badItemRows(trs, sel) {
+  return trs.map((tr, i) => { const v = ($(sel, tr) || {}).value || ''; return v.trim() && !matBy(v) ? 'row ' + (i + 1) + ' "' + v.trim() + '"' : ''; }).filter(Boolean);
+}
 function jcfBomRow(l) {
   l = l || {}; const m = matBy(l.material) || {};
   // a size-wise line is tied to one size of the order and takes that size's quantity
@@ -1067,6 +1071,8 @@ ACTIONS['jc-save'] = () => {
   const o = Store.all('orders').find(x => norm(x.no) === norm($('#jfOrd').value));
   if (!o || $('#jfLine').value === '') { $('#njMsg').innerHTML = '<span class="late-txt">Select a JC No in the JOB CARD field first.</span>'; return; }
   const l = jcOrderLine(o, num($('#jfLine').value));
+  const badItem = badItemRows($$('#jfBom tr[data-bomrow]'), '[data-b="mat"]');
+  if (badItem.length) { $('#njMsg').innerHTML = '<span class="late-txt">Not in the Item master: ' + esc(badItem.join(', ')) + ' — select the item from the list; names cannot be typed or changed here.</span>'; return; }
   // a job card needs the article's packaging PPT
   if (!pptOf(o.customer_name, l.article)) { $('#njMsg').innerHTML = '<span class="late-txt">Packaging PPT for ' + esc(l.article) + ' is not uploaded yet — Merchant → Packaging PPT. The job card can be made once it is there.</span>'; return; }
   const { act, ext } = jcfRecalc();
@@ -1688,6 +1694,8 @@ ACTIONS['bom-save'] = () => {
   const brand = $('#nbBrand').value.trim(); const artIn = $('#nbArt').value.trim().toUpperCase();
   const art = (Store.all('items').find(i => norm(i.code) === norm(artIn) || norm(i.name) === norm(artIn)) || { code: artIn }).code;
   const style = $('#nbStyle').value.trim(), col = $('#nbCol').value.trim(), gen = $('#nbGen').value, cat = $('#nbCat').value.trim();
+  const badItem = badItemRows($$('#nbTable tr[data-bline]'), '[data-nb="mat"]');
+  if (badItem.length) { $('#nbMsg').innerHTML = '<span class="late-txt">Not in the Item master: ' + esc(badItem.join(', ')) + ' — select the item from the list; names cannot be typed or changed here.</span>'; return; }
   const lines = $$('#nbTable tr[data-bline]').map(tr => {
     const m = Store.all('materials').find(x => norm(x.name) === norm($('[data-nb="mat"]', tr).value) || norm(x.code) === norm($('[data-nb="mat"]', tr).value));
     return m ? { process: $('[data-nb="process"]', tr).value.trim(), section: $('[data-nb="section"]', tr).value.trim(), category: $('[data-nb="cat"]', tr).value.trim() || m.group || '', material: m.code, uom: m.uom, qty: num($('[data-nb="qty"]', tr).value), price: num(m.price), supplier: $('[data-nb="sup"]', tr).value.trim(), remark: $('[data-nb="rem"]', tr).value.trim() } : null;
