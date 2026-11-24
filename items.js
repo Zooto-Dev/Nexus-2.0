@@ -42,7 +42,7 @@ function whenLabel(a) { return a.when_attr ? a.when_attr + ' = ' + a.when_val : 
 const blankVal = v => /^(NONE|NA|N\/A|NIL|NO|NO .+|WITHOUT .+)$/.test(String(v || '').trim().toUpperCase().replace(/\s+/g, ' '));
 // how an attribute is filled: one value from its list, several values (a foxing in up to 5 colours),
 // a brand from CDB, an article from the Articles master, or a size typed as length × width × height
-const AT_KINDS = [['list', 'One value'], ['multi', 'Many values'], ['brand', 'Brand (CDB)'], ['article', 'Article (Articles master)'], ['dims', 'Size L × W × H'], ['text', 'Typed text (a code, a number)']];
+const AT_KINDS = [['list', 'One value'], ['multi', 'Many values'], ['brand', 'Brand (CDB)'], ['article', 'Article (Articles master)'], ['dims', 'Size L × W × H'], ['text', 'Typed text (a code, a number)'], ['yesno', 'Yes / No (a switch)']];
 const atOptional = a => !!a.optional;   // an optional attribute may be left blank; a blank one is left out of the name
 const AT_MAX = 5, DIM_UNITS = ['MM', 'CM', 'INCH'];
 const atKind = a => a.kind || 'list';
@@ -50,6 +50,7 @@ const atMax = a => Math.max(1, num(a.max) || AT_MAX);
 const atKindLabel = a => (AT_KINDS.find(k => k[0] === atKind(a)) || AT_KINDS[0])[1] + (atKind(a) === 'multi' ? ' (up to ' + atMax(a) + ')' : '') + (atOptional(a) ? ' · optional' : '');
 function atValues(a, vals, t) {
   const k = atKind(a);
+  if (k === 'yesno') return ['YES', 'NO'];
   if (k === 'brand') return ['NONE'].concat(Store.all('customers').map(c => String(c.name || '').trim().toUpperCase()).filter(Boolean).sort());
   if (k === 'article') {
     // only the articles of the brand chosen above (articles without a brand are shown for every brand)
@@ -115,7 +116,8 @@ function lwhAt(A) {
 }
 const lwhText = (l, w, h) => [l, w, h].map(v => String(v || '').replace(/[A-Z\s]+$/i, '') || '?').join('*');
 function itemNameOf(t, vals) {
-  const A = typeAttrs(t); const parts = A.map(a => vals[a.name] || '');
+  // a Yes / No switch only decides whether the attribute under it is asked — it never goes into the name
+  const A = typeAttrs(t); const parts = A.map(a => atKind(a) === 'yesno' ? '' : (vals[a.name] || ''));
   // LENGTH, WIDTH, HEIGHT one after another are written as one size: 585*210*320
   const i = lwhAt(A);
   if (i >= 0 && parts[i] && parts[i + 1] && parts[i + 2]) parts.splice(i, 3, lwhText(parts[i], parts[i + 1], parts[i + 2]));
@@ -530,7 +532,7 @@ function atRead(tr) {
   const kind = ($('[data-af="kind"]', tr) || { value: 'list' }).value || 'list';
   const max = Math.min(20, Math.max(1, num(($('[data-af="max"]', tr) || { value: '' }).value) || AT_MAX));
   const optional = !!(($('[data-af="optional"]', tr) || {}).checked);
-  return { name, kind, max, optional, values: ['brand', 'article', 'dims', 'text'].includes(kind) ? [] : values, when_attr: k > 0 ? w.slice(0, k) : '', when_val: k > 0 ? w.slice(k + 1) : '' };
+  return { name, kind, max, optional, values: kind === 'yesno' ? ['YES', 'NO'] : ['brand', 'article', 'dims', 'text'].includes(kind) ? [] : values, when_attr: k > 0 ? w.slice(0, k) : '', when_val: k > 0 ? w.slice(k + 1) : '' };
 }
 ACTIONS['at-add'] = el => {
   if (!icSuper()) return;
