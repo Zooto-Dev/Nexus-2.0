@@ -3,7 +3,7 @@
 
 /* ---------- shared helpers ---------- */
 function matBy(code) { return Store.all('materials').find(m => norm(m.code) === norm(code) || norm(m.name) === norm(code)); }
-const UOMS = ['NOS', 'PAIR', 'PCS', 'PACK', 'BOX', 'ROLL', 'SET', 'DOZ', 'KGS', 'GM', 'MTR', 'CM', 'MM', 'INCH', 'FT', 'YARD', 'DM', 'LTR', 'ML', 'CAN', 'SQFT', 'SQM', 'SHEET'];
+const UOMS = ['NOS', 'PAIR', 'PCS', 'PACK', 'BOX', 'ROLL', 'CONE', 'SET', 'DOZ', 'KGS', 'GM', 'MTR', 'CM', 'MM', 'INCH', 'FT', 'YARD', 'DM', 'LTR', 'ML', 'CAN', 'SQFT', 'SQM', 'SHEET'];
 const ITEM_CATS = ['Compound', 'Consumable Item', 'Fabric', 'Grinderies', 'Leather', 'Packaging', 'Silicon', 'Sole', 'Synthetic', 'Upper'];
 const CAT_PREFIX = { 'compound': 'COM', 'consumable item': 'CON', 'fabric': 'FAB', 'grinderies': 'GRI', 'leather': 'LEA', 'packaging': 'PAC', 'silicon': 'SIL', 'sole': 'SOL', 'synthetic': 'SYN' };
 function itemCodeAuto(cat) {
