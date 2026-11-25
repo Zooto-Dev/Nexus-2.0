@@ -359,6 +359,16 @@ const INW_UI = { form: false, bt: 'Invoice', ven: '', po: '', f: {}, photo: '', 
 // A sample can be of anything — a consumable too — so it belongs to no brand and no merchant.
 // The person who asked for it is named on the gate entry, and the invoice approval is his alone.
 function inwIsSample(i) { return (i.bill_type || 'Invoice') === 'Sample'; }
+// A sample comes without a PO. Everything after the gate works on a PO, so one line is made up
+// for it — the item the sample is of, for the invoice qty. It is never saved as a PO.
+function samplePo(iw) {
+  const m = matBy(iw.sample_item) || {};
+  return { id: 'SMP-' + iw.id, no: '', vendor: iw.vendor, approval: 'Approved', sample: true,
+    lines: [{ material: iw.sample_item, uom: m.uom || '', qty: num(iw.qty), received: 0, rejected: 0, jc_no: '', brand: '' }] };
+}
+const inwNoPo = i => inwIsSample(i) && !String(i.po_no || '').trim();
+const grnPoOf = iw => !iw ? null : inwNoPo(iw) ? samplePo(iw) : (Store.all('purchase_orders').find(x => norm(x.no) === norm(iw.po_no)) || null);
+const grnPoKey = i => String(i.po_no || '').trim() || 'SAMPLE';
 function inwApprover(i) { return inwIsSample(i) ? (i.req_by || '') : ''; }
 function canApproveInward(i) { const who = inwApprover(i); return who ? (isSuperAdmin() || norm(who) === norm(ME.name) || (ME.doer && norm(who) === norm(ME.doer))) : canApproveInvoice(); }
 function inwUserNames() { return Store.all('users').filter(u => u.active !== false && u.name).map(u => u.name).sort((a, b) => a.localeCompare(b)); }
@@ -382,15 +392,22 @@ VIEWS.inward = {
       const smp = U.bt === 'Sample';
       const poItems = pos.length && U.po ? ((inwardPOs(U.ven).find(p => norm(p.no) === norm(U.po)) || { lines: [] }).lines || []).map(l => l.material) : [];
       const itemList = Array.from(new Set(poItems.concat(Store.all('materials').map(m => m.code).filter(Boolean))));
+      // a dropdown that shows the name but carries the code
+      const selKV = (id, pairs, val, ph) => '<select id="' + id + '"><option value="">' + ph + '</option>' +
+        pairs.map(([v, l]) => '<option value="' + esc(v) + '"' + (v === val ? ' selected' : '') + '>' + esc(l) + '</option>').join('') + '</select>';
+      const smpVendors = Array.from(new Set(Store.all('vendors').map(v => String(v.name || '').trim()).filter(Boolean))).sort();
+      const smpItems = Store.all('materials').map(m => [m.code, m.name || m.code]).sort((a, b) => String(a[1]).localeCompare(String(b[1])));
       const left = [
         ['Bill Type', seg('inwBt', ['Invoice', 'Sample'], U.bt)],
-        ['Vendor *', sel('inwVen', vendors, U.ven, vendors.length ? 'Select vendor…' : 'No open PO')],
-        ['PO Number *', sel('inwPo', pos.map(p => p.no), U.po, U.ven ? (pos.length ? 'Select PO…' : 'No PO available') : '—', !U.ven)],
-        [U.bt + ' No *', inp('bill_no')],
-        [U.bt + ' Date *', inp('bill_date', 'date')],
-        ['Inwarding Date', '<input value="' + fmtD(todayYmd()) + '" readonly>']
-      ].concat(smp ? [['Sample asked for by *', sel('inwReq', inwUserNames(), U.req, 'Select the person…')],
-        ['Sample of item *', sel('inwItem', itemList, U.item, U.po ? 'Select the item…' : 'Select the PO first', !U.po)]] : []);
+        ['Vendor *', smp ? sel('inwVen', smpVendors, U.ven, 'Select vendor…')
+          : sel('inwVen', vendors, U.ven, vendors.length ? 'Select vendor…' : 'No open PO')]
+      ].concat(smp ? [] : [['PO Number *', sel('inwPo', pos.map(p => p.no), U.po, U.ven ? (pos.length ? 'Select PO…' : 'No PO available') : '—', !U.ven)]])
+        .concat([
+          [U.bt + ' No *', inp('bill_no')],
+          [U.bt + ' Date *', inp('bill_date', 'date')],
+          ['Inwarding Date', '<input value="' + fmtD(todayYmd()) + '" readonly>']
+        ]).concat(smp ? [['Sample asked for by *', sel('inwReq', inwUserNames(), U.req, 'Select the person…')],
+          ['Sample of item *', selKV('inwItem', smpItems, U.item, 'Select the item…')]] : []);
       const right = [[U.bt + ' Qty *', inp('qty', 'number')]]
         .concat(qc ? [['QC No *', inp('qc_no')], ['QC Report *', attachBox('id="inwQc" accept="image/*,application/pdf"', U.qcDoc, 'Attach QC report')]] : [])
         .concat([[U.bt + ' Photo *', attachBox('id="inwPhoto" accept="image/*"', U.photo, 'Attach the ' + U.bt.toLowerCase() + ' photo')], ['Remark', inp('remark')]]);
@@ -405,7 +422,7 @@ VIEWS.inward = {
       (rows.length ? rows.map(i => { const ts = i.at || i.date; return '<tr><td>' + fmtDT(ts) + '</td><td>' + esc(i.bill_type || 'Invoice') + '</td><td>' + esc(i.vendor) + '</td><td>' + esc(i.po_no || '') + '</td><td>' + esc(i.bill_no || '') + '</td><td>' + fmtD(i.bill_date) + '</td><td class="num">' + Math.max(0, Math.floor((Date.now() - new Date(ts)) / 86400000)) + '</td><td class="num">' + qtyFmt(i.qty) + '</td><td>' + esc(i.req_by || '') + '</td><td>' + esc(i.sample_item || '') + '</td><td>' + photoThumb(i.photo) + '</td><td>' + esc(i.remark || '') + '</td><td>' + esc(i.grn_no || '') + '</td><td>' + esc(inwardStage(i)) + '</td></tr>'; }).join('')
         : '<tr><td colspan="14" class="empty">No gate entries</td></tr>') + '</table></div>';
     const m = setMain(h);
-    onSeg(e => { if (e.target.dataset.seg === 'inwBt') { U.bt = e.detail; VIEWS.inward.render(); } });
+    onSeg(e => { if (e.target.dataset.seg === 'inwBt') { U.bt = e.detail; Object.assign(U, { ven: '', po: '', req: '', item: '' }); VIEWS.inward.render(); } });
     m.addEventListener('change', e => {
       const t = e.target;
       if (t.id === 'inwVen') { U.ven = t.value; U.po = ''; U.item = ''; VIEWS.inward.render(); }
@@ -464,7 +481,8 @@ ACTIONS['inw-save'] = () => {
   if (!requirePerm('store', 'edit')) return;
   const U = INW_UI, F = U.f; const vm = vendorBy(U.ven) || {}; const qc = !!vm.qc_required;
   const billNo = String(F.bill_no || '').trim();
-  let err = !U.ven ? 'Select the vendor.' : !U.po ? 'Select the PO number.' : !billNo ? U.bt + ' No is required.' : !F.bill_date ? U.bt + ' Date is required.'
+  const smp = U.bt === 'Sample';
+  let err = !U.ven ? 'Select the vendor.' : (!smp && !U.po) ? 'Select the PO number.' : !billNo ? U.bt + ' No is required.' : !F.bill_date ? U.bt + ' Date is required.'
     : (qc && !String(F.qc_no || '').trim()) ? 'QC No is required for this vendor.' : (qc && !U.qcDoc) ? 'Attach the QC report.'
       : !U.photo ? 'Attach the invoice photo.' : '';
   if (!err && !(num(F.qty) > 0)) err = U.bt + ' Qty is required.';
@@ -472,8 +490,9 @@ ACTIONS['inw-save'] = () => {
   F.qty = r3(num(F.qty));
   if (err) { $('#niMsg').innerHTML = '<span class="late-txt">' + esc(err) + '</span>'; return; }
   const dupe = sameBill(U.ven, billNo); if (dupe) { $('#niMsg').innerHTML = '<span class="late-txt">' + esc(sameBillMsg(dupe, billNo)) + '</span>'; return; }
-  if (pendingInwardOf(U.po)) { $('#niMsg').innerHTML = '<span class="late-txt">' + esc(U.po) + ' already has a gate entry waiting for GRN.</span>'; return; }
-  const p = openPOs().find(x => norm(x.no) === norm(U.po) && norm(x.vendor) === norm(U.ven)); if (!p) { $('#niMsg').innerHTML = '<span class="late-txt">' + esc(U.po) + ' is not an open approved PO of ' + esc(U.ven) + '.</span>'; return; }
+  if (!smp && pendingInwardOf(U.po)) { $('#niMsg').innerHTML = '<span class="late-txt">' + esc(U.po) + ' already has a gate entry waiting for GRN.</span>'; return; }
+  const p = smp ? { lines: [{ material: U.item, brand: '' }] } : openPOs().find(x => norm(x.no) === norm(U.po) && norm(x.vendor) === norm(U.ven));
+  if (!p) { $('#niMsg').innerHTML = '<span class="late-txt">' + esc(U.po) + ' is not an open approved PO of ' + esc(U.ven) + '.</span>'; return; }
   const qcl = [];
   p.lines.forEach(l => {
     const m = matBy(l.material); if (!m || !isQcCat(m.group)) return;
@@ -483,10 +502,10 @@ ACTIONS['inw-save'] = () => {
   });
   qcl.forEach(q => { q.merchants = Array.from(new Set(q.brands.map(brandMerchant).filter(Boolean))); });
   const grnNo = reserveGrnNo();
-  const i = Store.put('inwards', { id: uid(), no: nextNo('inwards', 'INW'), grn_no: grnNo, at: nowIso(), date: todayYmd(), bill_type: U.bt, vendor: U.ven, po_no: U.po, bill_no: billNo, bill_date: F.bill_date, qty: num(F.qty),
+  const i = Store.put('inwards', { id: uid(), no: nextNo('inwards', 'INW'), grn_no: grnNo, at: nowIso(), date: todayYmd(), bill_type: U.bt, vendor: U.ven, po_no: smp ? '' : U.po, bill_no: billNo, bill_date: F.bill_date, qty: num(F.qty),
     qc_no: String(F.qc_no || '').trim(), qc_report: U.qcDoc || '', photo: U.photo, remark: String(F.remark || '').trim(), status: 'Pending GRN', inv_status: '', qc: qcl, by: ME.name,
     req_by: U.bt === 'Sample' ? U.req : '', sample_item: U.bt === 'Sample' ? U.item : '' });
-  audit('inward.create', i.no, U.bt + ' · ' + U.ven + ' · ' + U.po + ' · ' + billNo + ' · ' + grnNo + (U.bt === 'Sample' ? ' · asked by ' + U.req + ' · ' + U.item : '')); waSend('gate_entry', i.id);
+  audit('inward.create', i.no, U.bt + ' · ' + U.ven + (smp ? '' : ' · ' + U.po) + ' · ' + billNo + ' · ' + grnNo + (U.bt === 'Sample' ? ' · asked by ' + U.req + ' · ' + U.item : '')); waSend('gate_entry', i.id);
   Object.assign(U, { form: false, ven: '', po: '', f: {}, photo: '', qcDoc: '', req: '', item: '' });
   flash(esc(i.no) + ' saved — GRN No ' + esc(grnNo) + '. ' + (U.bt === 'Sample' ? 'Waiting for ' + esc(U.req) + ' to approve it.' : 'Invoice approval pending.')); VIEWS.inward.render();
 };
@@ -649,7 +668,7 @@ ACTIONS['qcm-amend'] = el => {
 // Save is allowed only when the grand total equals the gate-entry invoice qty.
 const GRN_UI = { ven: '', po: '', inw: '', rows: [], why: '' };
 function qcBlocked(i, code) { const q = (i.qc || []).find(x => norm(x.material) === norm(code)); return q && q.result === 'Mismatch' && q.m_status === 'Rejected'; }
-function grnReady() { return Store.all('inwards').filter(i => invApproved(i) && inwardQcState(i).ok).filter(i => { const p = Store.all('purchase_orders').find(x => norm(x.no) === norm(i.po_no)); return p && !p.cancelled && p.approval === 'Approved' && poPending(p) > 0; }); }
+function grnReady() { return Store.all('inwards').filter(i => invApproved(i) && inwardQcState(i).ok).filter(i => { if (inwNoPo(i)) return !Store.all('grns').some(g => g.inward_id === i.id); const p = Store.all('purchase_orders').find(x => norm(x.no) === norm(i.po_no)); return p && !p.cancelled && p.approval === 'Approved' && poPending(p) > 0; }); }
 // inv = invoice qty, rec = physically received, rej = rejected at GRN (all >= 0)
 // short = invoiced but not received; over = received above the invoice; excess = above PO pending + over (both need approval)
 // grn = good qty into stock; total = what the invoice must add up to (grn + rej + short + excess above PO)
@@ -701,17 +720,17 @@ VIEWS.grn = {
     const ready = grnReady();
     const vendors = Array.from(new Set(ready.map(i => i.vendor))).sort();
     if (U.ven && !vendors.includes(U.ven)) Object.assign(U, { ven: '', po: '', inw: '', rows: [] });
-    const pos = Array.from(new Set(ready.filter(i => i.vendor === U.ven).map(i => i.po_no)));
-    const invs = ready.filter(i => i.vendor === U.ven && i.po_no === U.po);
+    const pos = Array.from(new Set(ready.filter(i => i.vendor === U.ven).map(grnPoKey)));
+    const invs = ready.filter(i => i.vendor === U.ven && grnPoKey(i) === U.po);
     const iw = invs.find(i => i.id === U.inw) || null;
-    const p = iw ? Store.all('purchase_orders').find(x => norm(x.no) === norm(iw.po_no)) : null;
+    const p = grnPoOf(iw);
     const opt = (list, val, ph, dis) => '<option value="">' + ph + '</option>' + list.map(([v, l]) => '<option value="' + esc(v) + '"' + (v === val ? ' selected' : '') + '>' + esc(l) + '</option>').join('');
     let h = '';
     if (edit) {
       const items = p ? p.lines.map((l, k) => ({ l, k, pen: poLinePending(p, l, k) })).filter(x => x.pen > 0 && (!(iw.lines || []).length || inwLineOf(iw, x.k, x.l.material)) && !qcBlocked(iw, x.l.material) && !U.rows.some(r => r.i === x.k)) : [];
       const left = [
         ['Vendor Name *', '<select id="grVen">' + opt(vendors.map(v => [v, v]), U.ven, vendors.length ? 'Select vendor…' : 'Nothing ready for GRN') + '</select>'],
-        ['PO Number *', '<select id="grPo"' + (U.ven ? '' : ' disabled') + '>' + opt(pos.map(x => [x, x]), U.po, U.ven ? 'Select PO…' : '—') + '</select>'],
+        ['PO Number *', '<select id="grPo"' + (U.ven ? '' : ' disabled') + '>' + opt(pos.map(x => [x, x === 'SAMPLE' ? 'Sample — no PO' : x]), U.po, U.ven ? 'Select PO…' : '—') + '</select>'],
         ['Invoice No *', '<select id="grInv"' + (U.po ? '' : ' disabled') + '>' + opt(invs.map(i => [i.id, i.bill_no + ' · ' + fmtD(i.bill_date) + ' · Qty ' + qtyFmt(i.qty)]), U.inw, U.po ? 'Select invoice…' : '—') + '</select>'],
         ['Item *', '<select id="grItem"' + (iw ? '' : ' disabled') + '>' + opt(items.map(x => [String(x.k), x.l.material + ' — ' + ((matBy(x.l.material) || {}).name || '')]), '', iw ? (items.length ? 'Select item…' : 'All items added') : '—') + '</select>']
       ];
@@ -758,8 +777,8 @@ ACTIONS['grn-save'] = async el => {
   const U = GRN_UI; const iw = Store.get('inwards', U.inw);
   const bad = t => { flash(t, 'err'); VIEWS.grn.render(); };
   if (!iw || !invApproved(iw) || !inwardQcState(iw).ok) return bad('This invoice is not ready for GRN.');
-  const p = Store.all('purchase_orders').find(x => norm(x.no) === norm(iw.po_no));
-  if (!p || p.cancelled || p.approval !== 'Approved' || norm(p.vendor) !== norm(iw.vendor)) return bad('PO ' + (iw.po_no || '') + ' is not an open approved PO of ' + iw.vendor + '.');
+  const p = grnPoOf(iw); const smp = !!(p && p.sample);
+  if (!p || (!smp && (p.cancelled || p.approval !== 'Approved' || norm(p.vendor) !== norm(iw.vendor)))) return bad('PO ' + (iw.po_no || '') + ' is not an open approved PO of ' + iw.vendor + '.');
   if (Store.all('grns').some(g => g.inward_id === iw.id)) return bad('This invoice already has a GRN.');
   if (U.rows.some(r => !p.lines[r.i] || num(r.inv) < 0 || num(r.recv) < 0 || num(r.rej) < 0)) return bad('A line is missing or has a negative qty — add the items again.');
   const itemWise = !!(iw.lines || []).length;
@@ -775,8 +794,10 @@ ACTIONS['grn-save'] = async el => {
   const lines = calc.map(c => ({ po_line: c.r.i, material: c.l.material, jc_no: c.l.jc_no || '', brand: c.l.brand || '', uom: c.l.uom || '', po_pending: c.pen, inv_qty: c.inv, recv_qty: c.rec, short: c.short, over_inv: c.over, rejected: c.rej, accepted: c.grn, excess: c.excess, excess_status: c.excess > 0 ? 'Pending' : '', rack: String(c.r.rack || '').trim() }));
   const g = Store.put('grns', { id: uid(), no: iw.grn_no || reserveGrnNo(), date: todayYmd(), at: nowIso(), inward_id: iw.id, inward_no: iw.no, po_id: p.id, po_no: p.no, vendor: p.vendor, invoice: iw.bill_no, invoice_date: iw.bill_date, reject_reason: why, lines, by: ME.name });
   // the PO copies what its GRNs now record (never += on a possibly stale line)
-  calc.forEach(c => { c.l.received = grnRecvOf(p, c.l, c.r.i); c.l.rejected = r3(grnLinesOf(p, c.l, c.r.i).reduce((a, x) => a + num(x.rejected), 0)); });
-  Store.put('purchase_orders', p);
+  if (!smp) {   // a sample has no PO to write back to
+    calc.forEach(c => { c.l.received = grnRecvOf(p, c.l, c.r.i); c.l.rejected = r3(grnLinesOf(p, c.l, c.r.i).reduce((a, x) => a + num(x.rejected), 0)); });
+    Store.put('purchase_orders', p);
+  }
   iw.status = 'GRN Done'; Store.put('inwards', iw);
   const totRej = calc.reduce((x, c) => x + c.rej, 0), totShort = calc.reduce((x, c) => x + c.short, 0), totEx = calc.reduce((x, c) => x + c.excess, 0);
   if (totRej > 0 || totShort > 0) autoTask('Debit Note — ' + iw.bill_no + ' (' + p.vendor + '): reject ' + qtyFmt(totRej) + ', short ' + qtyFmt(totShort), autoDoer('debit_note', 'ACCOUNTS'), 0,
@@ -788,7 +809,7 @@ ACTIONS['grn-save'] = async el => {
   audit('grn.create', g.no, iw.no + ' · ' + p.no + ' · inv ' + iw.bill_no + ' · GRN ' + qtyFmt(calc.reduce((x, c) => x + c.grn, 0)) + (totRej ? ' / rej ' + qtyFmt(totRej) : '') + (totShort ? ' / short ' + qtyFmt(totShort) : '') + (totEx ? ' / excess ' + qtyFmt(totEx) : '') + (totOver ? ' / no invoice ' + qtyFmt(totOver) : ''));
   Object.assign(U, { ven: '', po: '', inw: '', rows: [], why: '' });
   VIEWS.grn.render();
-  try { poInwSync(Store.get('purchase_orders', p.id)); } catch (e) { console.error(e); }
+  if (!smp) { try { poInwSync(Store.get('purchase_orders', p.id)); } catch (e) { console.error(e); } }
   waSend(totEx > 0 ? 'excess_pending' : 'grn_final', g.id);
   if (totEx > 0) {
     const to = String(settings().alert_excess_email || '').trim();
