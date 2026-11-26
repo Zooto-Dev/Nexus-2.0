@@ -443,6 +443,7 @@ label.attach{flex-direction:row!important;width:auto}
 a.dl:hover { background: #fafbfc; text-decoration: none; }
 .dl .t { font-weight: 600; } .dl .m { font-size: 11.5px; color: var(--muted); }
 .dl .d { color: var(--late); font-weight: 700; font-size: 12.5px; white-space: nowrap; }
+.dl-btns { display: flex; gap: 6px; align-items: center; flex-shrink: 0; }
 .dl-empty { padding: 16px 14px; color: var(--faint); font-size: 12.5px; }
 .dl-more { padding: 8px 14px; font-size: 12.5px; }
 .dsec { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 8px 0 8px; }

@@ -505,6 +505,7 @@ ACTIONS['inw-save'] = () => {
   const i = Store.put('inwards', { id: uid(), no: nextNo('inwards', 'INW'), grn_no: grnNo, at: nowIso(), date: todayYmd(), bill_type: U.bt, vendor: U.ven, po_no: smp ? '' : U.po, bill_no: billNo, bill_date: F.bill_date, qty: num(F.qty),
     qc_no: String(F.qc_no || '').trim(), qc_report: U.qcDoc || '', photo: U.photo, remark: String(F.remark || '').trim(), status: 'Pending GRN', inv_status: '', qc: qcl, by: ME.name,
     req_by: U.bt === 'Sample' ? U.req : '', sample_item: U.bt === 'Sample' ? U.item : '' });
+  if (smp && typeof autoTask === 'function') { try { const ru = Store.all('users').find(u => norm(u.name) === norm(U.req)); if (ru && ru.doer) autoTask('Approve sample — ' + U.ven + ' · ' + billNo + ' (' + ((matBy(U.item) || {}).name || U.item) + ')', ru.doer, 0, { kind: 'sample_approve', inward_id: i.id, party: U.ven, ref: billNo }, 'Gate entry'); } catch (e) { console.error(e); } }
   audit('inward.create', i.no, U.bt + ' · ' + U.ven + (smp ? '' : ' · ' + U.po) + ' · ' + billNo + ' · ' + grnNo + (U.bt === 'Sample' ? ' · asked by ' + U.req + ' · ' + U.item : '')); waSend('gate_entry', i.id);
   Object.assign(U, { form: false, ven: '', po: '', f: {}, photo: '', qcDoc: '', req: '', item: '' });
   flash(esc(i.no) + ' saved — GRN No ' + esc(grnNo) + '. ' + (U.bt === 'Sample' ? 'Waiting for ' + esc(U.req) + ' to approve it.' : 'Invoice approval pending.')); VIEWS.inward.render();
@@ -559,6 +560,38 @@ ACTIONS['ia-amend'] = el => {
   });
 };
 ACTIONS['ia-view'] = el => { IA_UI.view = el.dataset.id; IA_UI.act = null; IA_UI.notes = []; VIEWS.invapproval.render(); };
+// after an approve / reject, stay where the person is (Home or the approval screen)
+function iaAfter() { (curView().v === 'home' ? VIEWS.home : VIEWS.invapproval).render(); }
+function sampleTaskClose(i, how) {
+  Store.all('checklist').filter(t => t.kind === 'sample_approve' && t.inward_id === i.id && !(t.done && t.done.once)).forEach(t => {
+    t.done = t.done || {}; t.done.once = { at: nowIso(), by: 'System', remark: 'Sample ' + how, photos: 0, files: 0, log: '' }; t.done_at = nowIso(); Store.put('checklist', t);
+  });
+}
+// Home: the samples waiting for this person to approve — one line each, approve or reject right here
+function sampleApprCard(all) {
+  const L = all ? Store.all('inwards').filter(x => inwWaiting(x) && inwIsSample(x)) : mySampleInwards();
+  if (!L.length) return '';
+  const line = i => { const m = matBy(i.sample_item) || {}; const mine = canApproveInward(i);
+    return '<div class="dl"><div><div class="t">' + esc(m.name || i.sample_item || '') + ' <span class="muted">· ' + esc(i.vendor) + '</span></div>' +
+      '<div class="m">' + esc(i.no) + ' · Sample ' + esc(i.bill_no) + ' · ' + fmtD(i.bill_date) + ' · Qty ' + qtyFmt(i.qty) + ' ' + esc(m.uom || '') + ' · entered by ' + esc(i.by || '') + (all ? ' · waiting with <b>' + esc(i.req_by || '') + '</b>' : '') + (i.inv_status === 'Hold' ? ' · <span class="late-txt">on hold</span>' : '') + '</div></div>' +
+      '<div class="dl-btns">' + (mine ? '<button class="btn sm primary" data-act="smp-approve" data-id="' + esc(i.id) + '">Approve</button><button class="btn sm danger" data-act="smp-reject" data-id="' + esc(i.id) + '">Reject</button>' : '') +
+      '<button class="btn sm" data-act="smp-open" data-id="' + esc(i.id) + '">Open</button></div></div>'; };
+  return '<div class="dcard" id="smpCard"><div class="dh3">' + (all ? 'Sample approvals (everyone)' : 'Samples waiting for your approval') + '<span class="n red">' + L.length + '</span></div>' + L.map(line).join('') + '</div>';
+}
+ACTIONS['smp-open'] = el => { IA_UI.view = el.dataset.id; IA_UI.act = null; IA_UI.notes = []; go('invapproval'); };
+ACTIONS['smp-approve'] = el => {
+  const i = Store.get('inwards', el.dataset.id); if (!i) return;
+  const m = matBy(i.sample_item) || {};
+  IA_UI.notes = [{ inv_item: m.name || i.sample_item || '', code: i.sample_item || '', note: '' }];
+  ACTIONS['ia-approve'](el);
+};
+ACTIONS['smp-reject'] = el => {
+  const i = Store.get('inwards', el.dataset.id); if (!i || !inwMayAct(i)) return;
+  reasonDialog('Reject sample ' + i.bill_no + ' · ' + i.vendor, 'Reject', why => {
+    i.inv_status = 'Rejected'; i.status = 'Invoice Rejected'; i.inv_reject_reason = why; i.inv_by = ME.name; i.inv_at = nowIso();
+    Store.put('inwards', i); sampleTaskClose(i, 'rejected'); audit('inward.invoice_reject', i.no, why); flash(esc(i.bill_no) + ' rejected.'); iaAfter();
+  }, true);
+};
 ACTIONS['ia-back'] = () => { IA_UI.view = null; IA_UI.act = null; IA_UI.notes = []; VIEWS.invapproval.render(); };
 ACTIONS['ia-add'] = () => { IA_UI.notes.push({ inv_item: '', code: '', note: '' }); VIEWS.invapproval.render(); };
 ACTIONS['ia-del'] = el => { IA_UI.notes.splice(+el.dataset.k, 1); if (!IA_UI.notes.length) IA_UI.notes.push({ inv_item: '', code: '', note: '' }); VIEWS.invapproval.render(); };
@@ -572,16 +605,17 @@ ACTIONS['ia-approve'] = el => {
   if (!notes.length) { flash('Add the GRN note: invoice item name and its item code.', 'err'); return; }
   if (bad) { flash('Every note row needs the invoice item name and the item code.', 'err'); return; }
   i.inv_status = 'Approved'; i.grn_notes = notes; i.inv_by = ME.name; i.inv_at = nowIso(); i.inv_hold_reason = '';
+  if (inwIsSample(i)) sampleTaskClose(i, 'approved');
   Store.put('inwards', i); audit('inward.invoice_approve', i.no, i.bill_no + ' · ' + notes.length + ' note(s)'); if ((i.qc || []).length) waSend('invoice_approved', i.id);
-  IA_UI.view = null; IA_UI.notes = []; flash(esc(i.bill_no) + ' approved.' + ((i.qc || []).length ? ' QC check pending.' : ' Ready for GRN.')); VIEWS.invapproval.render();
+  IA_UI.view = null; IA_UI.notes = []; flash(esc(i.bill_no) + ' approved.' + ((i.qc || []).length ? ' QC check pending.' : ' Ready for GRN.')); iaAfter();
 };
 ACTIONS['ia-confirm'] = el => {
   const i = Store.get('inwards', el.dataset.id); if (!i || !inwMayAct(i)) return;
   const rem = ($('#iaRem') || { value: '' }).value.trim();
   if (!rem) { flash(IA_UI.act === 'hold' ? 'Write why the invoice is on hold.' : 'Write the reason for rejection.', 'err'); return; }
   if (IA_UI.act === 'hold') { i.inv_status = 'Hold'; i.inv_hold_reason = rem; i.inv_hold_by = ME.name; i.inv_hold_at = nowIso(); audit('inward.invoice_hold', i.no, rem); flash(esc(i.bill_no) + ' put on hold.'); }
-  else { i.inv_status = 'Rejected'; i.status = 'Invoice Rejected'; i.inv_reject_reason = rem; i.inv_by = ME.name; i.inv_at = nowIso(); audit('inward.invoice_reject', i.no, rem); flash(esc(i.bill_no) + ' rejected.'); }
-  Store.put('inwards', i); IA_UI.view = null; IA_UI.act = null; IA_UI.notes = []; VIEWS.invapproval.render();
+  else { i.inv_status = 'Rejected'; i.status = 'Invoice Rejected'; i.inv_reject_reason = rem; i.inv_by = ME.name; i.inv_at = nowIso(); if (inwIsSample(i)) sampleTaskClose(i, 'rejected'); audit('inward.invoice_reject', i.no, rem); flash(esc(i.bill_no) + ' rejected.'); }
+  Store.put('inwards', i); IA_UI.view = null; IA_UI.act = null; IA_UI.notes = []; iaAfter();
 };
 
 /* ================= QC check (store) ================= */
