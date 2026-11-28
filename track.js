@@ -60,11 +60,22 @@ function paRows() {
     add('po_approval', { ref: p.no, party: p.vendor, start: at, actual: done ? ts(p.approved_at) : null, by: done ? p.approved_by : '', result: p.approval || '',
       owners: amd && p.created_by ? [doerOfName(p.created_by)] : [], amend: amd, amend_with: amd ? (p.created_by || '') : '' });
     if (p.approval === 'Approved') {
-      const ins = Store.all('inwards').filter(i => norm(i.po_no) === norm(p.no)).sort((a, b) => (a.at || '') < (b.at || '') ? -1 : 1);
-      const open = (p.lines || []).some((l, k) => poLinePending(p, l, k) > 0);
+      // Material Inward: ONE TASK PER PO × ITEM. Starts at approval, planned for the PO's expected date,
+      // done when that line is fully received (accepted qty ≥ PO qty); the actual is the GRN that completed it.
       const plan = p.expected ? new Date(p.expected + 'T18:00') : null;
-      if (ins.length) add('inward', { ref: p.no, party: p.vendor, start: ts(p.approved_at), plan, actual: ts(ins[0].at), by: ins[0].by, result: ins[0].no });
-      else if (open) add('inward', { ref: p.no, party: p.vendor, start: ts(p.approved_at), plan });
+      const grns = Store.all('grns').filter(g => g.po_id === p.id || (!g.po_id && norm(g.po_no) === norm(p.no))).sort((a, b) => (a.at || a.date || '') < (b.at || b.date || '') ? -1 : 1);
+      (p.lines || []).forEach((l, k) => {
+        if (l.closed) return;
+        const code = (matBy(l.material) || {}).code || l.material; const pen = poLinePending(p, l, k); const rec = recvOf(p, l, k);
+        let doneAt = null, doneBy = '', got = 0, nos = [];
+        for (const g of grns) {
+          const q = (g.lines || []).filter(x => x.po_line != null ? x.po_line === k : norm(x.material) === norm(l.material)).reduce((s, x) => s + num(x.accepted), 0);
+          if (q <= 1e-9) continue; got += q; nos.push(g.no);
+          if (got + 1e-9 >= num(l.qty)) { doneAt = ts(g.at || g.date); doneBy = g.by || ''; break; }
+        }
+        if (pen <= 1e-9 && !doneAt) { const g = grns[grns.length - 1]; doneAt = g ? ts(g.at || g.date) : ts(p.approved_at); doneBy = g ? g.by || '' : ''; }
+        add('inward', { ref: p.no + ' · ' + code, party: p.vendor, start: ts(p.approved_at), plan, actual: doneAt, by: doneAt ? doneBy : '', result: doneAt ? (nos.join(', ') || 'Received') : (rec > 0 ? qtyFmt(rec) + ' received · ' + qtyFmt(pen) + ' pending' : qtyFmt(pen) + ' pending') });
+      });
     }
   });
   Store.all('inwards').forEach(i => {
