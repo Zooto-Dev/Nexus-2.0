@@ -22,7 +22,10 @@ function jcIssueRows(j) {
 function amRows() {
   const map = {};
   const row = (brand, article) => { const k = amKey(brand, article); return map[k] || (map[k] = { brand: String(brand || '').trim(), article: String(article || '').trim().toUpperCase(), style: '', category: '', gender: '', orders: [], jcs: [] }); };
-  Store.all('items').forEach(i => { if (!i.code) return; const r = row(i.brand || '', i.code); r.style = r.style || i.name || ''; r.category = r.category || i.group || ''; r.gender = r.gender || i.gender || ''; r.inMaster = true; });
+  // an article with no brand on it takes the brand of the orders / BOMs that use it, so it is one row, not two
+  const brandOfArt = {}; Store.all('orders').forEach(o => (o.lines || []).forEach(l => { if (l.article && !brandOfArt[norm(l.article)]) brandOfArt[norm(l.article)] = o.customer_name || o.brand || ''; }));
+  Store.all('boms').forEach(b => { if (b.article && b.brand && !brandOfArt[norm(b.article)]) brandOfArt[norm(b.article)] = b.brand; });
+  Store.all('items').forEach(i => { if (!i.code) return; const r = row(i.brand || brandOfArt[norm(i.code)] || '', i.code); r.style = r.style || i.name || ''; r.category = r.category || i.group || ''; r.gender = r.gender || i.gender || ''; r.inMaster = true; });
   Store.all('orders').filter(o => o.priority !== 'Cancelled').forEach(o => (o.lines || []).forEach(l => { if (!l.article) return; const r = row(o.customer_name || o.brand || '', l.article); if (!r.orders.includes(o)) r.orders.push(o); r.style = r.style || l.style || ''; r.gender = r.gender || l.gender || ''; r.category = r.category || o.category || ''; r.qty = (r.qty || 0) + num(l.qty); }));
   Store.all('job_cards').forEach(j => { if (!j.article) return; const r = row(j.brand || '', j.article); r.jcs.push(j); });
   Store.all('boms').forEach(b => { if (!b.article) return; const r = row(b.brand || '', b.article); r.style = r.style || b.style || ''; r.category = r.category || b.category || ''; r.gender = r.gender || b.gender || ''; });

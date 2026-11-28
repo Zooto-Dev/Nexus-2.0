@@ -466,8 +466,16 @@ ACTIONS['punch-size-add'] = el => { punchCollect(); const l = PUNCH.lines[+el.da
 ACTIONS['punch-del'] = el => { punchCollect(); PUNCH.lines.splice(+el.dataset.i, 1); if (!PUNCH.lines.length) PUNCH.lines.push(blankLine()); VIEWS.punch.render(PUNCH.id); };
 ACTIONS['punch-clear'] = () => { newPunch(); VIEWS.punch.render(); };
 ACTIONS['punch-cancel'] = el => { PUNCH = null; go('order', el.getAttribute('href').split('/').pop()); };
+let PUNCH_BUSY = false;
 ACTIONS['punch-save'] = async () => {
   if (!requirePerm('orders', 'edit')) return;
+  if (PUNCH_BUSY) return;   // a second click while the first save is still talking to the cloud
+  const saveBtn = $('[data-act="punch-save"]'); const saveTxt = saveBtn ? saveBtn.textContent : '';
+  const busy = on => { PUNCH_BUSY = on; if (saveBtn) { saveBtn.disabled = on; saveBtn.textContent = on ? 'Saving…' : saveTxt; } };
+  busy(true);
+  try { await punchSaveNow(); } finally { busy(false); }
+};
+async function punchSaveNow() {
   punchCollect(); const P = PUNCH; const errs = [];
   const lines = P.lines.filter(l => l.article || lineQty(l) > 0);
   if (!P.brand) errs.push('brand');
@@ -496,7 +504,12 @@ ACTIONS['punch-save'] = async () => {
   if (errs.length) { $('#pMsg').innerHTML = '<span class="late-txt">Missing / wrong: ' + esc(errs.join(', ')) + '</span>'; return; }
   const cu = Store.all('customers').find(c => norm(c.name) === norm(P.brand));
   if (!cu) { $('#pMsg').innerHTML = '<span class="late-txt">Brand is not in the list — add it in Merchant → Brands first.</span>'; return; }
-  lines.forEach(l => { if (l.article && !Store.all('items').some(x => norm(x.code) === norm(l.article))) Store.put('items', { id: uid(), code: l.article, name: l.style, group: P.category, gender: l.gender }); });
+  if (!P.id) {   // the same order saved twice within a minute (a double click, a stale form)
+    const sig = norm(cu.name + '|' + P.buyer_po + '|' + lines.map(l => l.article + '/' + l.colour).sort().join(','));
+    const twin = Store.all('orders').find(x => Date.now() - new Date(x.created_at || 0).getTime() < 60000 && norm((x.customer_name || '') + '|' + (x.buyer_po || '') + '|' + (x.lines || []).map(l => l.article + '/' + l.colour).sort().join(',')) === sig);
+    if (twin) { $('#pMsg').innerHTML = '<span class="late-txt">This order was just saved as <b>' + esc(twin.no) + '</b> — not saving it again. <a href="#/order/' + esc(twin.id) + '">Open</a></span>'; return; }
+  }
+  lines.forEach(l => { if (l.article && !Store.all('items').some(x => norm(x.code) === norm(l.article))) Store.put('items', { id: uid(), code: l.article, name: l.style, group: P.category, gender: l.gender, brand: cu.name, created_at: nowIso(), created_by: ME.name }); });
   if (P.id) { const o0 = Store.get('orders', P.id); const jl = o0 ? Store.all('job_cards').filter(j => norm(j.order_no || '') === norm(o0.no) && j.status !== 'Cancelled') : []; if (jl.length) { flash('This order has job card ' + esc(jl.map(j => j.no).join(', ')) + ' — it cannot be edited.', 'err'); return; } }
   const o = P.id ? Store.get('orders', P.id) : { id: uid(), no: '', process_id: activeProcess().id, actuals: {}, done_by: {}, created_at: nowIso(), created_by: ME.name };
   Object.assign(o, { order_date: P.order_date, customer_id: cu.id, customer_name: cu.name, brand: cu.name, buyer_po: P.buyer_po, po_expiry_date: P.po_expiry_date, tooling_no: P.tooling_no, channel: P.channel, category: P.category, priority: P.priority, remarks: P.remarks, extra: P.extra, lines: lines.map(l => ({ article: l.article, style: l.style, colour: l.colour, gender: l.gender, size_run: l.size_run, size: l.size_run, sizes: (l.sizes || []).filter(x => num(x.qty) > 0).map(x => ({ size: x.size, qty: num(x.qty) })), qty: lineQty(l), pack: l.pack, jc_no: l.jc_no || '' })) });
