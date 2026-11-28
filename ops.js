@@ -296,6 +296,17 @@ function parseSizeRun(str) {
   if (t.includes(',')) return t.split(',').map(x => x.trim().toUpperCase()).filter(Boolean);
   return [t.toUpperCase()];
 }
+// the highest Job Card number the cloud holds right now — one small query, not a full sync
+async function jcCloudMax() {
+  if (!(CLOUD && !SANDBOX && CLOUD_OK && SB)) return 0;
+  try {
+    const { data, error } = await SB.from('nx_docs').select('collection,data').in('collection', ['orders', 'job_cards']);
+    if (error || !data) return 0;
+    let max = 0; const scan = no => { if (no && String(no).startsWith('ZF-')) max = Math.max(max, parseInt(String(no).slice(3), 10) || 0); };
+    data.forEach(r => { const d = r.data || {}; if (r.collection === 'job_cards') scan(d.no); else (d.lines || []).forEach(l => scan(l.jc_no)); });
+    return max;
+  } catch (e) { console.warn(e); return 0; }
+}
 async function jcFresh() {
   if (!(CLOUD && !SANDBOX && CLOUD_OK && SB)) return;
   for (let i = 0; i < 50 && pendingWrites; i++) await new Promise(r => setTimeout(r, 100));   // let my own saves finish first
@@ -313,7 +324,8 @@ async function jcUniqueCheck(o) {
     if (!clash) return;
     await jcFresh(); let seq = jcNoBase();
     o.lines.forEach(l => { seq += 1; l.jc_no = 'ZF-' + String(seq).padStart(4, '0'); }); o.no = o.lines[0].jc_no;
-    Store.put('orders', o); flash('Another order took that Job Card number — this order is now ' + esc(o.no) + '.', 'err');
+    Store.put('orders', o); audit('order.renumber', o.no, 'another order took the earlier number'); flash('Another order took that Job Card number — this order is now ' + esc(o.no) + '.', 'err');
+    if (curView().v === 'punch') VIEWS.punch.render();
   }
 }
 function jcNoBase() {
@@ -515,13 +527,13 @@ async function punchSaveNow() {
   Object.assign(o, { order_date: P.order_date, customer_id: cu.id, customer_name: cu.name, brand: cu.name, buyer_po: P.buyer_po, po_expiry_date: P.po_expiry_date, tooling_no: P.tooling_no, channel: P.channel, category: P.category, priority: P.priority, remarks: P.remarks, extra: P.extra, lines: lines.map(l => ({ article: l.article, style: l.style, colour: l.colour, gender: l.gender, size_run: l.size_run, size: l.size_run, sizes: (l.sizes || []).filter(x => num(x.qty) > 0).map(x => ({ size: x.size, qty: num(x.qty) })), qty: lineQty(l), pack: l.pack, jc_no: l.jc_no || '' })) });
   // Auto-assign a Job Card No (ZF-xxxx) to each article line that lacks one.
   // Cloud: first pull what others saved, so two people never get the same number.
-  if (o.lines.some(l => !l.jc_no)) await jcFresh();
   let jcSeq = jcNoBase();
+  if (o.lines.some(l => !l.jc_no)) { const m = $('#pMsg'); if (m) m.textContent = 'Saving… taking the next Job Card number.'; jcSeq = Math.max(jcSeq, await jcCloudMax()); }
   o.lines.forEach(l => { if (!l.jc_no) { jcSeq += 1; l.jc_no = 'ZF-' + String(jcSeq).padStart(4, '0'); } });
   o.no = o.lines[0].jc_no;   // the Job Card No is the order number
   Store.put('orders', o);
   if (!P.id && typeof draftConsumed === 'function') draftConsumed(P);
-  if (!P.id) await jcUniqueCheck(o);
+  if (!P.id) jcUniqueCheck(o);   // in the background — the number was just read from the cloud, a clash is rare
   audit(P.id ? 'order.edit' : 'order.create', o.no, cu.name + ' · PO ' + P.buyer_po + ' · ' + qtyFmt(orderTotals(o).qty) + ' qty');
   if (P.id) { PUNCH = null; flash('Saved ' + esc(o.no) + '.'); go('order', o.id); return; }
   try { pptRaise(o); } catch (e) { console.error(e); }   // packaging PPT task on the brand merchant for every new article
