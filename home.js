@@ -197,7 +197,8 @@ function sxDetail(o) {
   const scored = [].concat(...mine.map(r => r.tasks));
   const f = new Date(from + 'T00:00:00'), tt = new Date(to + 'T23:59:59');
   const doerSet = new Set(isD ? Store.all('users').filter(u => u.doer && (u.department || 'No department') === o.k).map(u => norm(u.doer)).concat(mine.map(r => norm(r.doer))) : [norm(o.k)]);
-  const list = allTasks().filter(t => doerSet.has(norm(t.doer || '')) && (!SX_UI.src || t.src === SX_UI.src) && !t.demo && t.planned && t.planned >= f && t.planned <= tt).sort((a, b) => b.planned - a.planned);
+  // every task of the period, plus every task still open whatever its plan date (a PO due in December is still work to do today)
+  const list = allTasks().filter(t => doerSet.has(norm(t.doer || '')) && (!SX_UI.src || t.src === SX_UI.src) && !t.demo && t.planned && ((t.planned >= f && t.planned <= tt) || (!t.done && t.planned > tt))).sort((a, b) => b.planned - a.planned);
   const escs = Store.all('escalations').filter(e => doerSet.has(norm(e.doer || '')) && (e.raised_at || e.planned || '') >= from + 'T00:00:00' && (e.raised_at || e.planned || '') <= to + 'T23:59:59').sort((a, b) => (b.raised_at || '') < (a.raised_at || '') ? -1 : 1);
   const u = !isD && userOfDoer(o.k); const role = u && Store.get('roles', u.role_id);
   const dRows = sxDeptRows(allR);

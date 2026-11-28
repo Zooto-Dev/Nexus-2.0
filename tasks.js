@@ -438,7 +438,7 @@ function saHomeHtml(names) {
   delayed.forEach(t => { const k = t.doer || 'NOT SET'; const x = byDoer[k] || (byDoer[k] = { doer: k, dept: t.dept, n: 0, sum: 0, max: 0, top: '' }); x.n++; x.sum += t.delay; if (t.delay > x.max) { x.max = t.delay; x.top = t.task + (t.ref ? ' · ' + t.ref : ''); } });
   const dRows = Object.values(byDoer).sort((a, b) => b.sum - a.sum);
   const f = new Date(SA_UI.from + 'T00:00:00'), tt = new Date(SA_UI.to + 'T23:59:59'); const byProc = {};
-  tasks.filter(t => !t.demo && !t.dup && t.doer !== 'SYSTEM' && t.planned && t.planned >= f && t.planned <= tt && (t.done || t.planned <= now)).forEach(t => {
+  tasks.filter(t => !t.demo && !t.dup && t.doer !== 'SYSTEM' && t.planned && ((t.planned >= f && t.planned <= tt && (t.done || t.planned <= now)) || (!t.done && t.planned > tt))).forEach(t => {   // due in the period, or still open for later
     const name = t.proc || t.task; const k = t.src + '|' + name; const x = byProc[k] || (byProc[k] = { src: t.src, task: name, total: 0, done: 0, late: 0, dsum: 0, open: 0, osum: 0, pend: 0 });
     x.total++; if (t.done) { x.done++; if (t.late) { x.late++; x.dsum += t.delay; } } else { x.pend++; if (t.late) { x.open++; x.osum += t.delay; } }
   });
