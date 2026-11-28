@@ -175,22 +175,22 @@ VIEWS.mattrack = {
       '<input id="mtQ" placeholder="Search job card, order, article" value="' + esc(MTK_UI.q) + '" style="max-width:260px"><span class="grow"></span>' +
       (noRes && isSuperAdmin() ? '<button class="btn sm primary" data-act="mt-book" data-confirm="Book reservations for ' + noRes + ' job card(s) made before this screen existed? Each takes what is free now, in the order the job cards were made.">Book reservations · ' + noRes + '</button>' : '') +
       '<span class="muted small">' + A.cards.filter(c => c.bad).length + ' stuck · ' + A.cards.filter(c => !c.bad && c.warn).length + ' waiting · ' + A.cards.length + ' open</span></div>';
-    // the register: one row per job card + item, exactly like the Job Card sheet — Required, Reserved, PO Raised, Received, To order
+    // the register, in the Job Card sheet's own columns. TBO = to be ordered, POR = PO raised, Balance = required − issued
     const tone = { bad: 0, warn: 1, ok: 2 };
-    let n = 0;
-    h += '<div class="tbl-wrap"><table class="bomflat"><tr><th>Job Card</th><th>Brand</th><th>Article</th><th>Colour</th><th class="num">Pairs</th><th>Plan date</th><th>Item</th><th>Name</th><th>UOM</th><th class="num">Required</th><th class="num">Reserved</th><th class="num">In kit</th><th class="num">PO Raised</th><th>PO No</th><th class="num">Received</th><th class="num">Issued</th><th class="num">Transit</th><th class="num">To order</th><th>Status</th></tr>' +
+    const jcLineOf = (j, mat) => (j.lines || []).find(l => norm(l.material) === norm(mat)) || {};
+    h += '<div class="tbl-wrap"><table class="bomflat"><tr><th>Created At</th><th>Brand</th><th>Job Card</th><th>Item Category</th><th>Item Name</th><th>Item Code</th><th>UOM</th><th class="num">Norms</th><th class="num">Required Qty</th><th class="num">Reserve Qty</th><th>Vendor</th><th class="num">TBO</th><th class="num">POR</th><th class="num">Balance</th><th class="num">Issued Qty</th><th>Status</th></tr>' +
       (cards.length ? cards.map(c => {
         const rows = c.rows.slice().sort((a, b) => tone[a.tone] - tone[b.tone] || String(a.material).localeCompare(String(b.material)));
-        if (!rows.length) return '<tr class="bomfirst"><td><b>' + esc(c.j.no) + '</b><div class="small muted">' + esc(c.j.order_no || '') + '</div></td><td>' + esc(c.j.brand || '') + '</td><td>' + esc(c.j.article || '') + '</td><td>' + esc(c.j.colour || '') + '</td><td class="num">' + qtyFmt(c.j.qty) + '</td><td class="nowrap">' + (c.plan ? fmtD(c.plan) : '<span class="muted">not planned</span>') + '</td><td colspan="13" class="muted">No material lines on this job card</td></tr>';
-        return rows.map((r, k) => { const m = matBy(r.material) || {}; n++;
-          return '<tr' + (k === 0 ? ' class="bomfirst"' : '') + '>' +
-            (k === 0 ? '<td rowspan="' + rows.length + '"><b>' + esc(c.j.no) + '</b><div class="small muted">' + esc(c.j.order_no || '') + '</div></td><td rowspan="' + rows.length + '">' + esc(c.j.brand || '') + '</td><td rowspan="' + rows.length + '">' + esc(c.j.article || '') + '</td><td rowspan="' + rows.length + '">' + esc(c.j.colour || '') + '</td><td rowspan="' + rows.length + '" class="num">' + qtyFmt(c.j.qty) + '</td><td rowspan="' + rows.length + '" class="nowrap">' + (c.plan ? fmtD(c.plan) : '<span class="muted">not planned</span>') + '</td>' : '') +
-            '<td><b>' + esc(r.material) + '</b></td><td>' + esc(m.name || '') + '</td><td>' + esc(r.uom) + '</td><td class="num">' + qtyFmt(r.required) + '</td>' +
-            '<td class="num">' + qtyFmt(r.resEff) + (r.borrowed > 1e-9 ? '<div class="small late-txt">' + qtyFmt(r.borrowed) + ' to another JC</div>' : '') + '</td><td class="num">' + (r.kit > 1e-9 ? qtyFmt(r.kit) : '') + '</td>' +
-            '<td class="num">' + (r.poOrdered > 0 ? qtyFmt(r.poOrdered) : '') + '</td><td class="small nowrap">' + esc((r.poNos || []).join(', ')) + '</td>' +
-            '<td class="num">' + (r.poOrdered > 0 ? qtyFmt(r.poReceived) : '') + '</td><td class="num">' + (r.issued > 1e-9 ? qtyFmt(r.issued) : '') + '</td><td class="num">' + (r.transit > 1e-9 ? qtyFmt(r.transit) : '') + '</td>' +
-            '<td class="num' + (r.toOrder > 1e-9 ? ' late-txt' : '') + '"><b>' + (r.toOrder > 1e-9 ? qtyFmt(r.toOrder) : '') + '</b></td><td>' + mtChip(r) + '</td></tr>'; }).join('');
-      }).join('') : '<tr><td colspan="19" class="empty">' + (MTK_UI.f === 'stuck' ? 'Nothing is stuck' : 'No open job cards') + '</td></tr>') + '</table></div>';
+        const head = '<td class="nowrap">' + fmtDT(c.j.at) + '</td><td>' + esc(c.j.brand || '') + '</td><td><b>' + esc(c.j.no) + '</b><div class="small muted">' + esc(c.j.article || '') + (c.j.colour ? ' · ' + esc(c.j.colour) : '') + '</div></td>';
+        if (!rows.length) return '<tr class="bomfirst">' + head + '<td colspan="13" class="muted">No material lines on this job card</td></tr>';
+        return rows.map((r, k) => { const m = matBy(r.material) || {}; const jl = jcLineOf(c.j, r.material);
+          return '<tr' + (k === 0 ? ' class="bomfirst"' : '') + '>' + head +
+            '<td>' + esc(jl.category || m.group || '') + '</td><td>' + esc(m.name || '') + '</td><td><b>' + esc(r.material) + '</b></td><td>' + esc(r.uom) + '</td><td class="num">' + (jl.norms != null ? esc(jl.norms) : '') + '</td>' +
+            '<td class="num">' + qtyFmt(r.required) + '</td><td class="num">' + qtyFmt(r.resEff) + (r.kit > 1e-9 ? '<div class="small muted">kit ' + qtyFmt(r.kit) + '</div>' : '') + '</td><td>' + esc(jl.supplier || '') + '</td>' +
+            '<td class="num' + (r.toOrder > 1e-9 ? ' late-txt' : '') + '"><b>' + (r.toOrder > 1e-9 ? qtyFmt(r.toOrder) : '') + '</b></td>' +
+            '<td class="num">' + (r.poOrdered > 0 ? qtyFmt(r.poOrdered) + '<div class="small muted">' + esc((r.poNos || []).join(', ')) + (r.poReceived > 0 ? ' · recd ' + qtyFmt(r.poReceived) : '') + '</div>' : '') + '</td>' +
+            '<td class="num">' + qtyFmt(Math.max(0, r.required - r.issued)) + '</td><td class="num">' + (r.issued > 1e-9 ? qtyFmt(r.issued) : '') + '</td><td>' + mtChip(r) + '</td></tr>'; }).join('');
+      }).join('') : '<tr><td colspan="16" class="empty">' + (MTK_UI.f === 'stuck' ? 'Nothing is stuck' : 'No open job cards') + '</td></tr>') + '</table></div>';
     const m = setMain(h);
     onSeg(e => { if (e.target.dataset.seg === 'mtf') { MTK_UI.f = e.detail; VIEWS.mattrack.render(); } });
     const qi = $('#mtQ'); if (qi) qi.addEventListener('input', () => { MTK_UI.q = qi.value; const pos = qi.selectionStart; VIEWS.mattrack.render(); const q2 = $('#mtQ'); if (q2) { q2.focus(); q2.setSelectionRange(pos, pos); } });
