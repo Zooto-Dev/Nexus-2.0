@@ -54,7 +54,7 @@ function personTasks(doer) {
     const base = { task: r.task, ref: r.t.ref || (r.type === 'Delegation' ? '' : r.freq), party: r.t.party || '', src: r.t.demo ? 'Demo' : r.type, id: r.t.id, planned: r.planned };
     if (r.actual) { if (r.actual >= since) out.push(Object.assign(base, { status: r.kind === 'blocked' ? (r.ok ? 'Excused' : 'Not done') : 'Completed', done: r.actual, delay: r.delay, why: r.remark || '' })); return; }
     const st = r.status === 'Overdue' ? 'Delayed' : r.status;
-    out.push(Object.assign(base, { status: st, delay: r.status === 'Overdue' ? r.delay : 0, btn: r.status === 'Upcoming' ? '' : clDoneBtn(r.t, r.ymd) }));
+    out.push(Object.assign(base, { status: st, delay: r.status === 'Overdue' ? r.delay : 0, btn: r.status === 'Upcoming' && !clEarlyOk(r.t) ? '' : clDoneBtn(r.t, r.ymd) }));
   });
   allTasks().filter(x => x.src === 'Nexus' && norm(x.owner) === norm(doer)).forEach(x => {
     const base = { task: x.task, ref: x.ref, party: x.party, src: 'Nexus', planned: x.planned };
