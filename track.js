@@ -34,21 +34,24 @@ function paRows() {
   const R = [];
   const add = (k, o) => R.push(Object.assign({ k, act: paDef(k).l }, o));
   const jcs = Store.all('job_cards'); const pos = Store.all('purchase_orders').filter(p => !p.cancelled);
-  // PO Raise: from job card creation until EVERY item of the job card has its PO (TBO − POR = 0 on each line).
-  // One PO for some items does not close it; the actual is the PO that completed the cover.
+  // PO Raise: ONE TASK PER JOB CARD × ITEM that has something to order (TBO = Required − Reserve > 0).
+  // It starts when the job card is made and is done when the POs raised for that job card cover the item
+  // (POR ≥ TBO, i.e. POB = 0); the actual is the PO that completed the cover, the doer the one who raised it.
   jcs.forEach(j => {
     const at = ts(j.at || j.created_at); if (!at || j.status === 'Closed') return;
     const need = {}; (j.lines || []).forEach(l => { const k = norm(l.material); need[k] = (need[k] || 0) + Math.max(0, num(l.required) - num(l.reserved)); });
-    const mats = Object.keys(need).filter(k => need[k] > 1e-9); if (!mats.length) return;
     const mine = pos.filter(p => p.approval !== 'Rejected' && (p.lines || []).some(l => norm(l.jc_no || '') === norm(j.no))).sort((a, b) => (a.at || a.created_at || '') < (b.at || b.created_at || '') ? -1 : 1);
-    const got = {}; let doneAt = null, doneBy = '', nos = [];
-    for (const p of mine) {
-      (p.lines || []).forEach(l => { if (norm(l.jc_no || '') === norm(j.no)) got[norm(l.material)] = (got[norm(l.material)] || 0) + num(l.qty); });
-      nos.push(p.no);
-      if (mats.every(k => (got[k] || 0) + 1e-9 >= need[k])) { doneAt = ts(p.at || p.created_at); doneBy = p.created_by || ''; break; }
-    }
-    const left = mats.filter(k => (got[k] || 0) + 1e-9 < need[k]).length;
-    add('po_raise', { ref: j.no, party: j.brand || '', start: at, actual: doneAt, by: doneAt ? doneBy : '', result: doneAt ? nos.join(', ') : (nos.length ? nos.join(', ') + ' · ' + left + ' item(s) still without PO' : mats.length + ' item(s) to order') });
+    Object.keys(need).filter(k => need[k] > 1e-9).forEach(k => {
+      let got = 0, doneAt = null, doneBy = '', nos = [];
+      for (const p of mine) {
+        const q = (p.lines || []).filter(l => norm(l.jc_no || '') === norm(j.no) && norm(l.material) === k).reduce((s, l) => s + num(l.qty), 0);
+        if (q <= 1e-9) continue;
+        got += q; nos.push(p.no);
+        if (got + 1e-9 >= need[k]) { doneAt = ts(p.at || p.created_at); doneBy = p.created_by || ''; break; }
+      }
+      const code = (matBy(k) || {}).code || k;
+      add('po_raise', { ref: j.no + ' · ' + code, party: j.brand || '', start: at, actual: doneAt, by: doneAt ? doneBy : '', result: doneAt ? nos.join(', ') : (nos.length ? nos.join(', ') + ' · ' + qtyFmt(need[k] - got) + ' still to order' : qtyFmt(need[k]) + ' to order') });
+    });
   });
   pos.forEach(p => {
     const at = ts(p.at || p.created_at || p.date);
