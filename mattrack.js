@@ -175,22 +175,26 @@ VIEWS.mattrack = {
       '<input id="mtQ" placeholder="Search job card, order, article" value="' + esc(MTK_UI.q) + '" style="max-width:260px"><span class="grow"></span>' +
       (noRes && isSuperAdmin() ? '<button class="btn sm primary" data-act="mt-book" data-confirm="Book reservations for ' + noRes + ' job card(s) made before this screen existed? Each takes what is free now, in the order the job cards were made.">Book reservations · ' + noRes + '</button>' : '') +
       '<span class="muted small">' + A.cards.filter(c => c.bad).length + ' stuck · ' + A.cards.filter(c => !c.bad && c.warn).length + ' waiting · ' + A.cards.length + ' open</span></div>';
-    // the register, in the Job Card sheet's own columns. TBO = to be ordered, POR = PO raised, Balance = required − issued
+    // the register, in the Job Card sheet's own columns and formulas:
+    // TBO = Required − Reserve (to be ordered), POR = PO raised, POB = TBO − POR (PO balance), IB = Required − Issued (issue balance)
     const tone = { bad: 0, warn: 1, ok: 2 };
     const jcLineOf = (j, mat) => (j.lines || []).find(l => norm(l.material) === norm(mat)) || {};
-    h += '<div class="tbl-wrap"><table class="bomflat"><tr><th>Created At</th><th>Job Card / Brand</th><th>Item</th><th>UOM</th><th class="num">Norms</th><th class="num">Required Qty</th><th class="num">Reserve Qty</th><th>Vendor</th><th class="num">TBO</th><th class="num">POR</th><th class="num">Balance</th><th class="num">Issued Qty</th><th>Status</th></tr>' +
+    h += '<div class="tbl-wrap"><table class="bomflat"><tr><th>Created At</th><th>Job Card / Brand</th><th>Item</th><th>UOM</th><th class="num">Norms</th><th class="num">Required Qty</th><th class="num">Reserve Qty</th><th>Vendor</th><th class="num">TBO</th><th class="num">POR</th><th class="num">POB</th><th class="num">Issued Qty</th><th class="num">IB</th><th>Status</th></tr>' +
       (cards.length ? cards.map(c => {
         const rows = c.rows.slice().sort((a, b) => tone[a.tone] - tone[b.tone] || String(a.material).localeCompare(String(b.material)));
         const head = '<td class="nowrap">' + fmtDT(c.j.at) + '</td><td><b>' + esc(c.j.no) + '</b> ' + esc(c.j.brand || '') + '<div class="small muted">' + esc(c.j.article || '') + (c.j.colour ? ' · ' + esc(c.j.colour) : '') + '</div></td>';
-        if (!rows.length) return '<tr class="bomfirst">' + head + '<td colspan="10" class="muted">No material lines on this job card</td></tr>';
+        if (!rows.length) return '<tr class="bomfirst">' + head + '<td colspan="11" class="muted">No material lines on this job card</td></tr>';
         return rows.map((r, k) => { const m = matBy(r.material) || {}; const jl = jcLineOf(c.j, r.material);
           return '<tr' + (k === 0 ? ' class="bomfirst"' : '') + '>' + head +
             '<td><b>' + esc(r.material) + '</b> ' + esc(m.name || '') + '<div class="small muted">' + esc(jl.category || m.group || '') + '</div></td><td>' + esc(r.uom) + '</td><td class="num">' + (jl.norms != null ? esc(jl.norms) : '') + '</td>' +
             '<td class="num">' + qtyFmt(r.required) + '</td><td class="num">' + qtyFmt(r.resEff) + (r.kit > 1e-9 ? '<div class="small muted">kit ' + qtyFmt(r.kit) + '</div>' : '') + '</td><td>' + esc(jl.supplier || '') + '</td>' +
-            '<td class="num' + (r.toOrder > 1e-9 ? ' late-txt' : '') + '"><b>' + (r.toOrder > 1e-9 ? qtyFmt(r.toOrder) : '') + '</b></td>' +
-            '<td class="num">' + (r.poOrdered > 0 ? qtyFmt(r.poOrdered) + '<div class="small muted">' + esc((r.poNos || []).join(', ')) + (r.poReceived > 0 ? ' · recd ' + qtyFmt(r.poReceived) : '') + '</div>' : '') + '</td>' +
-            '<td class="num">' + qtyFmt(Math.max(0, r.required - r.issued)) + '</td><td class="num">' + (r.issued > 1e-9 ? qtyFmt(r.issued) : '') + '</td><td>' + mtChip(r) + '</td></tr>'; }).join('');
-      }).join('') : '<tr><td colspan="13" class="empty">' + (MTK_UI.f === 'stuck' ? 'Nothing is stuck' : 'No open job cards') + '</td></tr>') + '</table></div>';
+            (() => { const tbo = Math.max(0, r3(r.required - r.resEff)); const pob = Math.max(0, r3(tbo - r.poOrdered)); const ib = Math.max(0, r3(r.required - r.issued));
+              return '<td class="num">' + qtyFmt(tbo) + '</td>' +
+                '<td class="num">' + qtyFmt(r.poOrdered) + (r.poOrdered > 0 ? '<div class="small muted">' + esc((r.poNos || []).join(', ')) + (r.poReceived > 0 ? ' · recd ' + qtyFmt(r.poReceived) : '') + '</div>' : '') + '</td>' +
+                '<td class="num' + (pob > 1e-9 ? ' late-txt' : '') + '"><b>' + qtyFmt(pob) + '</b></td>' +
+                '<td class="num">' + qtyFmt(r.issued) + '</td><td class="num">' + qtyFmt(ib) + '</td>'; })() +
+            '<td>' + mtChip(r) + '</td></tr>'; }).join('');
+      }).join('') : '<tr><td colspan="14" class="empty">' + (MTK_UI.f === 'stuck' ? 'Nothing is stuck' : 'No open job cards') + '</td></tr>') + '</table></div>';
     const m = setMain(h);
     onSeg(e => { if (e.target.dataset.seg === 'mtf') { MTK_UI.f = e.detail; VIEWS.mattrack.render(); } });
     const qi = $('#mtQ'); if (qi) qi.addEventListener('input', () => { MTK_UI.q = qi.value; const pos = qi.selectionStart; VIEWS.mattrack.render(); const q2 = $('#mtQ'); if (q2) { q2.focus(); q2.setSelectionRange(pos, pos); } });
