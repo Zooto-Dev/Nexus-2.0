@@ -24,11 +24,11 @@ function mtOrder(a, b) {
   return pa < pb ? -1 : pa > pb ? 1 : String(a.j.at || '').localeCompare(String(b.j.at || '')) || String(a.j.no).localeCompare(String(b.j.no));
 }
 
-function mtAll() {
-  if (RES_CACHE.has('mtAll')) return RES_CACHE.get('mtAll');
+function mtAll(excludePo) {   // excludePo: leave one PO out, to judge that PO itself at approval
+  if (RES_CACHE.has('mtAll|' + (excludePo || ''))) return RES_CACHE.get('mtAll|' + (excludePo || ''));
   const jcs = mtOpenJcs().map(j => ({ j, plan: mtPlanDate(j) })).sort(mtOrder);
   // a PO that is saved but not yet approved already covers the need: it shows as 'PO awaiting approval', never as To order
-  const pos = Store.all('purchase_orders').filter(p => !p.cancelled && ['Approved', 'Pending', 'Amend'].includes(p.approval));
+  const pos = Store.all('purchase_orders').filter(p => !p.cancelled && ['Approved', 'Pending', 'Amend'].includes(p.approval) && p.id !== excludePo);
   const today = todayYmd(); const now = Date.now();
   // open PO lines per item, with how much is still to come on each
   const poByMat = {};
@@ -100,7 +100,7 @@ function mtAll() {
     return { j: x.j, plan: x.plan, rows: L, items: L.length, bad, warn, done, tone: bad ? 'bad' : warn ? 'warn' : 'ok', noRes: L.some(r => !r.hasRes), kits };
   });
   const out = { rows, cards, byMat, free, poLeft, poByMat };
-  RES_CACHE.set('mtAll', out);
+  RES_CACHE.set('mtAll|' + (excludePo || ''), out);
   return out;
 }
 

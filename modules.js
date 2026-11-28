@@ -126,7 +126,7 @@ function netReqRows(vendor, excludePo) {
   const by = {};
   const row = code => { const k = norm(code); return by[k] || (by[k] = { material: (matBy(code) || {}).code || code, jcs: [], demand: 0, suppliers: new Set() }); };
   const frozen = new Set(Store.all('orders').filter(o => o.priority === 'Cancelled' || o.priority === 'On Hold').map(o => norm(o.no)));
-  const MT = typeof mtAll === 'function' ? mtAll() : null;
+  const MT = typeof mtAll === 'function' ? mtAll(excludePo) : null;
   const toOrder = {};   // per item: what the job cards still have to order, after stock and open POs are shared out
   Store.all('job_cards').filter(j => j.status !== 'Closed' && !frozen.has(norm(j.order_no || ''))).forEach(j => {
     // the same item may sit on two sections of one job card: its requirement is the sum, issued is counted once
