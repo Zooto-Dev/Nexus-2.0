@@ -27,13 +27,14 @@ function mtOrder(a, b) {
 function mtAll() {
   if (RES_CACHE.has('mtAll')) return RES_CACHE.get('mtAll');
   const jcs = mtOpenJcs().map(j => ({ j, plan: mtPlanDate(j) })).sort(mtOrder);
-  const pos = Store.all('purchase_orders').filter(p => !p.cancelled && p.approval === 'Approved');
+  // a PO that is saved but not yet approved already covers the need: it shows as 'PO awaiting approval', never as To order
+  const pos = Store.all('purchase_orders').filter(p => !p.cancelled && ['Approved', 'Pending', 'Amend'].includes(p.approval));
   const today = todayYmd(); const now = Date.now();
   // open PO lines per item, with how much is still to come on each
   const poByMat = {};
   pos.forEach(p => (p.lines || []).forEach((l, k) => {
     const pen = poLinePending(p, l, k); if (pen <= 1e-9) return;
-    const key = norm(l.material); (poByMat[key] = poByMat[key] || []).push({ p, l, k, pen, left: pen, jc: norm(l.jc_no || ''), exp: p.expected || '' });
+    const key = norm(l.material); (poByMat[key] = poByMat[key] || []).push({ p, l, k, pen, left: pen, jc: norm(l.jc_no || ''), exp: p.expected || '', appr: p.approval === 'Approved' });
   }));
   // one row per job card + item (the same item on two sections of a job card is summed)
   const rows = []; const byMat = {};
@@ -62,18 +63,18 @@ function mtAll() {
     free[k] = f;
     // 2. its own PO lines first, then what is left on any open line, in Plan-date order
     byMat[k].forEach(r => {
-      r.poOrdered = 0; r.poReceived = 0; r.poNos = []; r.transit = 0; r.transitDue = '';
+      r.poOrdered = 0; r.poReceived = 0; r.poNos = []; r.transit = 0; r.transitDue = ''; r.transitPend = 0; r.pendNos = [];
       pos.forEach(p => (p.lines || []).forEach((l, i) => {
         if (norm(l.material) !== k || norm(l.jc_no || '') !== norm(r.jc)) return;
         r.poOrdered += num(l.qty); r.poReceived += recvOf(p, l, i); if (!r.poNos.includes(p.no)) r.poNos.push(p.no);
       }));
       let gap = r3(Math.max(0, r.needRest - r.resEff));
-      L.filter(x => x.jc === norm(r.jc)).forEach(x => { const t = Math.min(x.left, gap); if (t > 1e-9) { x.left = r3(x.left - t); gap = r3(gap - t); r.transit += t; if (!r.transitDue || (x.exp && x.exp < r.transitDue)) r.transitDue = x.exp; } });
+      L.filter(x => x.jc === norm(r.jc)).forEach(x => { const t = Math.min(x.left, gap); if (t > 1e-9) { x.left = r3(x.left - t); gap = r3(gap - t); r.transit += t; if (!x.appr) { r.transitPend += t; if (!r.pendNos.includes(x.p.no)) r.pendNos.push(x.p.no); } else if (!r.transitDue || (x.exp && x.exp < r.transitDue)) r.transitDue = x.exp; } });
       r.gap = gap;
     });
     byMat[k].forEach(r => {
       let gap = r.gap;
-      L.forEach(x => { if (gap <= 1e-9 || x.left <= 1e-9) return; const t = Math.min(x.left, gap); x.left = r3(x.left - t); gap = r3(gap - t); r.transit += t; if (!r.transitDue || (x.exp && x.exp < r.transitDue)) r.transitDue = x.exp; });
+      L.forEach(x => { if (gap <= 1e-9 || x.left <= 1e-9) return; const t = Math.min(x.left, gap); x.left = r3(x.left - t); gap = r3(gap - t); r.transit += t; if (!x.appr) { r.transitPend += t; if (!r.pendNos.includes(x.p.no)) r.pendNos.push(x.p.no); } else if (!r.transitDue || (x.exp && x.exp < r.transitDue)) r.transitDue = x.exp; });
       r.toOrder = r3(gap); r.transit = r3(r.transit); r.short = r3(Math.max(0, r.needRest - r.resEff));
       r.poOrdered = r3(r.poOrdered); r.poReceived = r3(r.poReceived);
     });
@@ -87,7 +88,8 @@ function mtAll() {
     else if (r.transit > 1e-9 && r.transitDue && r.transitDue < today) { r.st = 'Vendor late · due ' + fmtD(r.transitDue); r.tone = 'bad'; }
     else if (r.toOrder > 1e-9 && r.transit <= 1e-9) { r.st = ageH > MTK_TAT_H ? 'No PO yet · ' + Math.floor(ageH) + ' h past' : 'To order'; r.tone = ageH > MTK_TAT_H ? 'bad' : 'warn'; }
     else if (r.toOrder > 1e-9) { r.st = 'Transit ' + qtyFmt(r.transit) + ' · ' + qtyFmt(r.toOrder) + ' to order'; r.tone = ageH > MTK_TAT_H ? 'bad' : 'warn'; }
-    else if (r.transit > 1e-9) { r.st = 'Transit' + (r.transitDue ? ' · due ' + fmtD(r.transitDue) : ''); r.tone = 'warn'; }
+    else if (r.transit > 1e-9 && r.transitPend > 1e-9 && r.transit - r.transitPend <= 1e-9) { r.st = 'PO awaiting approval · ' + r.pendNos.join(', '); r.tone = 'warn'; }
+    else if (r.transit > 1e-9) { r.st = 'Transit' + (r.transitDue ? ' · due ' + fmtD(r.transitDue) : '') + (r.transitPend > 1e-9 ? ' · ' + qtyFmt(r.transitPend) + ' awaiting PO approval' : ''); r.tone = 'warn'; }
     else { r.st = 'Reserved · in stock'; r.tone = 'ok'; }
   });
   // per job card
