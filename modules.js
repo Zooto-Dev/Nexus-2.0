@@ -1549,6 +1549,36 @@ VIEWS.materials = {
 };
 
 /* ================= DEVELOPMENT: BOM ================= */
+/* The half-made BOM lives in this browser (per user) while it is being typed: a sync, a wrong click or a reload
+   does not lose it. It is offered back on the BOM screen and goes when the BOM is saved or discarded. */
+const bomDraftKey = () => 'nx_bom_draft_' + ((typeof ME !== 'undefined' && ME && ME.id) || 'x');
+let BOM_DRAFT_T = 0;
+function bomDraftCollect() {
+  const v = id => { const el = $('#' + id); return el ? String(el.value || '').trim() : ''; };
+  const rows = $$('#nbTable tr[data-bline]').map(tr => ({ process: $('[data-nb="process"]', tr).value, section: $('[data-nb="section"]', tr).value, category: $('[data-nb="cat"]', tr).value.trim(), material: ($('[data-nb-code]', tr).textContent || '').trim() || $('[data-nb="mat"]', tr).value.trim(), qty: $('[data-nb="qty"]', tr).value, supplier: $('[data-nb="sup"]', tr).value, remark: ($('[data-nb="rem"]', tr) || {}).value || '' }))
+    .filter(r => r.material || r.qty || r.section || r.category);
+  const d = { at: nowIso(), brand: v('nbBrand'), article: v('nbArt'), style: v('nbStyle'), colour: v('nbCol'), gender: v('nbGen'), category: v('nbCat'), run: v('nbRun'), mould: v('nbMould'), remark: v('nbRem'), rows };
+  const ph = (window.NBF || {}).photo || ''; if (ph && ph.length < 1500000) d.photo = ph;
+  return d;
+}
+const bomDraftHas = d => !!(d && (d.brand || d.article || (d.rows || []).length));
+function bomDraftSave() { try { if (curView().v !== 'bom' || !$('#nbTable')) return; const d = bomDraftCollect(); if (bomDraftHas(d)) localStorage.setItem(bomDraftKey(), JSON.stringify(d)); else localStorage.removeItem(bomDraftKey()); } catch (e) { console.warn(e); } }
+function bomDraftQueue() { clearTimeout(BOM_DRAFT_T); BOM_DRAFT_T = setTimeout(bomDraftSave, 400); }
+function bomDraftLoad() { try { const d = JSON.parse(localStorage.getItem(bomDraftKey()) || 'null'); return bomDraftHas(d) ? d : null; } catch (e) { return null; } }
+function bomDraftClear() { clearTimeout(BOM_DRAFT_T); try { localStorage.removeItem(bomDraftKey()); } catch (e) { } }
+ACTIONS['bom-draft-discard'] = () => { bomDraftClear(); const b = $('#nbDraftBar'); if (b) b.remove(); flash('Draft discarded.'); };
+ACTIONS['bom-draft-restore'] = () => {
+  const d = bomDraftLoad(); if (!d) return;
+  const set = (id, val) => { const el = $('#' + id); if (el) el.value = val || ''; };
+  const br = $('#nbBrand'); if (br) { if (d.brand && !Array.from(br.options).some(o => o.value === d.brand)) br.insertAdjacentHTML('beforeend', '<option>' + esc(d.brand) + '</option>'); br.value = d.brand || ''; br.dispatchEvent(new Event('change', { bubbles: true })); }
+  const ar = $('#nbArt'); if (ar && d.article) { if (!Array.from(ar.options).some(o => o.value === d.article)) ar.insertAdjacentHTML('beforeend', '<option value="' + esc(d.article) + '">' + esc(d.article) + '</option>'); ar.disabled = false; ar.value = d.article; }
+  set('nbStyle', d.style); set('nbCol', d.colour); set('nbGen', d.gender); set('nbCat', d.category); set('nbRun', d.run); set('nbMould', d.mould); set('nbRem', d.remark);
+  if (d.photo) { window.NBF = window.NBF || {}; NBF.photo = d.photo; const t = $('#nbPhotoTag'); if (t) t.innerHTML = '<img src="' + d.photo + '">'; }
+  $$('#nbTable tr[data-bline]').forEach(tr => tr.remove());
+  (d.rows || []).forEach(l => { $('#nbTable').insertAdjacentHTML('beforeend', bomRow(l)); const tr = $('#nbTable tr[data-bline]:last-child'); if (tr && !matBy(l.material)) $('[data-nb="mat"]', tr).value = l.material || ''; });
+  bomRecalc(); const b = $('#nbDraftBar'); if (b) b.remove(); MAIN_DIRTY = true;
+  flash('Draft restored — ' + (d.rows || []).length + ' row(s). Check it and Save BOM.');
+};
 VIEWS.bom = {
   mod: 'development', render() {
     const edit = can('development', 'edit');
@@ -1590,6 +1620,9 @@ VIEWS.bom = {
     setMain(h);
     for (let i = 0; i < 5; i++) $('#nbTable').insertAdjacentHTML('beforeend', bomRow());
     const m = $('#main'); window.NBF = { photo: '' };
+    const dr = bomDraftLoad();
+    if (dr) m.insertAdjacentHTML('afterbegin', '<div class="panel" id="nbDraftBar" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><b>Unsaved BOM</b> from ' + fmtDT(dr.at) + (dr.brand || dr.article ? ' · ' + esc([dr.brand, dr.article, dr.colour].filter(Boolean).join(' · ')) : '') + ' · ' + (dr.rows || []).length + ' row(s)<span class="grow"></span><button class="btn sm primary" data-act="bom-draft-restore">Restore</button><button class="btn sm" data-act="bom-draft-discard">Discard</button></div>');
+    m.addEventListener('input', bomDraftQueue); m.addEventListener('change', bomDraftQueue);
     m.addEventListener('input', e => { if (e.target.closest('#nbTable')) bomRecalc(); });
     m.addEventListener('change', e => {
       if (e.target.dataset.nb === 'mat') {
@@ -1685,7 +1718,7 @@ function bomRecalc() {
 }
 ACTIONS['bom-ask-price'] = el => { const codes = String(el.dataset.c || '').split(',').filter(Boolean); if (codes.length && typeof prDialog === 'function') prDialog(codes, 'BOM', '', 'Price for BOM items'); };
 ACTIONS['bom-line'] = () => { $('#nbTable').insertAdjacentHTML('beforeend', bomRow()); bomRecalc(); };
-ACTIONS['bom-line-del'] = el => { el.closest('tr').remove(); bomRecalc(); };
+ACTIONS['bom-line-del'] = el => { el.closest('tr').remove(); bomRecalc(); bomDraftQueue(); };
 ACTIONS['bom-paste-t'] = () => $('#nbPasteBox').classList.toggle('hidden');
 function bomImportText(text) {
   let ok = 0, bad = [], badSup = [];
@@ -1740,6 +1773,7 @@ ACTIONS['bom-save'] = () => {
   if (dupKey.length) { $('#nbMsg').innerHTML = '<span class="late-txt">Duplicate Section + Item — remove it.</span>'; return; }
   const ver = Store.all('boms').filter(b2 => norm(b2.article) === norm(art) && norm(b2.brand || '') === norm(brand) && norm(b2.style || '') === norm(style) && norm(b2.colour || '') === norm(col)).reduce((mx, b2) => Math.max(mx, b2.version), 0) + 1;
   const b2 = Store.put('boms', { id: uid(), brand, article: art, style, colour: col, gender: gen, category: cat, size_run: $('#nbRun').value.trim(), mould_no: $('#nbMould').value.trim(), photo: (window.NBF || {}).photo || '', remark: $('#nbRem').value.trim().toUpperCase(), version: ver, lines, status: 'Pending', by: ME.name, at: nowIso() });
+  bomDraftClear();
   audit('bom.create', art + ' v' + ver, brand + (col ? ' · ' + col : '') + ' · ' + lines.length + ' items · RMC ₹' + money(lines.reduce((s2, l) => s2 + l.qty * l.price, 0)));
   flash('BOM saved: ' + esc(art) + ' v' + ver + (ver > 1 ? ' (new version)' : '') + ' — waiting for the Development Head\'s approval.'); go('boms');
 };

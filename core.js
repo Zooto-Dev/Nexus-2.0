@@ -248,7 +248,7 @@ async function cloudReload(col, id) {
     if (error) return;
     if (data) cloudApply(col, id, data.data, data.updated_at, false);
     else { const list = DB[col]; if (list) { const i = list.findIndex(d => d.id === id); if (i >= 0) list.splice(i, 1); } SNAP.delete(col + '|' + id); }
-    RES_CACHE.clear(); if (typeof route === 'function') route();
+    RES_CACHE.clear(); if (typeof route === 'function' && cloudRefreshOk()) route();
   } catch (e) { console.warn(e); }
 }
 // retry failed writes every 20s (sends the latest local copy)
@@ -275,7 +275,7 @@ function cloudApply(col, id, data, ver, del) {
   if (i >= 0) list[i] = data; else list.push(data);
   SNAP.set(k, JSON.stringify(data)); return true;
 }
-function cloudRefreshView() { RES_CACHE.clear(); const a = document.activeElement; if (!a || !/INPUT|TEXTAREA|SELECT/.test(a.tagName)) { renderNav(); route(); } }
+function cloudRefreshView() { RES_CACHE.clear(); if (cloudRefreshOk()) { renderNav(); route(); } }
 // safety net besides the live channel: every 90 s (and when the tab comes back) compare with the cloud and pull what changed
 let SYNC_BUSY = false;
 async function cloudSync() {
@@ -325,8 +325,7 @@ async function cloudLoad() {
     const r = p.new && p.new.collection ? p.new : p.old; if (!r || !r.collection) return;
     cloudApply(r.collection, r.id, p.new && p.new.data, p.new && p.new.updated_at, p.eventType === 'DELETE');
     RES_CACHE.clear();
-    const a = document.activeElement;
-    if (!a || !/INPUT|TEXTAREA|SELECT/.test(a.tagName)) { renderNav(); route(); }
+    if (cloudRefreshOk()) { renderNav(); route(); }
   }).subscribe();
 }
 
@@ -1061,7 +1060,7 @@ function startApp(u) {
   whoPaint(u, r);
   migrateDb();
   syncBadge(); sbxBar(); if (!location.hash) go(can('tasks', 'view') && !can('dashboard', 'view') ? 'tasks' : 'home'); route();
-  setInterval(() => { RES_CACHE.clear(); const a = document.activeElement; if (!a || !/INPUT|TEXTAREA|SELECT/.test(a.tagName)) { renderNav(); if (['home', 'tasks', 'tracker'].includes(curView().v)) route(); } }, 60000);
+  setInterval(() => { RES_CACHE.clear(); if (cloudRefreshOk()) { renderNav(); if (['home', 'tasks', 'tracker'].includes(curView().v)) route(); } }, 60000);
 }
 // Demo: only the demo table; no mail, WhatsApp or any other table
 function demoGuard(sb) {
@@ -1124,7 +1123,14 @@ async function boot() {
 
 /* fresh #main per render, so listeners never pile up across screens */
 let SEG_HANDLER = null;
+/* Unsaved typing on the screen. A cloud change (someone else saved something) refreshes the screen only while
+   nothing has been typed on it; otherwise the data is still taken in, and the screen redraws on the next navigation. */
+let MAIN_DIRTY = false;
+document.addEventListener('input', e => { if (e.target && e.target.closest && e.target.closest('#main') && e.target.id !== 'gsearch') MAIN_DIRTY = true; });
+document.addEventListener('change', e => { if (e.target && e.target.closest && e.target.closest('#main') && /INPUT|SELECT|TEXTAREA/.test(e.target.tagName)) MAIN_DIRTY = true; });
+function cloudRefreshOk() { const a = document.activeElement; return !MAIN_DIRTY && (!a || !/INPUT|TEXTAREA|SELECT/.test(a.tagName)); }
 function setMain(html) {
+  MAIN_DIRTY = false;
   const old = $('#main'); const m = old.cloneNode(false); m.innerHTML = html;
   try { old.replaceWith(m); }
   catch (e) { const cur = document.getElementById('main'); if (cur && cur !== m) cur.replaceWith(m); }
