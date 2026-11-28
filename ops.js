@@ -45,7 +45,7 @@ function personTasks(doer) {
     r.order.forEach(id => {
       const s = r.steps[id]; if (!s || norm(s.doer) !== norm(doer)) return;
       const def = r.spec.steps.find(x => x.id === id);
-      const base = { task: s.name, ref: o.no, party: o.customer_name, src: o.kind === 'sample' ? 'Sample' : 'FMS', planned: s.planned || null, photos: fmsPhotos(o) };
+      const base = { task: s.name, ref: o.no, party: o.customer_name || o.brand || '', what: o.kind === 'jc' ? (o.line.article || '') + (o.line.colour ? ' · ' + o.line.colour : '') : (o.article || ''), src: o.kind === 'sample' ? 'Sample' : 'FMS', planned: s.planned || null, photos: fmsPhotos(o) };
       if (s.status === 'Pending' || s.status === 'Late') out.push(Object.assign(base, { status: s.status === 'Late' ? 'Delayed' : openSt(s.planned), delay: s.status === 'Late' ? s.delayMinutes : 0, btn: stepDoneBtn(o, s, def, r.spec) }));
       else if (s.actual && new Date(s.actual) >= since) out.push(Object.assign(base, { status: 'Completed', done: new Date(s.actual), delay: s.delayMinutes || 0 }));
     });
@@ -116,7 +116,7 @@ function homeTaskTable(tasks) {
   return '<div class="dcard"><div class="dh3">My tasks<span class="grow"></span>' +
     seg('htf', ['all', 'Delayed', 'Pending', 'Upcoming', 'Completed'].map(k => ({ v: k, l: (k === 'all' ? 'All' : k) + ' ' + n(k) })), HT_UI.f) + '</div>' +
     '<div class="tbl-wrap"><table data-pg="home_tasks"><tr><th class="num">#</th><th>Task</th><th>Reference</th><th>Party</th><th>Planned</th><th>Completed</th><th>Status</th><th class="num">Delay</th><th></th></tr>' +
-    (list.length ? list.map((t, i) => '<tr><td class="num">' + (i + 1) + '</td><td>' + esc(t.task) + '<div class="muted small">' + esc(t.src) + '</div>' + taskExtraHtml(t.id) + ((t.photos || []).length ? '<div class="tphotos">' + t.photos.map(photoThumb).join(' ') + '</div>' : '') + '</td><td><b>' + esc(t.ref || '') + '</b></td><td>' + esc(t.party || '') + '</td><td class="nowrap">' + (t.planned ? fmtDT(t.planned) : '') + '</td><td class="nowrap">' + (t.done ? fmtDT(t.done) : '') + '</td>' +
+    (list.length ? list.map((t, i) => '<tr><td class="num">' + (i + 1) + '</td><td>' + esc(t.task) + '<div class="muted small">' + esc(t.src) + (t.what ? ' · ' + esc(t.what) : '') + '</div>' + taskExtraHtml(t.id) + ((t.photos || []).length ? '<div class="tphotos">' + t.photos.map(photoThumb).join(' ') + '</div>' : '') + '</td><td><b>' + esc(t.ref || '') + '</b></td><td>' + esc(t.party || '') + '</td><td class="nowrap">' + (t.planned ? fmtDT(t.planned) : '') + '</td><td class="nowrap">' + (t.done ? fmtDT(t.done) : '') + '</td>' +
       '<td><span class="st ' + (cls[t.status] || 'Waiting') + '">' + t.status + '</span>' + (t.why ? '<div class="small muted">' + esc(t.why) + '</div>' : '') + '</td><td class="num' + (t.delay ? ' late-txt' : '') + '">' + (t.delay ? fmtDelay(t.delay) : '') + '</td><td class="right">' + (t.btn || '') + '</td></tr>').join('')
       : '<tr><td colspan="9" class="empty">No tasks</td></tr>') + '</table></div></div>';
 }
@@ -258,8 +258,8 @@ function nextStepsOf(x) {
 const TASK_UI = { who: 'mine', when: 'open', q: '' };
 function taskTable(list, compact) {
   if (!list.length) return '<div class="tbl-wrap"><div class="empty">No open tasks</div></div>';
-  return '<div class="tbl-wrap"><table class="bomflat"><tr><th>Order</th><th>Brand</th><th>Priority</th><th>Step</th>' + (compact ? '' : '<th>Doer</th>') + '<th>Planned</th><th>Status</th><th class="num">Delay</th>' + (compact ? '' : '<th>Note</th>') + '<th></th></tr>' +
-    list.map(x => '<tr><td><a href="#/order/' + esc(x.order.id) + '">' + esc(x.order.no) + '</a></td><td>' + esc(x.order.customer_name) + '</td><td>' + (x.order.priority === 'Urgent' ? '<span class="late-txt">Urgent</span>' : esc(x.order.priority || '')) + '</td>' +
+  return '<div class="tbl-wrap"><table class="bomflat"><tr><th>Job card</th><th>Brand</th><th>Article</th><th>Priority</th><th>Step</th>' + (compact ? '' : '<th>Doer</th>') + '<th>Planned</th><th>Status</th><th class="num">Delay</th>' + (compact ? '' : '<th>Note</th>') + '<th></th></tr>' +
+    list.map(x => '<tr><td><a href="#/order/' + esc(x.order.id) + '">' + esc(x.order.no) + '</a></td><td>' + esc(x.order.customer_name) + '</td><td>' + esc(x.order.line ? x.order.line.article + (x.order.line.colour ? ' · ' + x.order.line.colour : '') : (x.order.article || '')) + '</td><td>' + (x.order.priority === 'Urgent' ? '<span class="late-txt">Urgent</span>' : esc(x.order.priority || '')) + '</td>' +
       '<td>' + esc(x.step.name) + '</td>' + (compact ? '' : '<td>' + esc(x.step.doer || '') + '</td>') +
       '<td class="nowrap">' + fmtDT(x.step.planned) + '</td><td>' + stHtml(x.step.status) + '</td><td class="num late-txt">' + fmtDelay(x.step.delayMinutes) + '</td>' +
       (compact ? '' : '<td><input data-note placeholder="optional" style="min-width:120px"></td>') + '<td class="right">' + stepDoneBtn(x.order, x.step, x.def, x.spec) + '</td></tr>').join('') + '</table></div>';
@@ -523,7 +523,7 @@ async function punchSaveNow() {
   }
   lines.forEach(l => { if (l.article && !Store.all('items').some(x => norm(x.code) === norm(l.article))) Store.put('items', { id: uid(), code: l.article, name: l.style, group: P.category, gender: l.gender, brand: cu.name, created_at: nowIso(), created_by: ME.name }); });
   if (P.id) { const o0 = Store.get('orders', P.id); const jl = o0 ? Store.all('job_cards').filter(j => norm(j.order_no || '') === norm(o0.no) && j.status !== 'Cancelled') : []; if (jl.length) { flash('This order has job card ' + esc(jl.map(j => j.no).join(', ')) + ' — it cannot be edited.', 'err'); return; } }
-  const o = P.id ? Store.get('orders', P.id) : { id: uid(), no: '', process_id: activeProcess().id, actuals: {}, done_by: {}, created_at: nowIso(), created_by: ME.name };
+  const o = P.id ? Store.get('orders', P.id) : { id: uid(), no: '', process_id: activeProcess().id, actuals: {}, done_by: {}, jc: {}, created_at: nowIso(), created_by: ME.name };
   Object.assign(o, { order_date: P.order_date, customer_id: cu.id, customer_name: cu.name, brand: cu.name, buyer_po: P.buyer_po, po_expiry_date: P.po_expiry_date, tooling_no: P.tooling_no, channel: P.channel, category: P.category, priority: P.priority, remarks: P.remarks, extra: P.extra, lines: lines.map(l => ({ article: l.article, style: l.style, colour: l.colour, gender: l.gender, size_run: l.size_run, size: l.size_run, sizes: (l.sizes || []).filter(x => num(x.qty) > 0).map(x => ({ size: x.size, qty: num(x.qty) })), qty: lineQty(l), pack: l.pack, jc_no: l.jc_no || '' })) });
   // Auto-assign a Job Card No (ZF-xxxx) to each article line that lacks one.
   // Cloud: first pull what others saved, so two people never get the same number.
@@ -580,15 +580,16 @@ ACTIONS['orders-csv'] = () => downloadCsv('orders-' + todayYmd() + '.csv',
 /* ---------------- Order page ---------------- */
 VIEWS.order = {
   mod: 'orders', render(id) {
+    id = String(id || '').split(JC_SEP)[0];
     const o = Store.get('orders', id); if (!o && Store.get('samples', id)) return go('sample', id); if (!o) { setMain('<div class="panel empty">Order not found.</div>'); return; }
     const r = resolveOrder(o); const t = orderTotals(o); const d = dispatchedQty(o); const st = orderState(o);
     const proc = Store.get('processes', o.process_id);
     let h = '<div class="toolbar"><h1 style="margin:0">' + esc(o.no) + ' · ' + esc(o.customer_name) + '</h1>' + stHtml(st.label).replace('st ' + stCls(st.label), 'st ' + st.cls) + '<span class="grow"></span>' +
       (can('orders', 'edit') && !d.total ? '<a class="btn" href="#/punch/' + esc(o.id) + '">Edit</a>' : '') + '<button class="btn" data-act="print">Print</button></div>';
     // where the order stands right now: every step that is open (several can run side by side), most late first
-    const openSteps = r && st.open ? r.order.map(sid => r.steps[sid]).filter(s => s.status === 'Pending' || s.status === 'Late').sort((a, b) => (b.status === 'Late') - (a.status === 'Late') || (b.delayMinutes || 0) - (a.delayMinutes || 0) || a.planned - b.planned) : [];
+    const openSteps = r && st.open ? (r.insts || [{ inst: o, r }]).flatMap(x => x.r.order.map(sid => Object.assign({}, x.r.steps[sid], { jc: (o.lines || []).length > 1 ? x.inst.no : '' }))).filter(s => s.status === 'Pending' || s.status === 'Late').sort((a, b) => (b.status === 'Late') - (a.status === 'Late') || (b.delayMinutes || 0) - (a.delayMinutes || 0) || a.planned - b.planned) : [];
     if (openSteps.length) h += '<div class="panel ord-now"><b>Current status</b> · ' + openSteps.length + ' step(s) open<div class="ord-steps">' +
-      openSteps.map(s => '<span class="ord-step ' + (s.status === 'Late' ? 'late' : '') + '"><b>' + esc(s.name) + '</b> · ' + esc(s.doer || '') + ' · ' + fmtDT(s.planned) + (s.status === 'Late' ? ' · <span class="late-txt">Late ' + fmtDelay(s.delayMinutes) + '</span>' : ' · <span class="pend-txt">Pending</span>') + '</span>').join('') + '</div></div>';
+      openSteps.map(s => '<span class="ord-step ' + (s.status === 'Late' ? 'late' : '') + '"><b>' + esc((s.jc ? s.jc + ' · ' : '') + s.name) + '</b> · ' + esc(s.doer || '') + ' · ' + fmtDT(s.planned) + (s.status === 'Late' ? ' · <span class="late-txt">Late ' + fmtDelay(s.delayMinutes) + '</span>' : ' · <span class="pend-txt">Pending</span>') + '</span>').join('') + '</div></div>';
     if (can('orders', 'edit') && st.label !== 'Dispatched') h += '<div class="toolbar noprint"><span class="muted small">Priority</span>' + seg('opri', [{ v: '', l: 'Normal' }, { v: 'Urgent', l: 'Urgent' }, { v: 'On Hold', l: 'On Hold' }, { v: 'Cancelled', l: 'Cancel order' }], o.priority || '') + '</div>';
     h += '<div class="grid2"><div>';
     h += '<div class="panel"><table class="kv">' + [['Time stamp', fmtDT(o.created_at)], ['Order date', fmtD(o.order_date)], ['Buyer PO no', o.buyer_po], ['PO expiry date', fmtD(o.po_expiry_date)], ['Tooling / Mould no', o.tooling_no], ['Category', o.category], ['Channel', o.channel], ['Priority', o.priority || 'Normal'], ['Remarks', o.remarks], ['Punched by', o.created_by], ['FMS flow', proc ? proc.name + ' v' + proc.version : '—']]
@@ -600,21 +601,23 @@ VIEWS.order = {
     const dsp = Store.all('dispatches').filter(x => x.order_id === o.id);
     if (dsp.length) h += '<h2>Dispatches</h2><div class="tbl-wrap"><table class="bomflat"><tr><th>No</th><th>Date</th><th class="num">Qty</th><th>Invoice</th><th>Vehicle</th><th>Transporter</th><th>LR</th><th>Status</th></tr>' +
       dsp.map(x => '<tr' + (x.cancelled ? ' class="muted"' : '') + '><td>' + esc(x.no) + '</td><td>' + fmtD(x.date) + '</td><td class="num">' + qtyFmt(x.lines.reduce((s, l) => s + num(l.qty), 0)) + '</td><td>' + esc(x.invoice_no) + '</td><td>' + esc(x.vehicle) + '</td><td>' + esc(x.transporter) + '</td><td>' + esc(x.lr_no) + '</td><td>' + (x.cancelled ? 'Cancelled' : 'Dispatched') + '</td></tr>').join('') + '</table></div>';
-    h += '</div><div><h2 style="margin-top:0">FMS timeline</h2>';
+    h += '</div></div><h2>FMS timeline</h2>';
     if (!r) h += '<div class="panel">Flow not found for this order.</div>';
-    else {
+    else (r.insts || [{ inst: o, r }]).forEach(({ inst, r: ri }) => {
+      const l = inst.line || {};
+      if (inst.kind === 'jc') h += '<div class="dh3" style="padding:10px 0 4px"><b>' + esc(inst.no) + '</b> · ' + esc(l.article || '') + (l.colour ? ' · ' + esc(l.colour) : '') + ' · ' + qtyFmt(l.qty) + ' pairs</div>';
+      const cur = orderState(inst).cur;
       h += '<div class="tbl-wrap"><table class="tl bomflat"><tr><th>Step</th><th>Doer</th><th>Done By</th><th>Note</th><th>Planned</th><th>Actual</th><th>Status</th><th class="num">Delay</th><th></th></tr>' +
-        r.order.map(sid => {
-          const s = r.steps[sid]; const def = r.spec.steps.find(x => x.id === sid);
+        ri.order.map(sid => {
+          const s = ri.steps[sid]; const def = ri.spec.steps.find(x => x.id === sid);
           if (s.status === 'N/A') return '<tr class="muted"><td>' + esc(s.name) + '</td><td></td><td></td><td></td><td></td><td></td><td>N/A</td><td></td><td></td></tr>';
-          const act = s.status === 'Pending' || s.status === 'Late' ? stepDoneBtn(o, s, def, r.spec) :
-            (s.status === 'Done' && !isDispatchStep(def, r.spec) && (can('tracker', 'edit')) ? '<button class="btn sm ghost" data-act="undo-step" data-o="' + esc(o.id) + '" data-s="' + esc(sid) + '" data-confirm="Undo?">Undo</button>' : '');
-          const note = (o.notes || {})[sid]; const by = (o.done_by || {})[sid];
-          const pf = (o.proof || {})[sid] ? Store.get('task_proof', (o.proof || {})[sid]) : null;
-          return '<tr class="' + (st.cur && st.cur.id === sid ? 'cur' : '') + '"><td>' + esc(s.name) + '</td><td>' + esc(s.doer || '') + '</td><td>' + (by && by !== 'seed' ? esc(by) : '') + '</td><td>' + esc(note || '') + (pf ? '<div class="small">' + proofHtml(pf) + (pf.date ? ' · ' + esc((def && def.need && def.need.date_label) || 'Date') + ' ' + fmtD(pf.date) : '') + '</div>' : '') + '</td><td class="nowrap">' + fmtDT(s.planned) + '</td><td class="nowrap">' + fmtDT(s.actual) + '</td><td>' + stHtml(s.status) + '</td><td class="num late-txt">' + fmtDelay(s.delayMinutes) + '</td><td class="right">' + act + '</td></tr>';
+          const act = s.status === 'Pending' || s.status === 'Late' ? stepDoneBtn(inst, s, def, ri.spec) :
+            (s.status === 'Done' && !isDispatchStep(def, ri.spec) && (can('tracker', 'edit')) ? '<button class="btn sm ghost" data-act="undo-step" data-o="' + esc(inst.id) + '" data-s="' + esc(sid) + '" data-confirm="Undo?">Undo</button>' : '');
+          const note = (inst.notes || {})[sid]; const by = (inst.done_by || {})[sid];
+          const pf = (inst.proof || {})[sid] ? Store.get('task_proof', (inst.proof || {})[sid]) : null;
+          return '<tr class="' + (cur && cur.id === sid ? 'cur' : '') + '"><td>' + esc(s.name) + '</td><td>' + esc(s.doer || '') + '</td><td>' + (by && by !== 'seed' ? esc(by) : '') + '</td><td>' + esc(note || '') + (pf ? '<div class="small">' + proofHtml(pf) + (pf.date ? ' · ' + esc((def && def.need && def.need.date_label) || 'Date') + ' ' + fmtD(pf.date) : '') + '</div>' : '') + '</td><td class="nowrap">' + fmtDT(s.planned) + '</td><td class="nowrap">' + fmtDT(s.actual) + '</td><td>' + stHtml(s.status) + '</td><td class="num late-txt">' + fmtDelay(s.delayMinutes) + '</td><td class="right">' + act + '</td></tr>';
         }).join('') + '</table></div>';
-    }
-    h += '</div></div>';
+    });
     // every job card of this order, and the BOM behind it, in the same format they print in
     const jcl = (o.lines || []).map(l => ({ l, j: l.jc_no && jcBy(l.jc_no), b: jcBomFor(l.article, l.colour, o.customer_name || o.brand || '', l.style || '') }));
     h += '<h2>Job card &amp; BOM</h2>' + (jcl.length ? jcl.map(({ l, j, b }, i) => {
@@ -645,13 +648,13 @@ VIEWS.order = {
 ACTIONS['print'] = () => window.print();
 
 /* ---------------- Dispatch ---------------- */
-function readyForDispatch() {
-  return Store.all('orders').filter(o => {
-    if (o.priority === 'Cancelled' || o.priority === 'On Hold') return false;
-    const r = resolveOrder(o); if (!r) return false; const end = r.spec.process.endStep; const s = r.steps[end];
-    return s && (s.status === 'Pending' || s.status === 'Late') && dispatchedQty(o).pending > 0;
-  });
+// the Dispatch step of one job card, when it is open and pairs are still pending
+function jcReady(inst) {
+  if (!inst || inst.priority === 'Cancelled' || inst.priority === 'On Hold') return null;
+  const r = resolveOrder(inst); if (!r) return null; const s = r.steps[r.spec.process.endStep];
+  return s && (s.status === 'Pending' || s.status === 'Late') && dispatchedQty(inst).pending > 0 ? s : null;
 }
+function readyForDispatch() { return Store.all('orders').filter(o => jcInsts(o).some(jcReady)); }
 const DSP_UI = { tab: 'ready', open: null };
 VIEWS.dispatch = {
   mod: 'dispatch', render(param) {
@@ -662,8 +665,8 @@ VIEWS.dispatch = {
       const list = readyForDispatch().sort((a, b) => resolveOrder(a).steps[resolveOrder(a).spec.process.endStep].planned - resolveOrder(b).steps[resolveOrder(b).spec.process.endStep].planned);
       h += '<div class="tbl-wrap"><table class="bomflat"><tr><th>Order</th><th>JC No</th><th>Brand</th><th>Article</th><th>Colour</th><th>Size</th><th class="num">Order Qty</th><th class="num">Dispatched</th><th class="num">Pending</th><th>PO Expiry</th><th>Dispatch Due</th><th>Status</th><th class="num">Delay</th><th></th></tr>' +
         (list.length ? list.map(o => {
-          const r = resolveOrder(o); const s = r.steps[r.spec.process.endStep]; const d = dispatchedQty(o);
-          let row = o.lines.map((l, i) => '<tr' + (i === 0 ? ' class="bomfirst"' : '') + '><td><a href="#/order/' + esc(o.id) + '">' + esc(o.no) + '</a></td><td>' + esc(l.jc_no || '') + '</td><td>' + esc(o.customer_name) + '</td><td>' + esc(l.article) + '</td><td>' + esc(l.colour || '') + '</td><td>' + esc(l.size_run || l.size || '') + '</td><td class="num">' + qtyFmt(l.qty) + '</td><td class="num">' + qtyFmt(d.per[i] || 0) + '</td><td class="num">' + qtyFmt(Math.max(0, l.qty - (d.per[i] || 0))) + '</td><td>' + fmtD(o.po_expiry_date) + '</td><td>' + fmtDT(s.planned) + '</td><td>' + stHtml(s.status) + '</td><td class="num late-txt">' + fmtDelay(s.delayMinutes) + '</td><td class="right">' + (i === 0 && edit ? '<button class="btn sm ' + (DSP_UI.open === o.id ? '' : 'primary') + '" data-act="dsp-open" data-o="' + esc(o.id) + '">' + (DSP_UI.open === o.id ? 'Close' : 'Dispatch') + '</button>' : '') + '</td></tr>').join('');
+          const d = dispatchedQty(o);
+          let row = o.lines.map((l, i) => { const si = jcReady(jcInst(o, i)); return '<tr' + (i === 0 ? ' class="bomfirst"' : '') + '><td><a href="#/order/' + esc(o.id) + '">' + esc(o.no) + '</a></td><td>' + esc(l.jc_no || '') + '</td><td>' + esc(o.customer_name) + '</td><td>' + esc(l.article) + '</td><td>' + esc(l.colour || '') + '</td><td>' + esc(l.size_run || l.size || '') + '</td><td class="num">' + qtyFmt(l.qty) + '</td><td class="num">' + qtyFmt(d.per[i] || 0) + '</td><td class="num">' + qtyFmt(Math.max(0, l.qty - (d.per[i] || 0))) + '</td><td>' + fmtD(o.po_expiry_date) + '</td>' + (si ? '<td>' + fmtDT(si.planned) + '</td><td>' + stHtml(si.status) + '</td><td class="num late-txt">' + fmtDelay(si.delayMinutes) + '</td>' : '<td></td><td><span class="st Waiting">Not ready</span></td><td></td>') + '<td class="right">' + (i === 0 && edit ? '<button class="btn sm ' + (DSP_UI.open === o.id ? '' : 'primary') + '" data-act="dsp-open" data-o="' + esc(o.id) + '">' + (DSP_UI.open === o.id ? 'Close' : 'Dispatch') + '</button>' : '') + '</td></tr>'; }).join('');
           if (DSP_UI.open === o.id) row += '<tr class="inline-form"><td colspan="14">' + dispatchForm(o, d) + '</td></tr>';
           return row;
         }).join('') : '<tr><td colspan="14" class="empty">No orders ready</td></tr>') + '</table></div>';
@@ -682,7 +685,7 @@ VIEWS.dispatch = {
 };
 function dispatchForm(o, d) {
   return '<div style="padding:6px 4px"><table class="bomflat" style="margin-bottom:8px"><tr><th>JC No</th><th>Article</th><th>Style</th><th>Colour</th><th>Size</th><th class="num">Pending</th><th class="num">Dispatch now</th></tr>' +
-    o.lines.map((l, i) => { const p = Math.max(0, l.qty - d.per[i]); return '<tr><td>' + esc(l.jc_no || '') + '</td><td>' + esc(l.article) + '</td><td>' + esc(l.style || '') + '</td><td>' + esc(l.colour || '') + '</td><td>' + esc(l.size_run || l.size || '') + '</td><td class="num">' + qtyFmt(p) + '</td><td class="num"><input class="qty" type="number" min="0" max="' + p + '" step="any" data-dq="' + i + '" value="' + p + '"' + (p ? '' : ' disabled') + '></td></tr>'; }).join('') + '</table>' +
+    o.lines.map((l, i) => { const ok = !!jcReady(jcInst(o, i)); const p = Math.max(0, l.qty - d.per[i]); return '<tr' + (ok ? '' : ' class="muted"') + '><td>' + esc(l.jc_no || '') + '</td><td>' + esc(l.article) + '</td><td>' + esc(l.style || '') + '</td><td>' + esc(l.colour || '') + '</td><td>' + esc(l.size_run || l.size || '') + '</td><td class="num">' + qtyFmt(p) + '</td><td class="num"><input class="qty" type="number" min="0" max="' + p + '" step="any" data-dq="' + i + '" value="' + (ok ? p : 0) + '"' + (p && ok ? '' : ' disabled') + '>' + (ok ? '' : '<div class="small">not at Dispatch yet</div>') + '</td></tr>'; }).join('') + '</table>' +
     '<div class="row"><label>Invoice no *<input id="dInv"></label><label>Vehicle no<input id="dVeh"></label><label>Transporter<input id="dTr" list="dlTr"></label><label>LR / Docket no<input id="dLr"></label><label>Date<input id="dDate" type="date" value="' + todayYmd() + '"></label>' +
     '<datalist id="dlTr">' + Array.from(new Set(Store.all('dispatches').map(x => x.transporter).filter(Boolean))).map(t => '<option value="' + esc(t) + '">').join('') + '</datalist>' +
     '<button class="btn primary" data-save data-act="dsp-save" data-o="' + esc(o.id) + '">Save dispatch</button><span id="dMsg" class="small"></span></div></div>';
@@ -695,11 +698,13 @@ ACTIONS['dsp-save'] = el => {
   const lines = $$('[data-dq]').map(i => ({ idx: +i.dataset.dq, qty: num(i.value) })).filter(l => l.qty > 0);
   const inv = $('#dInv').value.trim();
   const over = lines.find(l => l.qty > o.lines[l.idx].qty - d.per[l.idx] + 1e-9);
-  const err = !inv ? 'Invoice no is required.' : !lines.length ? 'Enter qty to dispatch.' : over ? 'Qty more than pending for ' + o.lines[over.idx].article + '.' : '';
+  const notReady = lines.find(l => !jcReady(jcInst(o, l.idx)));
+  const err = !inv ? 'Invoice no is required.' : !lines.length ? 'Enter qty to dispatch.' : over ? 'Qty more than pending for ' + o.lines[over.idx].article + '.' : notReady ? (o.lines[notReady.idx].jc_no || o.lines[notReady.idx].article) + ' has not reached its Dispatch step.' : '';
   if (err) { $('#dMsg').innerHTML = '<span class="late-txt">' + esc(err) + '</span>'; return; }
   const rec = Store.put('dispatches', { id: uid(), no: nextNo('dispatches', 'DSP'), order_id: o.id, date: $('#dDate').value || todayYmd(), lines, invoice_no: inv, vehicle: $('#dVeh').value.trim(), transporter: $('#dTr').value.trim(), lr_no: $('#dLr').value.trim(), by: ME.name, at: nowIso() });
-  const after = dispatchedQty(o); const r = resolveOrder(o); const end = r.spec.process.endStep;
-  if (after.pending <= 0) { o.actuals = o.actuals || {}; o.actuals[end] = nowIso(); o.done_by = o.done_by || {}; o.done_by[end] = ME.name; Store.put('orders', o); }
+  const after = dispatchedQty(o);
+  // a job card whose pairs are all out closes its own Dispatch step
+  jcInsts(o).forEach(inst => { const r = resolveOrder(inst); if (!r) return; const end = r.spec.process.endStep; if (dispatchedQty(inst).pending <= 0 && !inst.actuals[end]) { inst.actuals[end] = nowIso(); inst.done_by[end] = ME.name; fmsPut(inst); } });
   audit('dispatch.create', o.no, rec.no + ' · ' + qtyFmt(lines.reduce((s, l) => s + l.qty, 0)) + ' qty · inv ' + inv);
   DSP_UI.open = null; flash(esc(rec.no) + ' saved for ' + esc(o.no) + (after.pending > 0 ? ' — ' + qtyFmt(after.pending) + ' still pending (part dispatch).' : ' — order fully dispatched, FMS closed.'));
   VIEWS.dispatch.render();
@@ -707,8 +712,7 @@ ACTIONS['dsp-save'] = el => {
 ACTIONS['dsp-cancel'] = el => {
   const x = Store.get('dispatches', el.dataset.d); const o = Store.get('orders', x.order_id);
   x.cancelled = true; x.cancelled_by = ME.name; Store.put('dispatches', x);
-  const r = resolveOrder(o); const end = r.spec.process.endStep;
-  if (o.actuals && o.actuals[end] && dispatchedQty(o).pending > 0) { delete o.actuals[end]; Store.put('orders', o); }
+  jcInsts(o).forEach(inst => { const r = resolveOrder(inst); if (!r) return; const end = r.spec.process.endStep; if (inst.actuals[end] && dispatchedQty(inst).pending > 0) { delete inst.actuals[end]; fmsPut(inst); } });
   audit('dispatch.cancel', o.no, x.no); flash(esc(x.no) + ' cancelled.'); VIEWS.dispatch.render();
 };
 ACTIONS['dsp-csv'] = () => downloadCsv('dispatches-' + todayYmd() + '.csv', [['No', 'Date', 'Order', 'Customer', 'Qty', 'Invoice', 'Vehicle', 'Transporter', 'LR', 'By', 'Cancelled']]
@@ -724,19 +728,19 @@ VIEWS.tracker = {
     const proc = Store.get('processes', TRK_UI.pid); if (!proc) { setMain('<div class="panel empty">No flow yet.</div>'); return; }
     const q = norm(TRK_UI.q);
     const orders = fmsDocs().filter(o => o.process_id === proc.id).sort((a, b) => b.created_at < a.created_at ? -1 : 1)
-      .filter(o => (TRK_UI.f === 'all' || orderState(o).open) && (!q || norm(o.no + ' ' + o.customer_name).includes(q)));
+      .filter(o => (TRK_UI.f === 'all' || orderState(o).open) && (!q || norm(o.no + ' ' + (o.order_no || '') + ' ' + (o.customer_name || o.brand || '') + ' ' + (o.line ? o.line.article + ' ' + (o.line.colour || '') : o.article || '')).includes(q)));
     let h = '<div class="toolbar">' + (procs.length > 1 ? seg('pid', procs.map(p => ({ v: p.id, l: p.name + ' v' + p.version + (p.active ? ' (active)' : '') })), TRK_UI.pid) : '<span class="muted small">' + esc(proc.name) + ' v' + proc.version + '</span>') +
-      seg('f', [{ v: 'open', l: 'Open orders' }, { v: 'all', l: 'All' }], TRK_UI.f) + '<input id="trkQ" placeholder="Filter…" value="' + esc(TRK_UI.q) + '"><span class="muted small">' + orders.length + ' order(s)</span></div>';
+      seg('f', [{ v: 'open', l: 'Open' }, { v: 'all', l: 'All' }], TRK_UI.f) + '<input id="trkQ" placeholder="Filter…" value="' + esc(TRK_UI.q) + '"><span class="muted small">' + orders.length + ' job card(s)</span></div>';
     const steps = FMSEngine.topoOrder(proc.spec).map(id => proc.spec.steps.find(s => s.id === id));
-    h += '<div class="tbl-wrap" style="max-height:75vh"><table class="trk"><tr><th rowspan="2">Order</th><th rowspan="2">Brand</th>' + steps.map(s => '<th colspan="3" class="c">' + esc(s.name) + '</th>').join('') + '</tr><tr>' + steps.map(() => '<th>Planned</th><th>Actual</th><th class="num">Delay</th>').join('') + '</tr>' +
+    h += '<div class="tbl-wrap" style="max-height:75vh"><table class="trk"><tr><th rowspan="2">Job card</th><th rowspan="2">Brand</th><th rowspan="2">Article</th>' + steps.map(s => '<th colspan="3" class="c">' + esc(s.name) + '</th>').join('') + '</tr><tr>' + steps.map(() => '<th>Planned</th><th>Actual</th><th class="num">Delay</th>').join('') + '</tr>' +
       (orders.length ? orders.map(o => {
         const r = resolveOrder(o);
-        return '<tr class="click" data-act="go" data-v="order" data-p="' + esc(o.id) + '"><td><b>' + esc(o.no) + '</b></td><td>' + esc(o.customer_name) + '</td>' + steps.map(sd => {
+        return '<tr class="click" data-act="go" data-v="order" data-p="' + esc(o.id) + '"><td><b>' + esc(o.no) + '</b></td><td>' + esc(o.customer_name || o.brand || '') + '</td><td>' + esc(o.kind === 'jc' ? (o.line.article || '') + (o.line.colour ? ' · ' + o.line.colour : '') : (o.article || '')) + '</td>' + steps.map(sd => {
           const s = r.steps[sd.id]; const c = 'cell c-' + stCls(s.status);
           if (s.status === 'N/A') return '<td class="' + c + '">N/A</td><td class="' + c + '"></td><td class="' + c + '"></td>';
           return '<td class="' + c + '">' + (s.planned ? fmtDT(s.planned) : '') + '</td><td class="' + c + '">' + (s.actual ? fmtDT(s.actual) : '') + '</td><td class="num ' + c + (s.delayMinutes ? ' late-txt' : '') + '">' + (s.delayMinutes ? fmtDelay(s.delayMinutes) : '') + '</td>';
         }).join('') + '</tr>';
-      }).join('') : '<tr><td colspan="' + (steps.length * 3 + 2) + '" class="empty">No orders</td></tr>') + '</table></div>';
+      }).join('') : '<tr><td colspan="' + (steps.length * 3 + 3) + '" class="empty">No job cards</td></tr>') + '</table></div>';
     setMain(h);
     onSeg(e => { TRK_UI[e.target.dataset.seg] = e.detail; VIEWS.tracker.render(); });
     $('#trkQ').addEventListener('input', e => { TRK_UI.q = e.target.value; clearTimeout(TRK_UI.t); TRK_UI.t = setTimeout(() => { VIEWS.tracker.render(); const i = $('#trkQ'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }, 250); });

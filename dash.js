@@ -199,7 +199,7 @@ VIEWS.merchantdash = {
     if (MD_UI.brand && !allowed.some(b => norm(b) === norm(MD_UI.brand))) MD_UI.brand = '';
     const inScope = o => MD_UI.brand ? norm(o.customer_name) === norm(MD_UI.brand) : (admin || allowed.some(b => norm(b) === norm(o.customer_name)));
     const now = new Date(), since30 = new Date(Date.now() - 30 * 864e5), in7 = new Date(Date.now() + 7 * 864e5);
-    const orders = Store.all('orders').filter(o => o.priority !== 'Cancelled' && inScope(o));
+    const orders = Store.all('orders').filter(o => o.priority !== 'Cancelled' && inScope(o)).flatMap(jcInsts);   // one row per job card
     const live = [];          // open orders with their FMS state
     const stepAgg = {}, doerAgg = {}, brandAgg = {};
     let doneN = 0, doneLate = 0, dueSoon = 0;

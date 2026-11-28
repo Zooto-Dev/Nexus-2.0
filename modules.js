@@ -1994,7 +1994,7 @@ ACTIONS['pr-save'] = () => {
 
 VIEWS.prodtracker = {
   mod: 'production', render() {
-    const rows = Store.all('orders').map(o => ({ o, st: orderState(o), r: resolveOrder(o) })).filter(x => x.st.open && x.r);
+    const rows = fmsDocs().filter(o => o.kind === 'jc').map(o => ({ o, st: orderState(o), r: resolveOrder(o) })).filter(x => x.st.open && x.r);
     const ids = ['material', 'production', 'qc'];
     setMain('<div class="tbl-wrap"><table><tr><th rowspan="2">Order</th><th rowspan="2">Brand</th><th rowspan="2" class="num">Qty</th>' + ['Material', 'Production', 'QC'].map(n => '<th colspan="4" class="c">' + n + '</th>').join('') + '<th rowspan="2">Current Step</th><th rowspan="2" class="num">Delay</th></tr><tr>' + ids.map(() => '<th>Status</th><th>Planned</th><th>Actual</th><th class="num">Delay</th>').join('') + '</tr>' +
       (rows.length ? rows.map(x => {

@@ -16,24 +16,21 @@ function planInfo(j) {
 }
 const planJcs = () => Store.all('job_cards').filter(j => j.status !== 'Closed' && !planOf(j.no)).sort((a, b) => String(a.no).localeCompare(String(b.no)));
 
-// O2D: when all job cards of the order are planned, close "Planned Dispatch Date" with the latest planned date
+// O2D: when a job card is planned, its own "Planned Dispatch Date" step closes with the plan's dispatch date
 function planSyncO2D(j) {
-  const o = planOrderOf(j); if (!o) return '';
-  const r = resolveOrder(o); if (!r) return '';
+  const inst = jcInstOf(j.no); if (!inst) return '';
+  const r = resolveOrder(inst); if (!r) return '';
   const def = r.spec.steps.find(s => s.capture && s.capture.field === 'planned_dispatch_date'); if (!def) return '';
-  const jcNos = (o.lines || []).map(l => l.jc_no).filter(Boolean);
-  const plans = jcNos.map(planOf);
-  if (!jcNos.length || plans.some(p => !p)) return 'waiting';
-  const date = plans.map(p => p.dispatch_date).sort().pop();
-  const s = r.steps[def.id]; o.extra = o.extra || {};
+  const p = planOf(j.no); if (!p || !p.dispatch_date) return 'waiting';
+  const date = p.dispatch_date;
+  const s = r.steps[def.id]; inst.extra = inst.extra || {};
   if (s && (s.status === 'Pending' || s.status === 'Late')) {
-    o.extra.planned_dispatch_date = date; o.actuals = o.actuals || {}; o.actuals[def.id] = nowIso();
-    o.done_by = o.done_by || {}; o.done_by[def.id] = ME.name; o.notes = o.notes || {}; o.notes[def.id] = 'From Production Planning';
-    fmsPut(o); audit('step.done', o.no, def.name + ' = ' + fmtD(date) + ' (from Production Planning)'); return 'closed';
+    inst.extra.planned_dispatch_date = date; inst.actuals[def.id] = nowIso(); inst.done_by[def.id] = ME.name; inst.notes[def.id] = 'From Production Planning';
+    fmsPut(inst); audit('step.done', inst.no, def.name + ' = ' + fmtD(date) + ' (from Production Planning)'); return 'closed';
   }
-  if (s && s.actual && o.extra.planned_dispatch_date !== date) {
-    const old = o.extra.planned_dispatch_date; o.extra.planned_dispatch_date = date; fmsPut(o);
-    audit('order.planned_dispatch', o.no, (old ? fmtD(old) : '—') + ' → ' + fmtD(date) + ' (plan revised)'); return 'updated';
+  if (s && s.actual && inst.extra.planned_dispatch_date !== date) {
+    const old = inst.extra.planned_dispatch_date; inst.extra.planned_dispatch_date = date; fmsPut(inst);
+    audit('order.planned_dispatch', inst.no, (old ? fmtD(old) : '—') + ' → ' + fmtD(date) + ' (plan revised)'); return 'updated';
   }
   return '';
 }
@@ -43,8 +40,9 @@ function planStatus(p) {
   const j = jcBy(p.jc_no); const o = j ? planOrderOf(j) : null;
   const qty = num(p.qty);
   // O2D position
-  const st = o ? orderState(o) : null;
-  const r = o ? resolveOrder(o) : null;
+  const inst = jcInstOf(p.jc_no);   // this job card's own flow
+  const st = inst ? orderState(inst) : (o ? orderState(o) : null);
+  const r = inst ? resolveOrder(inst) : (o ? resolveOrder(o) : null);
   // material
   const L = (j && j.lines) || [];
   let req = 0, iss = 0; const items = [];

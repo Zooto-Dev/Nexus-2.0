@@ -31,7 +31,7 @@ function kitProcesses(j) { return Array.from(new Set((j.lines || []).map(kitProc
 // when a process is due: the O2D step of that name on the order, else the job card's Plan date
 function kitProdDate(j, proc) {
   try {
-    const o = Store.all('orders').find(x => norm(x.no) === norm(j.order_no || ''));
+    const o = (typeof jcInstOf === 'function' && jcInstOf(j.no)) || Store.all('orders').find(x => norm(x.no) === norm(j.order_no || ''));
     if (o && typeof resolveOrder === 'function') { const r = resolveOrder(o); if (r) { const id = r.order.find(i => norm((r.steps[i] || {}).name || '') === norm(proc)); const s = id ? r.steps[id] : null; if (s && s.planned) return ymdOf(new Date(s.planned)); } }
   } catch (e) { }
   return typeof mtPlanDate === 'function' ? mtPlanDate(j) : '';

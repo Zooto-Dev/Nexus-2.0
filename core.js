@@ -498,24 +498,79 @@ function orderTotals(o) {
   return { qty };
 }
 function dispatchedQty(o) {
+  if (o && o.kind === 'jc') {
+    let q = 0; Store.all('dispatches').filter(d => d.order_id === o.oid && !d.cancelled).forEach(d => (d.lines || []).forEach(l => { if (l.idx === o.li) q += num(l.qty); }));
+    return { per: [q], total: q, pending: Math.max(0, num((o.line || {}).qty) - q) };
+  }
   const per = (o.lines || []).map(() => 0);
   Store.all('dispatches').filter(d => d.order_id === o.id && !d.cancelled).forEach(d => (d.lines || []).forEach(l => { if (per[l.idx] != null) per[l.idx] += num(l.qty); }));
   const total = per.reduce((a, b) => a + b, 0);
   return { per, total, pending: Math.max(0, orderTotals(o).qty - total) };
 }
 function orderFields(o) {
-  const t = orderTotals(o);
+  const t = orderTotals(o); const l = o.kind === 'jc' ? (o.line || {}) : null;
   return Object.assign({}, o.extra || {}, {
     created_at: o.created_at, order_no: o.no, brand: o.customer_name, category: o.category,
     channel: o.channel, priority: o.priority || '', po_expiry_date: o.po_expiry_date,
     order_date: o.order_date, qty: t.qty,
     brand_merchant: brandPeople(o.customer_name).merchant, brand_junior_merchant: brandPeople(o.customer_name).junior
-  });
+  }, l ? { jc_no: o.no, parent_order_no: o.order_no, article: l.article || '', style: l.style || '', colour: l.colour || '', gender: l.gender || '', size_run: l.size_run || l.size || '' } : {});
 }
-// FMS instances: sales orders (O2D) and sample development records share the same step engine
-function fmsDocs() { return Store.all('orders').concat(Store.all('samples')); }
-function fmsGet(id) { return Store.get('orders', id) || Store.get('samples', id); }
-function fmsPut(o) { Store.put(o.kind === 'sample' ? 'samples' : 'orders', o); }
+/* FMS instances. The O2D flow runs once per JOB CARD (one order line), not once per order: an order with two
+   articles has two Internal Green Seals, two Size Sets, two Toolings. A job-card instance is a view of its order
+   line, id "<order id>~<jc no>", whose actuals / done_by / notes / proof / extra live on the order under o.jc[jc no].
+   Sample development records are their own instances as before. */
+const JC_SEP = '~';
+function jcKeyOf(o, i) { const l = (o.lines || [])[i] || {}; return l.jc_no || ('L' + (i + 1)); }
+function jcInst(o, i) {
+  const l = (o.lines || [])[i]; if (!l) return null;
+  const k = jcKeyOf(o, i);
+  // an order saved before flows ran per job card keeps its order-level actuals for every line until a line is written
+  const bag = (o.jc || {})[k] || (o.actuals && Object.keys(o.actuals).length ? { actuals: o.actuals, done_by: o.done_by, notes: o.notes, proof: o.proof } : {});
+  return Object.assign({}, o, { id: o.id + JC_SEP + k, oid: o.id, kind: 'jc', jkey: k, li: i, no: k, order_no: o.no, line: l, lines: [l],
+    actuals: Object.assign({}, bag.actuals || {}), done_by: Object.assign({}, bag.done_by || {}), notes: Object.assign({}, bag.notes || {}), proof: Object.assign({}, bag.proof || {}),
+    extra: Object.assign({}, o.extra || {}, bag.extra || {}) });
+}
+function jcInsts(o) { return o && o.kind !== 'sample' && o.kind !== 'jc' ? (o.lines || []).map((_, i) => jcInst(o, i)) : (o && o.kind === 'jc' ? [o] : []); }
+function jcInstOf(jcNo) { const n = norm(jcNo || ''); if (!n) return null; for (const o of Store.all('orders')) { const i = (o.lines || []).findIndex(l => norm(l.jc_no || '') === n); if (i >= 0) return jcInst(o, i); } return null; }
+const fmsOrderId = o => o && o.oid ? o.oid : (o || {}).id;
+function fmsDocs() { return Store.all('orders').flatMap(jcInsts).concat(Store.all('samples')); }
+function fmsGet(id) {
+  id = String(id || ''); const p = id.indexOf(JC_SEP);
+  if (p > 0) { const o = Store.get('orders', id.slice(0, p)); if (!o) return null; const k = id.slice(p + 1); const i = (o.lines || []).findIndex((l, x) => jcKeyOf(o, x) === k); return i >= 0 ? jcInst(o, i) : null; }
+  return Store.get('orders', id) || Store.get('samples', id);
+}
+function fmsPut(o) {
+  if (o.kind === 'jc') {
+    const p = Store.get('orders', o.oid); if (!p) return;
+    const pe = p.extra || {}; const ex = {}; Object.entries(o.extra || {}).forEach(([k, v]) => { if (pe[k] !== v) ex[k] = v; });
+    p.jc = p.jc || {}; p.jc[o.jkey] = { actuals: o.actuals || {}, done_by: o.done_by || {}, notes: o.notes || {}, proof: o.proof || {}, extra: ex };
+    Store.put('orders', p); return;
+  }
+  Store.put(o.kind === 'sample' ? 'samples' : 'orders', o);
+}
+// an ORDER's view of its job-card flows: each step shows the job card that is furthest behind
+function resolveOrderAgg(o) {
+  const key = 'agg|' + o.id + '|' + o.updated_at; if (RES_CACHE.has(key)) return RES_CACHE.get(key);
+  const rs = jcInsts(o).map(x => ({ inst: x, r: resolveOrder(x) })).filter(x => x.r);
+  let res = null;
+  if (rs.length) {
+    const rank = { Late: 0, Pending: 1, Waiting: 2, 'On Hold': 3, Done: 4, Cancelled: 5, 'N/A': 6 };
+    const rk = s => rank[s.status] === undefined ? 9 : rank[s.status];
+    const steps = {};
+    rs[0].r.order.forEach(id => {
+      const all = rs.map(x => ({ s: x.r.steps[id], inst: x.inst })).filter(x => x.s);
+      const worst = all.slice().sort((a, b) => rk(a.s) - rk(b.s) || (b.s.delayMinutes || 0) - (a.s.delayMinutes || 0) || ((a.s.planned || 0) - (b.s.planned || 0)))[0];
+      const open = all.filter(x => x.s.status === 'Pending' || x.s.status === 'Late');
+      const openPl = open.map(x => x.s.planned).filter(Boolean).sort((a, b) => a - b);
+      steps[id] = Object.assign({}, worst.s, { jc: worst.inst.no, planned: openPl.length ? openPl[0] : worst.s.planned,
+        actual: all.every(x => x.s.actual || x.s.status === 'N/A') ? all.map(x => x.s.actual).filter(Boolean).sort((a, b) => a - b).pop() || null : null,
+        delayMinutes: Math.max.apply(null, all.map(x => x.s.delayMinutes || 0)), n: all.length, nOpen: open.length, nDone: all.filter(x => x.s.status === 'Done').length });
+    });
+    res = { steps, order: rs[0].r.order, priority: rs[0].r.priority, spec: rs[0].r.spec, insts: rs, agg: true };
+  }
+  RES_CACHE.set(key, res); return res;
+}
 // Other colours of an article wait for its first (lead) sample: they start when the lead passes without
 // rework (Changes Required = No), after the lead's rework submission, or when someone releases them by hand.
 function sampleLeadClearedAt(o) {
@@ -534,6 +589,7 @@ function sampleFields(o) {
   return Object.assign({}, o.extra || {}, { follows: L ? L.no : '', lead_cleared_at: sampleLeadClearedAt(o), created_at: o.created_at, order_no: o.no, sample_no: o.no, batch_no: o.batch_no, brand: o.brand, article: o.article, colour: o.colour, size: o.size, gender: o.gender, category: o.category, status: o.status || '', brand_merchant: brandPeople(o.brand).merchant, brand_junior_merchant: brandPeople(o.brand).junior });
 }
 function resolveOrder(o) {
+  if (o && o.kind !== 'sample' && o.kind !== 'jc' && o.lines) return resolveOrderAgg(o);
   const lead = o.lead_id && Store.get('samples', o.lead_id);
   const key = o.id + '|' + o.updated_at + (lead ? '|' + lead.updated_at + '|' + JSON.stringify([lead.actuals, lead.extra, lead.status]) : '');
   if (RES_CACHE.has(key)) return RES_CACHE.get(key);
@@ -592,7 +648,7 @@ function markStepDone(orderId, stepId, note, capVal, proof) {
     if (def.need.remark && !String(p.remark || '').trim()) { flash('This step needs a remark.', 'err'); return; }
     if (def.need.date && !p.date) { flash('This step needs the ' + esc(def.need.date_label || 'date') + '.', 'err'); return; }
     const pid = uid();
-    Store.put('task_proof', { id: pid, src: 'fms', ref: o.no, order_id: o.id, step: stepId, step_name: s.name, photos: p.photos || [], files: p.files || [], remark: String(p.remark || '').trim(), date: p.date || '', by: ME.name, at: nowIso() });
+    Store.put('task_proof', { id: pid, src: 'fms', ref: o.no, order_id: fmsOrderId(o), step: stepId, step_name: s.name, photos: p.photos || [], files: p.files || [], remark: String(p.remark || '').trim(), date: p.date || '', by: ME.name, at: nowIso() });
     o.proof = o.proof || {}; o.proof[stepId] = pid;
   }
   const wasOpen = {};   // which steps were already open, so only the newly opened ones are announced
@@ -614,7 +670,7 @@ function stepOpened(o, wasOpen, justDone) {
       const st = r2.steps[k];
       if (k === justDone || wasOpen[k] || !(st.status === 'Pending' || st.status === 'Late') || !st.doer) return;
       if (norm(st.doer) === norm(ME.doer)) return;   // no notification for the person who just closed a step
-      pushStep(o.kind === 'sample' ? 'samples' : 'orders', o.id, st.doer, st.name);
+      pushStep(o.kind === 'sample' ? 'samples' : 'orders', fmsOrderId(o), st.doer, st.name + (o.kind === 'jc' ? ' · ' + o.no : ''));
     });
   } catch (e) { console.error(e); }
 }
@@ -644,7 +700,7 @@ const FMS_RULES = [
 let FMS_AUTO_T = 0;
 function fmsAutoRun(force) {
   if (!force && Date.now() - FMS_AUTO_T < 4000) return; FMS_AUTO_T = Date.now();
-  Store.all('orders').forEach(o => {
+  fmsDocs().filter(o => o.kind === 'jc').forEach(o => {
     if (o.priority === 'Cancelled') return;
     const r = resolveOrder(o); if (!r) return; let changed = false;
     r.spec.steps.forEach(def => {
@@ -654,7 +710,7 @@ function fmsAutoRun(force) {
       const at = rule.check(o, def.status.field);
       if (at) { o.actuals = o.actuals || {}; o.actuals[def.id] = at; o.done_by = o.done_by || {}; o.done_by[def.id] = 'System'; changed = true; }
     });
-    if (changed) { Store.put('orders', o); RES_CACHE.clear(); }
+    if (changed) { fmsPut(o); RES_CACHE.clear(); }
   });
 }
 setInterval(() => { if (typeof ME !== 'undefined' && ME) fmsAutoRun(true); }, 60000);
