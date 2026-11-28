@@ -411,13 +411,13 @@ VIEWS.po = {
     let h = subTitle('Purchase Orders', 'GRN/followup only after approval') + '<div class="toolbar">' + seg('f', [{ v: 'appr', l: 'For approval' }, { v: 'open', l: 'Open' }, { v: 'done', l: 'Received' }, { v: 'cancel', l: 'Rejected/Cancelled' }, { v: 'all', l: 'All' }], PO_UI.f) +
       '<input id="poQ" placeholder="PO / vendor / material…" value="' + esc(PO_UI.q || '') + '"><span class="grow"></span>' + (edit ? newBtn('New PO', 'po-new') : '') + '</div>';
     if (PO_UI.form && edit) h = poForm();
-    else h += '<div class="tbl-wrap"><table class="bomflat"><tr><th>PO No</th><th>PO Date</th><th>Vendor</th><th class="num">Sr</th><th>Item Name</th><th>Item Code</th><th>Brand</th><th>UOM</th><th class="num">Qty</th><th class="num">Received</th><th class="num">Pending</th><th>Expected</th><th>Status</th><th>Raised By</th><th>Approved By</th><th></th></tr>' +
+    else h += '<div class="tbl-wrap"><table class="bomflat"><tr><th>PO No</th><th>PO Date</th><th>Vendor</th><th class="num">Sr</th><th>Item Name</th><th>Item Code</th><th>Job Card</th><th>Brand</th><th>UOM</th><th class="num">Qty</th><th class="num">Received</th><th class="num">Pending</th><th>Expected</th><th>Status</th><th>Raised By</th><th>Approved By</th><th></th></tr>' +
       (rows.length ? rows.map(p => {
         const st = poStatus(p);
         const act = (st === 'Amend' && edit && (p.amend_by ? ((p.amend_by_id ? p.amend_by_id === ME.id : p.amend_by === ME.name) || isSuperAdmin()) : (poOwn(p) || isSuperAdmin())) ? '<button class="btn sm primary" data-act="po-edit" data-id="' + esc(p.id) + '">Edit</button>' : '') +
           (edit && canApprove() && (st === 'Open' || st === 'Pending Approval' || st === 'Amend') && !pendingInwardOf(p.no) ? ' <button class="btn ghost sm danger" data-act="po-cancel" data-id="' + esc(p.id) + '">Cancel</button>' : '') +
           (edit && canApprove() && st === 'Partial' && !pendingInwardOf(p.no) ? ' <button class="btn ghost sm" data-act="po-close" data-id="' + esc(p.id) + '">Short close</button>' : '');
-        let row = p.lines.map((l, i) => '<tr class="click' + (i === 0 ? ' bomfirst' : '') + '" data-act="po-toggle" data-id="' + esc(p.id) + '"><td><b>' + esc(p.no) + '</b></td><td>' + fmtD(p.date) + '</td><td>' + esc(p.vendor) + '</td><td class="num">' + (i + 1) + '</td><td>' + esc((matBy(l.material) || {}).name || '') + '</td><td>' + esc(l.material) + '</td><td>' + esc(l.brand || '') + '</td><td>' + esc(l.uom || '') + '</td><td class="num">' + qtyFmt(l.qty) + '</td><td class="num">' + qtyFmt(recvOf(p, l, i)) + '</td><td class="num">' + qtyFmt(poLinePending(p, l, i)) + '</td><td>' + fmtD(p.expected) + '</td><td><span class="st ' + poStCls(st) + '">' + st + '</span></td><td>' + esc(p.created_by || '') + '</td><td>' + esc(p.approved_by || '') + '</td><td class="right">' + (i === 0 ? act : '') + '</td></tr>').join('');
+        let row = p.lines.map((l, i) => '<tr class="click' + (i === 0 ? ' bomfirst' : '') + '" data-act="po-toggle" data-id="' + esc(p.id) + '"><td><b>' + esc(p.no) + '</b></td><td>' + fmtD(p.date) + '</td><td>' + esc(p.vendor) + '</td><td class="num">' + (i + 1) + '</td><td>' + esc((matBy(l.material) || {}).name || '') + '</td><td>' + esc(l.material) + '</td><td class="nowrap">' + esc(l.jc_no || '') + '</td><td>' + esc(l.brand || '') + '</td><td>' + esc(l.uom || '') + '</td><td class="num">' + qtyFmt(l.qty) + '</td><td class="num">' + qtyFmt(recvOf(p, l, i)) + '</td><td class="num">' + qtyFmt(poLinePending(p, l, i)) + '</td><td>' + fmtD(p.expected) + '</td><td><span class="st ' + poStCls(st) + '">' + st + '</span></td><td>' + esc(p.created_by || '') + '</td><td>' + esc(p.approved_by || '') + '</td><td class="right">' + (i === 0 ? act : '') + '</td></tr>').join('');
         if (PO_UI.open === p.id) row += '<tr class="inline-form"><td colspan="16">' + poDetail(p) + '</td></tr>';
         return row;
       }).join('') : '<tr><td colspan="16" class="empty">No purchase orders</td></tr>') + '</table></div>';
@@ -454,7 +454,7 @@ function poFormSetup() {
   const mode = PO_UI.mode;
   $('#npHead').innerHTML = mode === 'manual'
     ? '<th>Item Name</th><th>Category</th><th>Code</th><th>HSN</th><th>UOM</th><th>Brand *</th><th class="num">Rate</th><th class="num">GST %</th><th>Remark</th><th class="num">Qty</th><th class="num">Amount</th><th class="num">Total</th><th></th>'
-    : '<th>Photo</th><th>Item Name</th><th>Category</th><th>Code</th><th>HSN</th><th>UOM</th><th>Brand</th><th class="num" style="width:90px">Rate</th><th class="num" style="width:70px">GST %</th><th style="width:160px">Remark</th><th class="num">Qty</th><th class="num">Amount</th><th class="num">Total</th>';
+    : '<th>Photo</th><th>Item Name</th><th>Category</th><th>Code</th><th>HSN</th><th>UOM</th><th>Job Card</th><th>Brand</th><th class="num" style="width:90px">Rate</th><th class="num" style="width:70px">GST %</th><th style="width:160px">Remark</th><th class="num">Qty</th><th class="num">Amount</th><th class="num">Total</th>';
   $('#npAdd').classList.toggle('hidden', mode !== 'manual');
   const ed = PO_UI.editId ? Store.get('purchase_orders', PO_UI.editId) : null;
   $('#npLines').innerHTML = ed ? ed.lines.map(l => poLineRow(l)).join('') : mode === 'manual' ? poLineRow() : '';
@@ -472,13 +472,20 @@ function poFillJc(vendor) {
   PO_UI.moq = {}; PO_UI.ed = {};
   poJcDraw();
 }
-// one line per item (POs are item-wise, not job-card-wise); an MOQ override raises that item's qty
+/* One PO line per JOB CARD per item: the line carries its JC number, so when the PO is raised that job card's
+   "PO Raised" goes up and its To order comes down — exactly the way the Job Card sheet worked. Requirements and
+   min-level needs (no job card) make a line of their own. An MOQ override adds its extra to the first line of the item. */
 function poJcLines() {
-  return (PO_UI.net || []).map(r => {
-    const m = matBy(r.material) || {}; const o = PO_UI.moq[r.material];
-    return { key: r.material, r, m, qty: o && o.qty > r.net + 1e-9 ? o.qty : roundUom(m.uom, r.net), moq: !!(o && o.qty > r.net + 1e-9),
-      brand: Array.from(new Set(r.jcs.map(x => x.req ? x.brand : (jcBy(x.jc) || {}).brand).filter(Boolean))).join(', ') };
+  const out = [];
+  (PO_UI.net || []).forEach(r => {
+    const m = matBy(r.material) || {}; const o = PO_UI.moq[r.material]; const extra = o && o.qty > r.net + 1e-9 ? r3(o.qty - r.net) : 0;
+    const jcLines = (r.jcs || []).filter(x => !x.req && num(x.toOrder) > 1e-9).map(x => { const j = jcBy(x.jc) || {}; return { key: r.material + '|' + x.jc, r, m, jc: x.jc, qty: roundUom(m.uom, x.toOrder), brand: j.brand || x.brand || '', article: j.article || x.article || '', colour: j.colour || x.colour || '', moq: false }; });
+    const rest = r3(Math.max(0, r.net - jcLines.reduce((s, x) => s + x.qty, 0)));
+    if (rest > 1e-9 || !jcLines.length) jcLines.push({ key: r.material + '|', r, m, jc: '', qty: roundUom(m.uom, jcLines.length ? rest : r.net), brand: Array.from(new Set((r.jcs || []).filter(x => x.req).map(x => x.brand).filter(Boolean))).join(', '), article: '', colour: '', moq: false, req: true });
+    if (extra > 1e-9 && jcLines.length) { jcLines[0].qty = r3(jcLines[0].qty + extra); jcLines[0].moq = true; }
+    jcLines.filter(x => x.qty > 1e-9).forEach(x => out.push(x));
   });
+  return out;
 }
 function poJcDraw() {
   const lines = poJcLines(); const vendor = PO_UI.vendor;
@@ -492,20 +499,21 @@ function poJcDraw() {
     const a2 = num(L.qty) * num(rate); const g2 = a2 * (1 + num(gst) / 100); q += num(L.qty); amt += a2; tot += g2;
     return '<tr data-jrow data-key="' + esc(L.key) + '"' + (L.moq ? ' class="moqrow"' : '') + '><td>' + matThumb(L.m) + '</td>' +
       '<td><b>' + esc(L.m.name || L.r.material) + '</b></td><td>' + esc(L.m.group || '') + '</td><td>' + esc(L.r.material) + '</td><td>' + esc(L.m.hsn || '') + '</td><td>' + esc(L.m.uom || '') + '</td>' +
+      '<td class="nowrap">' + (L.jc ? '<b>' + esc(L.jc) + '</b><div class="small muted">' + esc(L.article + (L.colour ? ' · ' + L.colour : '')) + '</div>' : '<span class="muted small">' + (L.req ? 'Requirement / min level' : '—') + '</span>') + '</td>' +
       '<td>' + (L.brand ? esc(L.brand) : '<input data-jbrand list="dlBrandPo" style="width:120px" value="' + esc((PO_UI.ed[L.key] || {}).brand || '') + '">') + '</td>' +
       '<td class="num">' + poRateCell(L.r.material) + '</td><td class="num">' + esc(gst) + '</td>' +
       '<td><input data-jrem value="' + esc(rem) + '"></td>' +
       '<td class="num"><b>' + qtyFmt(L.qty) + '</b>' + '<div><a class="small" data-act="po-moq" data-m="' + esc(L.r.material) + '">' + (L.moq ? 'MOQ ✎' : 'MOQ') + '</a></div>' + '</td>' +
       '<td class="num">' + money(a2) + '</td><td class="num">' + money(g2) + '</td></tr>' +
-      (PO_UI.moqOpen === L.r.material ? '<tr class="inline-form"><td colspan="13"><div class="row">' +
+      (PO_UI.moqOpen === L.r.material ? '<tr class="inline-form"><td colspan="14"><div class="row">' +
         '<span class="small">Net requirement <b>' + qtyFmt(L.r.net) + ' ' + esc(L.m.uom || '') + '</b></span>' +
         '<label>MOQ (min order qty) *<input id="moqQty" type="number" min="0" step="any" value="' + esc((PO_UI.moq[L.r.material] || {}).qty || L.r.moq || '') + '"></label>' +
         '<label style="flex:1">Reason *<input id="moqWhy" placeholder="Why more than the net requirement?" value="' + esc((PO_UI.moq[L.r.material] || {}).reason || '') + '"></label>' +
         '<button class="btn primary sm" data-act="po-moq-set" data-m="' + esc(L.r.material) + '">Apply MOQ</button>' +
         (PO_UI.moq[L.r.material] ? '<button class="btn sm" data-act="po-moq-clear" data-m="' + esc(L.r.material) + '">Remove MOQ</button>' : '') + '</div></td></tr>' : '');
   }).join('');
-  $('#npLines').innerHTML = lines.length ? html : '<tr><td colspan="13" class="empty">Nothing to order from this vendor — net requirement is covered by stock and open POs.</td></tr>';
-  const f = $('#npFoot'); if (f) f.innerHTML = lines.length ? '<td colspan="10" class="right"><b>Total</b></td><td class="num"><b>' + qtyFmt(q) + '</b></td><td class="num"><b>' + money(amt) + '</b></td><td class="num"><b>' + money(tot) + '</b></td>' : '';
+  $('#npLines').innerHTML = lines.length ? html : '<tr><td colspan="14" class="empty">Nothing to order from this vendor — net requirement is covered by stock and open POs.</td></tr>';
+  const f = $('#npFoot'); if (f) f.innerHTML = lines.length ? '<td colspan="11" class="right"><b>Total</b></td><td class="num"><b>' + qtyFmt(q) + '</b></td><td class="num"><b>' + money(amt) + '</b></td><td class="num"><b>' + money(tot) + '</b></td>' : '';
   $('#npHint').innerHTML = '';
 }
 document.addEventListener('input', e => {
@@ -591,7 +599,7 @@ ACTIONS['po-save'] = async el => {
   const mode = PO_UI.editId ? 'manual' : 'jc';
   const lines = mode === 'manual'
     ? $$('#npLines tr[data-mline]').map(tr => { const m = Store.all('materials').find(x => norm(x.name) === norm($('[data-np="mat"]', tr).value) || norm(x.code) === norm($('[data-np="mat"]', tr).value)); return m ? { material: m.code, uom: m.uom, qty: num($('[data-np="qty"]', tr).value), rate: matPrice(m.code), gst: num(m.gst), remark: $('[data-np="rem"]', tr).value.trim(), brand: $('[data-np="brand"]', tr).value.trim(), jc_no: '', received: 0, rejected: 0 } : null; }).filter(l => l && l.qty > 0)
-    : poJcLines().map(L => { const tr = $('#npLines tr[data-key="' + L.key + '"]'); return { material: L.r.material, uom: L.m.uom || '', qty: L.qty, rate: matPrice(L.r.material), gst: num(L.m.gst), remark: $('[data-jrem]', tr).value.trim(), jc_no: '', brand: L.brand || ($('[data-jbrand]', tr) || { value: '' }).value.trim(), moq: L.moq, net: L.r.net, received: 0, rejected: 0 }; });
+    : poJcLines().map(L => { const tr = $('#npLines tr[data-key="' + L.key + '"]'); return { material: L.r.material, uom: L.m.uom || '', qty: L.qty, rate: matPrice(L.r.material), gst: num(L.m.gst), remark: $('[data-jrem]', tr).value.trim(), jc_no: L.jc || '', article: L.article || '', colour: L.colour || '', brand: L.brand || ($('[data-jbrand]', tr) || { value: '' }).value.trim(), moq: L.moq, net: L.r.net, received: 0, rejected: 0 }; });
   // an item with no approved price: ask for it now (Super Admin approves), the PO waits
   const noPrice = Array.from(new Set(lines.filter(l => !(num(l.rate) > 0)).map(l => l.material)));
   if (noPrice.length) { prDialog(noPrice, 'PO', ven, 'Price missing'); $('#npMsg').innerHTML = '<span class="late-txt">' + esc(noPrice.join(', ')) + ': no approved price — the PO can be saved once the Super Admin approves it.</span>'; return; }

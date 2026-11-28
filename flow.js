@@ -47,7 +47,7 @@ function poDocHtml(p) {
   const rows = (p.lines || []).map((l, i) => {
     const m = matBy(l.material) || {}; const a = num(l.qty) * num(l.rate); const g = a * num(l.gst) / 100; amt += a; gst += g; tot += a + g;
     const ph = m.photo || '';
-    return '<tr><td class="c">' + (i + 1) + '</td><td class="c">' + (ph ? '<img src="' + e(ph) + '" onerror="this.remove()">' : '') + '</td><td>' + e(l.material) + '</td><td class="c">' + e(m.hsn || '') + '</td><td>' + e(m.name || l.material) + '</td><td class="c">' + e(l.remark || 'NA') + '</td>' +
+    return '<tr><td class="c">' + (i + 1) + '</td><td class="c">' + (ph ? '<img src="' + e(ph) + '" onerror="this.remove()">' : '') + '</td><td>' + e(l.material) + '</td><td class="c">' + e(m.hsn || '') + '</td><td>' + e(m.name || l.material) + (l.jc_no ? '<div style="font-size:10px;color:#555">Job card ' + e(l.jc_no) + (l.article ? ' · ' + e(l.article) : '') + '</div>' : '') + '</td><td class="c">' + e(l.remark || 'NA') + '</td>' +
       '<td class="r">' + amt2(l.qty) + '</td><td class="c">' + e(l.uom || m.uom || '') + '</td><td class="r">' + amt2(l.rate) + '</td><td class="r">' + amt2(a) + '</td><td class="r">' + num(l.gst) + '% | ' + amt2(g) + '</td><td class="r">' + amt2(a + g) + '</td></tr>';
   }).join('');
   const terms = String(s.po_terms || PO_TERMS_DEFAULT).split('\n').map(x => x.trim()).filter(Boolean);
