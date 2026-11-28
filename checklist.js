@@ -141,6 +141,11 @@ function clDoneBtn(t, ymd) { return clCanMark(t) ? '<button class="btn sm primar
 ACTIONS['cl-done'] = el => {
   const t = Store.get('checklist', el.dataset.id); if (!t) return;
   if (!clCanMark(t)) { flash('Only ' + esc(t.doer) + ' can mark this done.', 'err'); return; }
+  // a packaging-PPT task is finished by uploading the PPT itself, not by attaching a file to the task
+  if (t.src === 'ppt' && t.brand && t.article && typeof VIEWS.packaging !== 'undefined') {
+    PPT_UI.form = { brand: t.brand, article: t.article }; go('packaging'); setTimeout(() => VIEWS.packaging.render(), 50);
+    flash('Upload the PPT for <b>' + esc(t.article) + '</b> here — the task closes itself. If another article\'s PPT is the same, use <b>Map</b> on that PPT instead.'); return;
+  }
   const ymd = el.dataset.d || todayYmd();
   const isDN = t.kind === 'debit_note' || /^Debit Note/i.test(t.title || ''); let dnPdf = '';
   // a task asks for exactly what was set on it and nothing else. Attachment and remark boxes are

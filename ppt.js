@@ -68,7 +68,9 @@ async function pptUpload(brand, article, file) {
 }
 async function pptLink(path, secs) {
   if (!CLOUD || !SB) return '';
-  const { data, error } = await SB.storage.from('article-ppt').createSignedUrl(path, secs || 180);
+  // "bucket:path" names another bucket (a PPT taken from the file attached on its upload task)
+  let bucket = 'article-ppt'; const m = /^([a-z0-9-]+):(.+)$/.exec(String(path || '')); if (m) { bucket = m[1]; path = m[2]; }
+  const { data, error } = await SB.storage.from(bucket).createSignedUrl(path, secs || 180);
   if (error) { flash('Could not open the PPT: ' + esc(error.message), 'err'); return ''; }
   return data.signedUrl;
 }
