@@ -153,7 +153,7 @@ function mtBookAll() {
 const mtChip = r => '<span class="st ' + (r.tone === 'bad' ? 'Late' : r.tone === 'warn' ? 'Pending' : 'Done') + '">' + esc(r.st) + '</span>';
 function mtJcTable(c) {
   const rows = c.rows.slice().sort((a, b) => ({ bad: 0, warn: 1, ok: 2 })[a.tone] - ({ bad: 0, warn: 1, ok: 2 })[b.tone] || String(a.material).localeCompare(String(b.material)));
-  return '<div class="tbl-wrap"><table class="nofilter"><tr><th>Item</th><th>Name</th><th>UOM</th><th class="num">Required</th><th class="num">Reserved</th><th class="num">In kit</th><th>PO</th><th class="num">Received</th><th class="num">Issued</th><th class="num">Short</th><th class="num">Transit</th><th class="num">To order</th><th>Status</th></tr>' +
+  return '<div class="tbl-wrap"><table class="nofilter"><tr><th>Item</th><th>Name</th><th>UOM</th><th class="num">Required</th><th class="num">Reserved</th><th class="num">In kit</th><th>PO Raised</th><th class="num">Received</th><th class="num">Issued</th><th class="num">Short</th><th class="num">Transit</th><th class="num">To order</th><th>Status</th></tr>' +
     (rows.length ? rows.map(r => { const m = matBy(r.material) || {};
       return '<tr><td><b>' + esc(r.material) + '</b></td><td>' + esc(m.name || '') + '</td><td>' + esc(r.uom) + '</td><td class="num">' + qtyFmt(r.required) + '</td>' +
         '<td class="num">' + qtyFmt(r.resEff) + (r.borrowed > 1e-9 ? '<div class="small late-txt">' + qtyFmt(r.borrowed) + ' went to another job card</div>' : '') + '</td><td class="num">' + (r.kit > 1e-9 ? qtyFmt(r.kit) : '') + '</td>' +
