@@ -162,9 +162,11 @@ function roundUom(uom, q) { q = num(q); if (q <= 0) return 0; return UOM_WHOLE.i
 // received on a PO line = what its GRNs record (accepted + rejected). The copy on the line is only a cache,
 // so a stale save of the PO can never lose a receipt.
 function grnLinesOf(p, l, k) { return Store.all('grns').filter(g => g.po_id === p.id || (!g.po_id && norm(g.po_no) === norm(p.no))).flatMap(g => (g.lines || []).filter(x => x.po_line != null && k != null ? x.po_line === k : norm(x.material) === norm(l.material))); }
-function grnRecvOf(p, l, k) { return r3(grnLinesOf(p, l, k).reduce((a, x) => a + num(x.accepted) + num(x.rejected), 0)); }
+// received = accepted only. Rejected material goes back to the vendor, so the PO stays open for its replacement
+function grnRecvOf(p, l, k) { return r3(grnLinesOf(p, l, k).reduce((a, x) => a + num(x.accepted), 0)); }
 function grnAcceptedOf(p, l, k) { return r3(grnLinesOf(p, l, k).reduce((a, x) => a + num(x.accepted), 0)); }
-function recvOf(p, l, k) { return Math.max(r3(l.received), grnRecvOf(p, l, k)); }
+// a line with GRNs is read from its GRNs; the stored figure only counts where no GRN exists (opening data)
+function recvOf(p, l, k) { return grnLinesOf(p, l, k).length ? grnRecvOf(p, l, k) : r3(l.received); }
 // pending on a line: nothing once it is short-closed; tiny decimal leftovers count as 0
 function poLinePending(p, l, k) { if (!l || l.closed) return 0; const v = r3(num(l.qty) - recvOf(p, l, k)); return v > 1e-6 ? v : 0; }
 function poPending(po) { return (po.lines || []).reduce((s, l, k) => s + poLinePending(po, l, k), 0); }

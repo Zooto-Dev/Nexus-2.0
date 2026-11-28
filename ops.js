@@ -331,7 +331,8 @@ function fieldOptions(key) { const p = activeProcess(); const f = p && p.spec.fi
 function lineSel(f, opts, val) { return '<select data-f="' + f + '"><option value=""></option>' + opts.map(o => '<option' + (norm(o) === norm(val || '') ? ' selected' : '') + '>' + esc(o) + '</option>').join('') + '</select>'; }
 VIEWS.punch = {
   mod: 'orders', edit: true, render(param) {
-    if (param) { const o = Store.get('orders', param); if (!o) return go('orders'); if (dispatchedQty(o).total > 0) { flash('Dispatched orders cannot be edited.', 'err'); return go('order', o.id); } if (!PUNCH || PUNCH.id !== o.id) newPunch(o); }
+    if (param) { const o = Store.get('orders', param); if (!o) return go('orders'); if (dispatchedQty(o).total > 0) { flash('Dispatched orders cannot be edited.', 'err'); return go('order', o.id); }
+      const jcs = Store.all('job_cards').filter(j => norm(j.order_no || '') === norm(o.no) && j.status !== 'Cancelled'); if (jcs.length) { flash('This order has job card ' + esc(jcs.map(j => j.no).join(', ')) + ' — it cannot be edited now. Cancel the job card and make a new one for a change.', 'err'); return go('order', o.id); } if (!PUNCH || PUNCH.id !== o.id) newPunch(o); }
     else if (!PUNCH || PUNCH.id) newPunch();
     const proc = activeProcess();
     if (!proc) { setMain('<div class="panel">No active FMS flow. Activate one in FMS Builder first.</div>'); return; }
@@ -494,6 +495,7 @@ ACTIONS['punch-save'] = async () => {
   const cu = Store.all('customers').find(c => norm(c.name) === norm(P.brand));
   if (!cu) { $('#pMsg').innerHTML = '<span class="late-txt">Brand is not in the list — add it in Merchant → Brands first.</span>'; return; }
   lines.forEach(l => { if (l.article && !Store.all('items').some(x => norm(x.code) === norm(l.article))) Store.put('items', { id: uid(), code: l.article, name: l.style, group: P.category, gender: l.gender }); });
+  if (P.id) { const o0 = Store.get('orders', P.id); const jl = o0 ? Store.all('job_cards').filter(j => norm(j.order_no || '') === norm(o0.no) && j.status !== 'Cancelled') : []; if (jl.length) { flash('This order has job card ' + esc(jl.map(j => j.no).join(', ')) + ' — it cannot be edited.', 'err'); return; } }
   const o = P.id ? Store.get('orders', P.id) : { id: uid(), no: '', process_id: activeProcess().id, actuals: {}, done_by: {}, created_at: nowIso(), created_by: ME.name };
   Object.assign(o, { order_date: P.order_date, customer_id: cu.id, customer_name: cu.name, brand: cu.name, buyer_po: P.buyer_po, po_expiry_date: P.po_expiry_date, tooling_no: P.tooling_no, channel: P.channel, category: P.category, priority: P.priority, remarks: P.remarks, extra: P.extra, lines: lines.map(l => ({ article: l.article, style: l.style, colour: l.colour, gender: l.gender, size_run: l.size_run, size: l.size_run, sizes: (l.sizes || []).filter(x => num(x.qty) > 0).map(x => ({ size: x.size, qty: num(x.qty) })), qty: lineQty(l), pack: l.pack, jc_no: l.jc_no || '' })) });
   // Auto-assign a Job Card No (ZF-xxxx) to each article line that lacks one.

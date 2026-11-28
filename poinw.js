@@ -22,7 +22,10 @@ function poInwSync(p) {
   }
   const pend = poPending(p);
   if (t) {
-    if (done) return;
+    if (done) {   // closed earlier, but the PO is pending again (a rejection, a short close undone): open it back up
+      if (pend > 1e-9) { delete t.done[clDoneKey(t, t.start)]; t.done_at = ''; if (p.expected) { t.start = p.expected; t.due = p.expected; } clPin(t); Store.put('checklist', t); audit('po.inw_task', p.no, 'reopened — ' + qtyFmt(pend) + ' pending again'); renderNav(); }
+      return;
+    }
     if (pend <= 1e-9) {   // everything received: the task closes itself
       t.done = t.done || {}; t.done[clDoneKey(t, t.start)] = { at: nowIso(), by: 'System', remark: 'All material received', photos: 0, files: 0, log: '' };
       t.done_at = nowIso(); clPin(t); Store.put('checklist', t);
@@ -39,7 +42,7 @@ function poInwSync(p) {
   renderNav();
 }
 // run it for every PO that has a task, plus this one (used after a GRN)
-function poInwSyncAll() { Store.all('purchase_orders').forEach(p => { if (poInwTaskOf(p.no)) poInwSync(p); }); }
+function poInwSyncAll() { Store.all('purchase_orders').forEach(p => { if (poInwTaskOf(p.no) || (!p.cancelled && p.approval === 'Approved' && p.expected && poPending(p) > 1e-9)) poInwSync(p); }); }
 
 /* ---------- what is still pending on that PO, from the task itself ---------- */
 function taskExtraHtml(taskId) {
