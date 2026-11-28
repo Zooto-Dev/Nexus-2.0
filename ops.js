@@ -382,7 +382,7 @@ VIEWS.punch = {
       }).join('') +
       '<tr><td></td><td colspan="4"><a data-act="punch-add">+ Add article</a></td><td></td><td class="num"><b id="pTq"></b></td><td></td><td></td><td></td></tr></table>';
     h += '<div class="toolbar" style="margin:12px 0 0"><button class="btn primary" data-save data-act="punch-save">' + (P.id ? 'Save changes' : 'Save order') + '</button>' +
-      (P.id ? '<a href="#/order/' + esc(P.id) + '" data-act="punch-cancel">Cancel</a>' : '<a data-act="punch-clear">Clear</a>') + '<span id="pMsg" class="small"></span></div></div>';
+      (P.id ? '<a href="#/order/' + esc(P.id) + '" data-act="punch-cancel">Cancel</a>' : '<button class="btn" data-act="punch-draft">' + (P.draft_no ? 'Update draft ' + esc(P.draft_no) : 'Keep as draft') + '</button><a data-act="punch-clear">Clear</a>') + '<span id="pMsg" class="small"></span></div></div>' + (P.id || typeof draftsHtml !== 'function' ? '' : draftsHtml());
     const m = setMain(h);
     punchTotals();
     m.addEventListener('input', e => {
@@ -520,6 +520,7 @@ async function punchSaveNow() {
   o.lines.forEach(l => { if (!l.jc_no) { jcSeq += 1; l.jc_no = 'ZF-' + String(jcSeq).padStart(4, '0'); } });
   o.no = o.lines[0].jc_no;   // the Job Card No is the order number
   Store.put('orders', o);
+  if (!P.id && typeof draftConsumed === 'function') draftConsumed(P);
   if (!P.id) await jcUniqueCheck(o);
   audit(P.id ? 'order.edit' : 'order.create', o.no, cu.name + ' · PO ' + P.buyer_po + ' · ' + qtyFmt(orderTotals(o).qty) + ' qty');
   if (P.id) { PUNCH = null; flash('Saved ' + esc(o.no) + '.'); go('order', o.id); return; }
