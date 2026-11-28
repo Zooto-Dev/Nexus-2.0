@@ -83,11 +83,11 @@ VIEWS.priceapproval = {
           '<td>' + (x.status === 'Approved' ? '<span class="ok-txt">Approved</span>' : x.status === 'Rejected' ? '<span class="late-txt">Rejected</span>' : '<span class="pend-txt">Pending</span>') + '</td><td>' + esc(x.approved_by || '') + ((x.boms || []).length ? '<div class="small ok-txt">COGS: ' + esc(x.boms.join(', ')) + '</div>' : '') + (x.approved_at ? '<div class="small muted">' + fmtDT(x.approved_at) + '</div>' : '') + '</td>' +
           '<td class="nowrap">' + (sa && x.status === 'Pending' ? '<button class="btn sm primary" data-act="pr-ok" data-id="' + esc(x.id) + '">Approve</button><button class="btn sm" data-act="pr-no" data-id="' + esc(x.id) + '" data-confirm="Reject ' + esc(x.no) + '?">Reject</button>' : '') + '</td></tr>'; }).join('') + '</table></div>');
     onSeg(e => { if (e.target.dataset.seg === 'prst') { PRICE_UI.st = e.detail; VIEWS.priceapproval.render(); } });
-    // tick the prices to approve together; the buttons show how many are ticked
-    const m = $('#main'); const sync = () => { const n = $$('[data-prck]:checked', m).length; const b1 = $('[data-act="pr-sel"]', m), b2 = $('[data-act="pr-sel-no"]', m); if (b1) { b1.disabled = !n; b1.textContent = 'Approve selected (' + n + ')'; } if (b2) b2.disabled = !n; };
-    m.addEventListener('change', e => { if (e.target.id === 'prAllCk') { $$('[data-prck]', m).forEach(c => { c.checked = e.target.checked; }); sync(); } else if (e.target.dataset && e.target.dataset.prck !== undefined) sync(); });
   }
 };
+// tick the prices to approve together, on the Price Approval screen or the Home approvals card; the buttons show how many are ticked
+function prSelSync() { const n = $$('[data-prck]:checked').length; $$('[data-act="pr-sel"]').forEach(b => { b.disabled = !n; b.textContent = 'Approve selected (' + n + ')'; }); $$('[data-act="pr-sel-no"]').forEach(b => { b.disabled = !n; }); }
+document.addEventListener('change', e => { if (e.target.id === 'prAllCk') { $$('[data-prck]').forEach(c => { c.checked = e.target.checked; }); prSelSync(); } else if (e.target.dataset && e.target.dataset.prck !== undefined) prSelSync(); });
 const prSelected = () => $$('[data-prck]:checked').map(c => Store.get('price_requests', c.dataset.prck)).filter(x => x && x.status === 'Pending');
 ACTIONS['pr-sel'] = () => { const p = prSelected(); if (!p.length) return; p.forEach(x => prDecide(x, true)); const nb = new Set(p.flatMap(x => x.boms || [])); flash(p.length + ' price(s) approved' + (nb.size ? ' · COGS updated on ' + nb.size + ' BOM(s)' : '') + '.'); route(); };
 ACTIONS['pr-sel-no'] = () => { const p = prSelected(); if (!p.length) return; reasonDialog('Reject ' + p.length + ' price request(s)', 'Reject', why => { p.forEach(x => { x.reject_reason = why; prDecide(x, false); }); flash(p.length + ' price(s) rejected.'); route(); return ''; }, true); };
