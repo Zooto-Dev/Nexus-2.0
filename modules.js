@@ -1114,14 +1114,38 @@ ACTIONS['jc-save'] = () => {
     status: 'Open', corrections: [], by: ME.name, at: nowIso()
   });
   audit('jc.create', j.no, o.no + ' · ' + l.article + ' × ' + act + ' · ' + lines.length + ' materials');
+  const bomNote = jcSyncBom(j, o, l);
   // WhatsApp: job card PDF to the merchandiser, reservation to Store, short items to Purchase
   const shortTxt = lines.map(x => ({ x, s: num(x.required) - stockOf(x.material) })).filter(y => y.s > 1e-9).map(y => ((matBy(y.x.material) || {}).name || y.x.material) + ' short ' + qtyFmt(y.s) + ' ' + (y.x.uom || '')).join('; ');
   waSend('jc_created', j.id, false, { short: shortTxt });
   pptJcMail(j);   // the job card PDF and the packaging PPT go to the brand merchant together
   JC_UI.form = false; JCF = null;
-  flash(esc(j.no) + ' created — material requirement generated (' + lines.length + ' items, extra +2%). Swatch approval pending.');
+  flash(esc(j.no) + ' created — material requirement generated (' + lines.length + ' items, extra +2%). Swatch approval pending.' + (bomNote ? ' ' + bomNote : ''));
   VIEWS.jobcards.render();
 };
+/* An item changed or added on the job card goes onto the article's approved BOM at once, so the next job card
+   and every cost takes the real item. A line is matched by Section + Category; a swap changes its material,
+   a new row is added; nothing is removed from the BOM. Every change is written in the BOM's change_log and the audit. */
+function jcSyncBom(j, o, l) {
+  const b = jcBomFor(l.article, l.colour, o.customer_name || o.brand || '', l.style || ''); if (!b) return '';
+  const key = x => norm((x.section || '') + '|' + (x.category || ''));
+  const changes = []; const B = b.lines || [];
+  (j.lines || []).forEach(x => {
+    if (B.some(y => norm(y.material) === norm(x.material))) return;                       // the item is on the BOM already
+    const m = matBy(x.material) || {};
+    // a swapped line: same section + category (the item's group when a category is missing), its own item not on the job card
+    const cand = B.filter(y => !(j.lines || []).some(z => norm(z.material) === norm(y.material)));
+    const grp = y => norm(y.category || (matBy(y.material) || {}).group || '');
+    const row = cand.find(y => key(y) === key(x)) || cand.find(y => norm(y.section || '') === norm(x.section || '') && grp(y) === norm(x.category || m.group || ''));
+    if (row) { changes.push({ at: nowIso(), by: ME.name, jc: j.no, section: x.section || '', from: row.material, to: x.material, what: 'item changed on the job card' }); row.material = x.material; row.uom = x.uom || m.uom || row.uom; row.price = num(m.price); if (x.supplier) row.supplier = x.supplier; }
+    else { changes.push({ at: nowIso(), by: ME.name, jc: j.no, section: x.section || '', from: '', to: x.material, what: 'item added on the job card' }); B.push({ process: x.process || '', section: x.section || '', category: x.category || m.group || '', material: x.material, uom: x.uom || m.uom || '', qty: num(x.norms), price: num(m.price), supplier: x.supplier || '', remark: '' }); }
+  });
+  if (!changes.length) return '';
+  b.lines = B; b.cogs = r3(B.reduce((s, y) => s + num(y.qty) * num(y.price), 0)); b.change_log = (b.change_log || []).concat(changes); Store.put('boms', b);
+  const nm = c => ((matBy(c) || {}).name || c);
+  audit('bom.item_change', b.article + ' v' + b.version, changes.map(c => (c.section ? c.section + ': ' : '') + (c.from ? nm(c.from) + ' (' + c.from + ') → ' : '+ ') + nm(c.to) + ' (' + c.to + ')').join('; ') + ' · from job card ' + j.no);
+  return 'BOM v' + b.version + ' updated: ' + changes.length + ' item(s) changed as on this job card.';
+}
 ACTIONS['jc-close'] = el => { const j = Store.get('job_cards', el.dataset.id); if ((j.corrections || []).some(c => !c.resolved)) { flash('Resolve open corrections first.', 'err'); return; } j.status = 'Closed'; Store.put('job_cards', j); audit('jc.close', j.no, ''); VIEWS.jobcards.render(); };
 
 // Job Card Correction: change a saved job card — add / remove an item, change norms, supplier, process, section,
