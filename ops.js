@@ -43,9 +43,9 @@ function personTasks(doer) {
     if (o.priority === 'Cancelled') return;
     const r = resolveOrder(o); if (!r) return;
     r.order.forEach(id => {
-      const s = r.steps[id]; if (!s || norm(s.doer) !== norm(doer)) return;
+      const s = r.steps[id]; if (!s || norm(s.doer) !== norm(doer) || !stepShown(s)) return;
       const def = r.spec.steps.find(x => x.id === id);
-      const base = { task: s.name, ref: o.no, party: o.customer_name || o.brand || '', what: o.kind === 'jc' ? (o.line.article || '') + (o.line.colour ? ' · ' + o.line.colour : '') : (o.article || ''), src: o.kind === 'sample' ? 'Sample' : 'FMS', planned: s.planned || null, photos: fmsPhotos(o) };
+      const base = { task: s.name + (s.per && s.per !== 'jc' ? ' (per ' + s.per + ')' : ''), ref: s.per === 'order' ? (o.order_no || o.no) : o.no, party: o.customer_name || o.brand || '', what: o.kind === 'jc' ? (o.line.article || '') + (o.line.colour ? ' · ' + o.line.colour : '') : (o.article || ''), src: o.kind === 'sample' ? 'Sample' : 'FMS', planned: s.planned || null, photos: fmsPhotos(o) };
       if (s.status === 'Pending' || s.status === 'Late') out.push(Object.assign(base, { status: s.status === 'Late' ? 'Delayed' : openSt(s.planned), delay: s.status === 'Late' ? s.delayMinutes : 0, btn: stepDoneBtn(o, s, def, r.spec) }));
       else if (s.actual && new Date(s.actual) >= since) out.push(Object.assign(base, { status: 'Completed', done: new Date(s.actual), delay: s.delayMinutes || 0 }));
     });
@@ -259,8 +259,8 @@ const TASK_UI = { who: 'mine', when: 'open', q: '' };
 function taskTable(list, compact) {
   if (!list.length) return '<div class="tbl-wrap"><div class="empty">No open tasks</div></div>';
   return '<div class="tbl-wrap"><table class="bomflat"><tr><th>Job card</th><th>Brand</th><th>Article</th><th>Priority</th><th>Step</th>' + (compact ? '' : '<th>Doer</th>') + '<th>Planned</th><th>Status</th><th class="num">Delay</th>' + (compact ? '' : '<th>Note</th>') + '<th></th></tr>' +
-    list.map(x => '<tr><td><a href="#/order/' + esc(x.order.id) + '">' + esc(x.order.no) + '</a></td><td>' + esc(x.order.customer_name) + '</td><td>' + esc(x.order.line ? x.order.line.article + (x.order.line.colour ? ' · ' + x.order.line.colour : '') : (x.order.article || '')) + '</td><td>' + (x.order.priority === 'Urgent' ? '<span class="late-txt">Urgent</span>' : esc(x.order.priority || '')) + '</td>' +
-      '<td>' + esc(x.step.name) + '</td>' + (compact ? '' : '<td>' + esc(x.step.doer || '') + '</td>') +
+    list.map(x => '<tr><td><a href="#/order/' + esc(x.order.id) + '">' + esc(x.step.per === 'order' ? (x.order.order_no || x.order.no) : x.order.no) + '</a></td><td>' + esc(x.order.customer_name) + '</td><td>' + esc(x.order.line ? x.order.line.article + (x.order.line.colour ? ' · ' + x.order.line.colour : '') : (x.order.article || '')) + '</td><td>' + (x.order.priority === 'Urgent' ? '<span class="late-txt">Urgent</span>' : esc(x.order.priority || '')) + '</td>' +
+      '<td>' + esc(x.step.name) + (x.step.per && x.step.per !== 'jc' ? ' <span class="muted small">per ' + x.step.per + '</span>' : '') + '</td>' + (compact ? '' : '<td>' + esc(x.step.doer || '') + '</td>') +
       '<td class="nowrap">' + fmtDT(x.step.planned) + '</td><td>' + stHtml(x.step.status) + '</td><td class="num late-txt">' + fmtDelay(x.step.delayMinutes) + '</td>' +
       (compact ? '' : '<td><input data-note placeholder="optional" style="min-width:120px"></td>') + '<td class="right">' + stepDoneBtn(x.order, x.step, x.def, x.spec) + '</td></tr>').join('') + '</table></div>';
 }
@@ -587,7 +587,7 @@ VIEWS.order = {
     let h = '<div class="toolbar"><h1 style="margin:0">' + esc(o.no) + ' · ' + esc(o.customer_name) + '</h1>' + stHtml(st.label).replace('st ' + stCls(st.label), 'st ' + st.cls) + '<span class="grow"></span>' +
       (can('orders', 'edit') && !d.total ? '<a class="btn" href="#/punch/' + esc(o.id) + '">Edit</a>' : '') + '<button class="btn" data-act="print">Print</button></div>';
     // where the order stands right now: every step that is open (several can run side by side), most late first
-    const openSteps = r && st.open ? (r.insts || [{ inst: o, r }]).flatMap(x => x.r.order.map(sid => Object.assign({}, x.r.steps[sid], { jc: (o.lines || []).length > 1 ? x.inst.no : '' }))).filter(s => s.status === 'Pending' || s.status === 'Late').sort((a, b) => (b.status === 'Late') - (a.status === 'Late') || (b.delayMinutes || 0) - (a.delayMinutes || 0) || a.planned - b.planned) : [];
+    const openSteps = r && st.open ? (r.insts || [{ inst: o, r }]).flatMap(x => x.r.order.map(sid => Object.assign({}, x.r.steps[sid], { jc: (o.lines || []).length > 1 ? x.inst.no : '' }))).filter(s => (s.status === 'Pending' || s.status === 'Late') && stepShown(s)).sort((a, b) => (b.status === 'Late') - (a.status === 'Late') || (b.delayMinutes || 0) - (a.delayMinutes || 0) || a.planned - b.planned) : [];
     if (openSteps.length) h += '<div class="panel ord-now"><b>Current status</b> · ' + openSteps.length + ' step(s) open<div class="ord-steps">' +
       openSteps.map(s => '<span class="ord-step ' + (s.status === 'Late' ? 'late' : '') + '"><b>' + esc((s.jc ? s.jc + ' · ' : '') + s.name) + '</b> · ' + esc(s.doer || '') + ' · ' + fmtDT(s.planned) + (s.status === 'Late' ? ' · <span class="late-txt">Late ' + fmtDelay(s.delayMinutes) + '</span>' : ' · <span class="pend-txt">Pending</span>') + '</span>').join('') + '</div></div>';
     if (can('orders', 'edit') && st.label !== 'Dispatched') h += '<div class="toolbar noprint"><span class="muted small">Priority</span>' + seg('opri', [{ v: '', l: 'Normal' }, { v: 'Urgent', l: 'Urgent' }, { v: 'On Hold', l: 'On Hold' }, { v: 'Cancelled', l: 'Cancel order' }], o.priority || '') + '</div>';
@@ -615,7 +615,8 @@ VIEWS.order = {
             (s.status === 'Done' && !isDispatchStep(def, ri.spec) && (can('tracker', 'edit')) ? '<button class="btn sm ghost" data-act="undo-step" data-o="' + esc(inst.id) + '" data-s="' + esc(sid) + '" data-confirm="Undo?">Undo</button>' : '');
           const note = (inst.notes || {})[sid]; const by = (inst.done_by || {})[sid];
           const pf = (inst.proof || {})[sid] ? Store.get('task_proof', (inst.proof || {})[sid]) : null;
-          return '<tr class="' + (cur && cur.id === sid ? 'cur' : '') + '"><td>' + esc(s.name) + '</td><td>' + esc(s.doer || '') + '</td><td>' + (by && by !== 'seed' ? esc(by) : '') + '</td><td>' + esc(note || '') + (pf ? '<div class="small">' + proofHtml(pf) + (pf.date ? ' · ' + esc((def && def.need && def.need.date_label) || 'Date') + ' ' + fmtD(pf.date) : '') + '</div>' : '') + '</td><td class="nowrap">' + fmtDT(s.planned) + '</td><td class="nowrap">' + fmtDT(s.actual) + '</td><td>' + stHtml(s.status) + '</td><td class="num late-txt">' + fmtDelay(s.delayMinutes) + '</td><td class="right">' + act + '</td></tr>';
+          const owner = s.per && s.per !== 'jc' && !s.primary ? ((r.insts || []).map(x => x.inst).find(x => s.per === 'order' ? x.ordFirst : (x.artFirst && norm(x.line.article || '') === norm(l.article || ''))) || {}).no || '' : '';
+          return '<tr class="' + (cur && cur.id === sid ? 'cur' : '') + (owner ? ' muted' : '') + '"><td>' + esc(s.name) + (s.per && s.per !== 'jc' ? ' <span class="muted small">per ' + s.per + (owner ? ' · on ' + esc(owner) : '') + '</span>' : '') + '</td><td>' + esc(s.doer || '') + '</td><td>' + (by && by !== 'seed' ? esc(by) : '') + '</td><td>' + esc(note || '') + (pf ? '<div class="small">' + proofHtml(pf) + (pf.date ? ' · ' + esc((def && def.need && def.need.date_label) || 'Date') + ' ' + fmtD(pf.date) : '') + '</div>' : '') + '</td><td class="nowrap">' + fmtDT(s.planned) + '</td><td class="nowrap">' + fmtDT(s.actual) + '</td><td>' + stHtml(s.status) + '</td><td class="num late-txt">' + fmtDelay(s.delayMinutes) + '</td><td class="right">' + act + '</td></tr>';
         }).join('') + '</table></div>';
     });
     // every job card of this order, and the BOM behind it, in the same format they print in

@@ -207,7 +207,7 @@ VIEWS.merchantdash = {
       const r = resolveOrder(o); const st = orderState(o);
       const brand = o.customer_name || '—';
       if (r) r.order.forEach(id => {
-        const s = r.steps[id]; if (!s || !s.applies) return;
+        const s = r.steps[id]; if (!s || !s.applies || !stepShown(s)) return;
         if (s.actual && new Date(s.actual) >= since30) { doneN++; if (s.delayMinutes > 0) doneLate++; }
         const late = s.status === 'Late' || (s.actual && new Date(s.actual) >= since30 && s.delayMinutes > 0);
         if (!late) return;

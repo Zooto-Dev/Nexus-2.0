@@ -45,8 +45,8 @@ function allTasks(force) {
     const r = resolveOrder(o); if (!r) return;
     const label = o.kind === 'sample' ? 'Sample' : 'FMS';
     r.order.forEach(id => {
-      const s = r.steps[id]; if (!s || !['Pending', 'Late', 'Done'].includes(s.status)) return;
-      push({ key: 'fms|' + o.id + '|' + id, src: label, task: s.name, ref: o.no, party: o.customer_name || o.brand || '', doer: String(s.doer || (s.actual ? doerOfName((o.done_by || {})[id]) : '') || '').toUpperCase(), by: (o.done_by || {})[id] || '',
+      const s = r.steps[id]; if (!s || !['Pending', 'Late', 'Done'].includes(s.status) || !stepShown(s)) return;
+      push({ key: 'fms|' + o.id + '|' + id, src: label, task: s.name, ref: s.per === 'order' ? (o.order_no || o.no) : o.no, party: o.customer_name || o.brand || '', doer: String(s.doer || (s.actual ? doerOfName((o.done_by || {})[id]) : '') || '').toUpperCase(), by: (o.done_by || {})[id] || '',
         owner: String(s.doer || '').toUpperCase(), planned: s.planned ? new Date(s.planned) : null, actual: s.actual ? new Date(s.actual) : null, link: '#/order/' + o.id });
     });
   });

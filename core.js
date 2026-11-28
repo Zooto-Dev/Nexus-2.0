@@ -522,15 +522,27 @@ function orderFields(o) {
    Sample development records are their own instances as before. */
 const JC_SEP = '~';
 function jcKeyOf(o, i) { const l = (o.lines || [])[i] || {}; return l.jc_no || ('L' + (i + 1)); }
+/* A step runs once per JOB CARD by default. In the FMS Builder a step can instead run once per ARTICLE (all colours
+   of that article in the order share it — Tooling, Size Set, Norms) or once per ORDER. Shared steps keep their
+   actuals in a shared bag on the order: o.jc['A:<article>'] or o.jc['O']; the first job card of the group owns the task. */
+function jcStepPer(o) { const p = Store.get('processes', o.process_id); const m = {}; ((p && p.spec && p.spec.steps) || []).forEach(s => { m[s.id] = s.per === 'article' || s.per === 'order' ? s.per : 'jc'; }); return m; }
+const jcArtKey = l => 'A:' + norm((l || {}).article || '');
+const JC_BAG_FIELDS = ['actuals', 'done_by', 'notes', 'proof'];
 function jcInst(o, i) {
   const l = (o.lines || [])[i]; if (!l) return null;
-  const k = jcKeyOf(o, i);
+  const k = jcKeyOf(o, i); const per = jcStepPer(o); const J = o.jc || {};
   // demo data only: an order seeded with order-level actuals shows them on every line. Live orders never inherit.
-  const bag = (o.jc || {})[k] || (DEMO && o.actuals && Object.keys(o.actuals).length ? { actuals: o.actuals, done_by: o.done_by, notes: o.notes, proof: o.proof } : {});
-  return Object.assign({}, o, { id: o.id + JC_SEP + k, oid: o.id, kind: 'jc', jkey: k, li: i, no: k, order_no: o.no, line: l, lines: [l],
-    actuals: Object.assign({}, bag.actuals || {}), done_by: Object.assign({}, bag.done_by || {}), notes: Object.assign({}, bag.notes || {}), proof: Object.assign({}, bag.proof || {}),
-    extra: Object.assign({}, o.extra || {}, bag.extra || {}) });
+  const L = J[k] || (DEMO && o.actuals && Object.keys(o.actuals).length ? { actuals: o.actuals, done_by: o.done_by, notes: o.notes, proof: o.proof } : {});
+  const A = J[jcArtKey(l)] || {}, O = J['O'] || {};
+  const pick = (bag, scope) => { const out = {}; Object.entries(bag || {}).forEach(([id, v]) => { if ((per[id] || 'jc') === scope) out[id] = v; }); return out; };
+  const inst = Object.assign({}, o, { id: o.id + JC_SEP + k, oid: o.id, kind: 'jc', jkey: k, li: i, no: k, order_no: o.no, line: l, lines: [l],
+    artFirst: (o.lines || []).findIndex(x => norm(x.article || '') === norm(l.article || '')) === i, ordFirst: i === 0,
+    extra: Object.assign({}, o.extra || {}, A.extra || {}, L.extra || {}) });
+  JC_BAG_FIELDS.forEach(f => { inst[f] = Object.assign({}, pick(L[f], 'jc'), pick(A[f], 'article'), pick(O[f], 'order')); });
+  return inst;
 }
+// is this step's task shown on this job card? shared steps show on the first job card of their group only
+const stepShown = s => !s || !s.per || s.per === 'jc' || !!s.primary;
 function jcInsts(o) { return o && o.kind !== 'sample' && o.kind !== 'jc' ? (o.lines || []).map((_, i) => jcInst(o, i)) : (o && o.kind === 'jc' ? [o] : []); }
 function jcInstOf(jcNo) { const n = norm(jcNo || ''); if (!n) return null; for (const o of Store.all('orders')) { const i = (o.lines || []).findIndex(l => norm(l.jc_no || '') === n); if (i >= 0) return jcInst(o, i); } return null; }
 const fmsOrderId = o => o && o.oid ? o.oid : (o || {}).id;
@@ -543,8 +555,17 @@ function fmsGet(id) {
 function fmsPut(o) {
   if (o.kind === 'jc') {
     const p = Store.get('orders', o.oid); if (!p) return;
-    const pe = p.extra || {}; const ex = {}; Object.entries(o.extra || {}).forEach(([k, v]) => { if (pe[k] !== v) ex[k] = v; });
-    p.jc = p.jc || {}; p.jc[o.jkey] = { actuals: o.actuals || {}, done_by: o.done_by || {}, notes: o.notes || {}, proof: o.proof || {}, extra: ex };
+    const per = jcStepPer(p); const proc = Store.get('processes', p.process_id); const steps = (proc && proc.spec && proc.spec.steps) || [];
+    const capScope = {}; steps.forEach(s => { if (s.capture && s.capture.field) capScope[s.capture.field] = per[s.id] || 'jc'; });
+    const pe = p.extra || {}; const ex = { jc: {}, article: {}, order: {} };
+    Object.entries(o.extra || {}).forEach(([k, v]) => { if (pe[k] !== v) ex[capScope[k] || 'jc'][k] = v; });
+    const pick = (bag, scope) => { const out = {}; Object.entries(bag || {}).forEach(([id, v]) => { if ((per[id] || 'jc') === scope) out[id] = v; }); return out; };
+    p.jc = p.jc || {};
+    // the instance holds the whole state of every scope it belongs to, so each bag is rewritten from it
+    const write = (key, scope) => { const b = Object.assign({}, p.jc[key] || {}); JC_BAG_FIELDS.forEach(f => { b[f] = pick(o[f], scope); }); b.extra = Object.assign({}, scope === 'jc' ? {} : (b.extra || {}), ex[scope]); p.jc[key] = b; };
+    write(o.jkey, 'jc');
+    if (Object.values(per).some(v => v === 'article')) write(jcArtKey(o.line), 'article');
+    if (Object.values(per).some(v => v === 'order')) { Object.assign(p.extra = p.extra || {}, ex.order); ex.order = {}; write('O', 'order'); }
     Store.put('orders', p); return;
   }
   Store.put(o.kind === 'sample' ? 'samples' : 'orders', o);
@@ -596,7 +617,10 @@ function resolveOrder(o) {
   const proc = Store.get('processes', o.process_id); const spec = specOf(proc);
   let res = null;
   if (spec) {
-    try { res = FMSEngine.resolveInstance(spec, { fields: o.kind === 'sample' ? sampleFields(o) : orderFields(o), actuals: o.actuals || {} }, new Date()); res.spec = spec; }
+    try {
+      res = FMSEngine.resolveInstance(spec, { fields: o.kind === 'sample' ? sampleFields(o) : orderFields(o), actuals: o.actuals || {} }, new Date()); res.spec = spec;
+      if (o.kind === 'jc') Object.values(res.steps).forEach(s => { const d = spec.steps.find(x => x.id === s.id); s.per = d && (d.per === 'article' || d.per === 'order') ? d.per : 'jc'; s.primary = s.per === 'jc' || (s.per === 'article' ? !!o.artFirst : !!o.ordFirst); });
+    }
     catch (e) { console.error(e); }
   }
   RES_CACHE.set(key, res); return res;
@@ -624,7 +648,7 @@ function allOpenSteps() {
   fmsDocs().forEach(o => {
     if (o.priority === 'Cancelled') return;
     const r = resolveOrder(o); if (!r) return;
-    r.order.forEach(id => { const s = r.steps[id]; if (s.status === 'Pending' || s.status === 'Late') out.push({ order: o, step: s, def: r.spec.steps.find(x => x.id === id), spec: r.spec }); });
+    r.order.forEach(id => { const s = r.steps[id]; if ((s.status === 'Pending' || s.status === 'Late') && stepShown(s)) out.push({ order: o, step: s, def: r.spec.steps.find(x => x.id === id), spec: r.spec }); });
   });
   return out.sort((a, b) => a.step.planned - b.step.planned);
 }
@@ -668,7 +692,7 @@ function stepOpened(o, wasOpen, justDone) {
     const r2 = resolveOrder(fmsGet(o.id) || o); if (!r2) return;
     Object.keys(r2.steps).forEach(k => {
       const st = r2.steps[k];
-      if (k === justDone || wasOpen[k] || !(st.status === 'Pending' || st.status === 'Late') || !st.doer) return;
+      if (k === justDone || wasOpen[k] || !(st.status === 'Pending' || st.status === 'Late') || !st.doer || !stepShown(st)) return;
       if (norm(st.doer) === norm(ME.doer)) return;   // no notification for the person who just closed a step
       pushStep(o.kind === 'sample' ? 'samples' : 'orders', fmsOrderId(o), st.doer, st.name + (o.kind === 'jc' ? ' · ' + o.no : ''));
     });
@@ -705,7 +729,7 @@ function fmsAutoRun(force) {
     const r = resolveOrder(o); if (!r) return; let changed = false;
     r.spec.steps.forEach(def => {
       if (!def.status || def.status.type !== 'auto') return;
-      const s = r.steps[def.id]; if (!s || !(s.status === 'Pending' || s.status === 'Late')) return;
+      const s = r.steps[def.id]; if (!s || !(s.status === 'Pending' || s.status === 'Late') || !stepShown(s)) return;
       const rule = FMS_RULES.find(x => x.id === def.status.rule); if (!rule) return;
       const at = rule.check(o, def.status.field);
       if (at) { o.actuals = o.actuals || {}; o.actuals[def.id] = at; o.done_by = o.done_by || {}; o.done_by[def.id] = 'System'; changed = true; }

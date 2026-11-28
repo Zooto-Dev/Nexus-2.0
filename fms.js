@@ -381,6 +381,8 @@ function bldEditor() {
       (rule.param ? '<select data-k="stField"><option value="">— choose —</option>' + bldFields().map(f => '<option value="' + esc(f.key) + '"' + (f.key === stt.field ? ' selected' : '') + '>' + esc(f.label) + '</option>').join('') + '</select>' : '') + '</div>'
       : '<div class="qline"><span>On Done, ask for</span><select data-k="capField"><option value="">Nothing</option>' + capFields.map(f => '<option value="' + esc(f.key) + '"' + (s.capture && s.capture.field === f.key ? ' selected' : '') + '>' + esc(f.label) + '</option>').join('') + '</select></div>' +
       '<div class="qline"><span>Before Done, ask the doer for</span>' + needChips('bld', s.need) + '</div>') + '</div>';
+  const per = s.per === 'article' || s.per === 'order' ? s.per : 'jc';
+  h += '<div class="q"><div class="qh">' + (onDate ? '6' : '7') + '. Runs once per</div><select data-k="per"><option value="jc">Job card — every colour of every article</option><option value="article"' + (per === 'article' ? ' selected' : '') + '>Article — all colours of one article in the order share it</option><option value="order"' + (per === 'order' ? ' selected' : '') + '>Order — once for the whole order</option></select></div>';
   if (edit) h += '<div class="toolbar"><button class="btn sm" data-act="bld-move" data-d="-1">↑ Up</button><button class="btn sm" data-act="bld-move" data-d="1">↓ Down</button><span class="grow"></span><button class="btn sm danger" data-act="bld-del" data-confirm="Confirm delete">Delete step</button></div>';
   el.innerHTML = h;
   if (!edit) $$('input,select,textarea', el).forEach(x => { x.disabled = true; });
@@ -419,6 +421,7 @@ function bldCollect() {
   if (mode === 'one') delete cands[0].when;
   s.trigger = cands.length === 1 ? cands[0] : cands;
   if ($('[data-k="tatv"]', el)) { const tu = val('tatu'); s.tat = { value: num(val('tatv')), unit: val('tatUnit') || 'days' }; if (tu !== '' && tu != null) s.tat.urgent = num(tu); else if (tu == null && s.tat.urgent != null) delete s.tat.urgent; }
+  const pv = val('per'); if (pv === 'article' || pv === 'order') s.per = pv; else if (pv !== undefined) delete s.per;
   if (val('statusType') === 'auto') { s.status = { type: 'auto', rule: val('stRule') || (s.status && s.status.rule) || autoRuleFor(s) }; const sf = val('stField'); if (sf) s.status.field = sf; delete s.capture; }
   else { delete s.status; const cf = val('capField'); if (cf) s.capture = { field: cf }; else delete s.capture; if ($('.nd-bld')) { const nd = needRead('bld'); if (nd) s.need = nd; else delete s.need; } }
 }

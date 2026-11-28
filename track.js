@@ -152,7 +152,7 @@ function fmsDoneRows(since) {
   const out = [];
   fmsDocs().forEach(o => {
     const r = resolveOrder(o); if (!r) return;
-    r.order.forEach(id => { const s = r.steps[id]; if (!s.actual || new Date(s.actual) < since) return; out.push({ by: (o.done_by || {})[id] || '', late: (s.delayMinutes || 0) > 0, delay: s.delayMinutes || 0, what: s.name + ' · ' + o.no }); });
+    r.order.forEach(id => { const s = r.steps[id]; if (!s.actual || new Date(s.actual) < since || !stepShown(s)) return; out.push({ by: (o.done_by || {})[id] || '', late: (s.delayMinutes || 0) > 0, delay: s.delayMinutes || 0, what: s.name + ' · ' + o.no }); });
   });
   return out;
 }
