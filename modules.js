@@ -156,8 +156,8 @@ function netReqRows(vendor, excludePo) {
       // job cards: what the tracking engine says is still to order; requirements and min level: against what is left over
       const k = norm(r.material); const extra = r.jcs.filter(x => x.req).reduce((a2, x) => a2 + x.bal, 0);
       const leftover = Math.max(0, (MT.free[k] || 0) + (MT.poLeft[k] || 0));
-      r.net = r3(Math.max(0, toOrder[k] + Math.max(0, extra + r.min - leftover)));
-    } else r.net = r3(Math.max(0, r.demand + r.min - r.stock - r.openPo));
+      r.net = qWhole(Math.max(0, toOrder[k] + Math.max(0, extra + r.min - leftover)));
+    } else r.net = qWhole(Math.max(0, r.demand + r.min - r.stock - r.openPo));
     const sc = vendor ? src.find(x => norm(x.material) === norm(r.material) && norm(x.vendor) === norm(vendor)) : null;
     r.rate = num(m.price) || ''; r.moq = sc ? num(sc.moq) : 0;   // price only from the item (set via price approval)
     r.jcs.sort((a, b) => String(a.jc).localeCompare(String(b.jc)));
@@ -168,7 +168,9 @@ function netReqRows(vendor, excludePo) {
 const r3 = v => Math.round(num(v) * 1000) / 1000;
 // whole units for counted UOMs, 3 decimals for measured ones (always rounded UP so the need is covered)
 const UOM_WHOLE = ['PCS', 'PC', 'PIECE', 'PIECES', 'PAIR', 'PAIRS', 'PRS', 'NOS', 'NO', 'SET', 'SETS', 'BOX', 'BOXES', 'ROLL', 'ROLLS', 'SHEET', 'SHEETS', 'PKT', 'PACKET', 'BAG', 'BAGS', 'CTN', 'CARTON', 'DOZEN', 'DOZ', 'CONE', 'CONES'];
-function roundUom(uom, q) { q = num(q); if (q <= 0) return 0; return UOM_WHOLE.includes(String(uom || '').trim().toUpperCase()) ? Math.ceil(q - 1e-9) : Math.ceil(q * 1000 - 1e-6) / 1000; }
+// every quantity in the system is a whole number, rounded UP: requirement, PO, GRN. No decimals in any UOM.
+const qWhole = v => Math.max(0, Math.ceil(num(v) - 1e-9));
+function roundUom(uom, q) { return qWhole(q); }
 // received on a PO line = what its GRNs record (accepted + rejected). The copy on the line is only a cache,
 // so a stale save of the PO can never lose a receipt.
 function grnLinesOf(p, l, k) { return Store.all('grns').filter(g => g.po_id === p.id || (!g.po_id && norm(g.po_no) === norm(p.no))).flatMap(g => (g.lines || []).filter(x => x.po_line != null && k != null ? x.po_line === k : norm(x.material) === norm(l.material))); }
@@ -507,7 +509,7 @@ function poJcDraw() {
       '<td class="num">' + money(a2) + '</td><td class="num">' + money(g2) + '</td></tr>' +
       (PO_UI.moqOpen === L.r.material ? '<tr class="inline-form"><td colspan="14"><div class="row">' +
         '<span class="small">Net requirement <b>' + qtyFmt(L.r.net) + ' ' + esc(L.m.uom || '') + '</b></span>' +
-        '<label>MOQ (min order qty) *<input id="moqQty" type="number" min="0" step="any" value="' + esc((PO_UI.moq[L.r.material] || {}).qty || L.r.moq || '') + '"></label>' +
+        '<label>MOQ (min order qty) *<input id="moqQty" type="number" min="0" step="1" value="' + esc((PO_UI.moq[L.r.material] || {}).qty || L.r.moq || '') + '"></label>' +
         '<label style="flex:1">Reason *<input id="moqWhy" placeholder="Why more than the net requirement?" value="' + esc((PO_UI.moq[L.r.material] || {}).reason || '') + '"></label>' +
         '<button class="btn primary sm" data-act="po-moq-set" data-m="' + esc(L.r.material) + '">Apply MOQ</button>' +
         (PO_UI.moq[L.r.material] ? '<button class="btn sm" data-act="po-moq-clear" data-m="' + esc(L.r.material) + '">Remove MOQ</button>' : '') + '</div></td></tr>' : '');
@@ -529,7 +531,7 @@ document.addEventListener('input', e => {
 ACTIONS['po-moq'] = el => { PO_UI.moqOpen = PO_UI.moqOpen === el.dataset.m ? null : el.dataset.m; poJcDraw(); const i = $('#moqQty'); if (i) i.focus(); };
 ACTIONS['po-moq-set'] = el => {
   const r = (PO_UI.net || []).find(x => x.material === el.dataset.m); if (!r) return;
-  const q = num($('#moqQty').value); const why = $('#moqWhy').value.trim();
+  const q = qWhole($('#moqQty').value); const why = $('#moqWhy').value.trim();
   if (!why) { flash('Reason is required for an MOQ order.', 'err'); return; }
   if (q <= r.net + 1e-9) { flash('MOQ ' + qtyFmt(q) + ' is not above the net requirement ' + qtyFmt(r.net) + ' — no MOQ needed.', 'err'); return; }
   if (num(r.moq) > 0 && q > num(r.moq) + 1e-9) { flash('Vendor MOQ in Sourcing is ' + qtyFmt(r.moq) + ' — an MOQ order cannot be more than that.', 'err'); return; }
@@ -544,7 +546,7 @@ function poLineRow(l) {
     '<td><input data-np="brand" list="dlBrandPo" style="width:120px" value="' + esc(l.brand || '') + '"></td>' +
     '<td class="num" data-np-rate>' + (m.code ? poRateCell(m.code) : '') + '</td><td class="num" data-np-gst>' + esc(m.code ? (m.gst != null ? m.gst : '') : '') + '</td>' +
     '<td><input data-np="rem" style="width:120px" value="' + esc(l.remark || '') + '"></td>' +
-    '<td><input data-np="qty" type="number" min="0" step="any" class="right" style="width:80px" value="' + esc(l.qty || '') + '"></td><td class="num muted" data-np-amt>' + (a2 ? money(a2) : '0') + '</td><td class="num muted" data-np-tot>' + (a2 ? money(g2) : '0') + '</td><td><button class="btn ghost sm" data-act="po-line-del">\u00d7</button></td></tr>';
+    '<td><input data-np="qty" type="number" min="0" step="1" class="right" style="width:80px" value="' + esc(l.qty || '') + '"></td><td class="num muted" data-np-amt>' + (a2 ? money(a2) : '0') + '</td><td class="num muted" data-np-tot>' + (a2 ? money(g2) : '0') + '</td><td><button class="btn ghost sm" data-act="po-line-del">\u00d7</button></td></tr>';
 }
 function poRateCell(code) {
   const p = num((matBy(code) || {}).price); const q = typeof prPending === 'function' && prPending(code);
@@ -598,7 +600,7 @@ ACTIONS['po-save'] = async el => {
   { const vv = vendorBy(ven); if (vv && vendorMissing(vv).length) { vendorDialog(vv); return; } }
   const mode = PO_UI.editId ? 'manual' : 'jc';
   const lines = mode === 'manual'
-    ? $$('#npLines tr[data-mline]').map(tr => { const m = Store.all('materials').find(x => norm(x.name) === norm($('[data-np="mat"]', tr).value) || norm(x.code) === norm($('[data-np="mat"]', tr).value)); return m ? { material: m.code, uom: m.uom, qty: num($('[data-np="qty"]', tr).value), rate: matPrice(m.code), gst: num(m.gst), remark: $('[data-np="rem"]', tr).value.trim(), brand: $('[data-np="brand"]', tr).value.trim(), jc_no: '', received: 0, rejected: 0 } : null; }).filter(l => l && l.qty > 0)
+    ? $$('#npLines tr[data-mline]').map(tr => { const m = Store.all('materials').find(x => norm(x.name) === norm($('[data-np="mat"]', tr).value) || norm(x.code) === norm($('[data-np="mat"]', tr).value)); return m ? { material: m.code, uom: m.uom, qty: qWhole($('[data-np="qty"]', tr).value), rate: matPrice(m.code), gst: num(m.gst), remark: $('[data-np="rem"]', tr).value.trim(), brand: $('[data-np="brand"]', tr).value.trim(), jc_no: '', received: 0, rejected: 0 } : null; }).filter(l => l && l.qty > 0)
     : poJcLines().map(L => { const tr = $('#npLines tr[data-key="' + L.key + '"]'); return { material: L.r.material, uom: L.m.uom || '', qty: L.qty, rate: matPrice(L.r.material), gst: num(L.m.gst), remark: $('[data-jrem]', tr).value.trim(), jc_no: L.jc || '', article: L.article || '', colour: L.colour || '', brand: L.brand || ($('[data-jbrand]', tr) || { value: '' }).value.trim(), moq: L.moq, net: L.r.net, received: 0, rejected: 0 }; });
   // an item with no approved price: ask for it now (Super Admin approves), the PO waits
   const noPrice = Array.from(new Set(lines.filter(l => !(num(l.rate) > 0)).map(l => l.material)));
@@ -1107,7 +1109,7 @@ ACTIONS['jc-save'] = () => {
     const m = matBy($('[data-b="mat"]', tr).value); const n = num($('[data-b="norms"]', tr).value);
     const z = tr.dataset.size || '';
     const basis = z ? ((sizes.find(x => String(x.size) === String(z)) || {}).extra || 0) : ext;
-    return m && n > 0 ? { process: $('[data-b="process"]', tr).value.trim(), section: $('[data-b="section"]', tr).value.trim(), category: $('[data-b="category"]', tr).value.trim() || m.group || '', material: m.code, uom: m.uom, norms: n, size: z, required: Math.ceil(n * basis * 1000) / 1000, supplier: $('[data-b="supplier"]', tr).value.trim(), po_raised: 0 } : null;
+    return m && n > 0 ? { process: $('[data-b="process"]', tr).value.trim(), section: $('[data-b="section"]', tr).value.trim(), category: $('[data-b="category"]', tr).value.trim() || m.group || '', material: m.code, uom: m.uom, norms: n, size: z, required: qWhole(n * basis), supplier: $('[data-b="supplier"]', tr).value.trim(), po_raised: 0 } : null;
   }).filter(Boolean);
   const badNorm = $$('#jfBom tr[data-bomrow]').some(tr => matBy($('[data-b="mat"]', tr).value) && num($('[data-b="norms"]', tr).value) <= 0);
   if (badNorm) { $('#njMsg').innerHTML = '<span class="late-txt">Norms must be greater than 0 for every item.</span>'; return; }
@@ -1232,7 +1234,7 @@ ACTIONS['jcc-save'] = el => {
   const changes = [];
   const lbl = { process: 'Process', section: 'Section', category: 'Category', supplier: 'Supplier' };
   const lines = rows.map(r => {
-    const req = Math.ceil(r.norms * ext * 1000) / 1000;
+    const req = qWhole(r.norms * ext);
     const base = r.oi != null ? Object.assign({}, old[r.oi]) : { po_raised: 0 };
     const o = r.oi != null ? old[r.oi] : null;
     if (o && norm(o.material) !== norm(r.mat.code)) { changes.push('Item ' + o.material + ' → ' + r.mat.code); base.po_raised = 0; }

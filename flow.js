@@ -447,7 +447,7 @@ function inwEditDialog(i, title, okLabel, noteLabel, onSave) {
   d.innerHTML = '<div class="dlg hx-dlg"><div class="dlg-h">' + esc(title) + '</div><table class="jckv">' +
     '<tr><td class="k">' + esc(bt) + ' No *</td><td class="v"><input data-ie="bill_no" value="' + esc(i.bill_no || '') + '"></td><td class="k">' + esc(bt) + ' Date *</td><td class="v"><input data-ie="bill_date" type="date" value="' + esc(i.bill_date || '') + '"></td></tr>' +
     '<tr><td class="k">Remark</td><td class="v" colspan="3"><input data-ie="remark" value="' + esc(i.remark || '') + '"></td></tr>' +
-    (lines ? '' : '<tr><td class="k">' + esc(bt) + ' Qty *</td><td class="v"><input data-ie="qty" type="number" min="0" step="any" value="' + esc(i.qty) + '"></td><td></td><td></td></tr>') +
+    (lines ? '' : '<tr><td class="k">' + esc(bt) + ' Qty *</td><td class="v"><input data-ie="qty" type="number" min="0" step="1" value="' + esc(i.qty) + '"></td><td></td><td></td></tr>') +
     '<tr><td class="k">' + esc(noteLabel) + ' *</td><td class="v" colspan="3"><textarea data-ie="note" rows="2"></textarea></td></tr></table>' +
     (lines ? '<div class="tbl-wrap hx-wrap"><table class="nopage nofilter"><tr><th>Item Code</th><th>Item Name</th><th>UOM</th><th class="num">PO Qty</th><th class="num">' + esc(bt) + ' Qty *</th></tr>' +
       lines.map((x, n) => { const l = p.lines[x.po_line] || {}; return '<tr><td><b>' + esc(x.material) + '</b></td><td>' + esc((matBy(x.material) || {}).name || '') + '</td><td>' + esc(l.uom || '') + '</td><td class="num">' + qtyFmt(l.qty) + '</td><td><input data-iel="' + n + '" type="number" min="0" step="any" class="right" style="width:110px" value="' + esc(x.inv_qty) + '"></td></tr>'; }).join('') + '</table></div>' : '') +
@@ -487,7 +487,8 @@ ACTIONS['inw-save'] = () => {
       : !U.photo ? 'Attach the invoice photo.' : '';
   if (!err && !(num(F.qty) > 0)) err = U.bt + ' Qty is required.';
   if (!err && U.bt === 'Sample') err = !U.req ? 'Select who asked for the sample.' : !U.item ? 'Select which item the sample is of.' : '';
-  F.qty = r3(num(F.qty));
+  if (!err && num(F.qty) !== Math.floor(num(F.qty))) err = 'Qty must be a whole number — no decimals.';
+  F.qty = qWhole(F.qty);
   if (err) { $('#niMsg').innerHTML = '<span class="late-txt">' + esc(err) + '</span>'; return; }
   const dupe = sameBill(U.ven, billNo); if (dupe) { $('#niMsg').innerHTML = '<span class="late-txt">' + esc(sameBillMsg(dupe, billNo)) + '</span>'; return; }
   if (!smp && pendingInwardOf(U.po)) { $('#niMsg').innerHTML = '<span class="late-txt">' + esc(U.po) + ' already has a gate entry waiting for GRN.</span>'; return; }
@@ -734,7 +735,7 @@ function grnDialog(p, k, done) {
   const old = $('#grnDlg'); if (old) old.remove();
   const d = document.createElement('div'); d.id = 'grnDlg'; d.className = 'dlg-back';
   d.innerHTML = '<div class="dlg"><div class="dlg-h">' + esc(l.material) + ' — ' + esc(m.name || '') + '</div><table class="jckv"><tr><td class="k">PO Pending</td><td class="v">' + qtyFmt(pen) + ' ' + esc(l.uom || m.uom || '') + '</td></tr>' +
-    '<tr><td class="k">Invoice Qty *</td><td class="v"><input data-gd="inv" type="number" min="0" step="any"' + (il ? ' value="' + esc(il.inv_qty) + '" readonly' : '') + '></td></tr><tr><td class="k">Received Qty *</td><td class="v"><input data-gd="recv" type="number" min="0" step="any"></td></tr></table>' +
+    '<tr><td class="k">Invoice Qty *</td><td class="v"><input data-gd="inv" type="number" min="0" step="1"' + (il ? ' value="' + esc(il.inv_qty) + '" readonly' : '') + '></td></tr><tr><td class="k">Received Qty *</td><td class="v"><input data-gd="recv" type="number" min="0" step="1"></td></tr></table>' +
     '<div class="dlg-f"><span id="gdMsg" class="small late-txt"></span><span class="grow"></span><button class="btn" data-gd-cancel>Cancel</button><button class="btn primary" data-gd-ok>Add</button></div></div>';
   document.body.appendChild(d); $('[data-gd="' + (il ? 'recv' : 'inv') + '"]', d).focus();
   d.addEventListener('click', ev => {
@@ -774,7 +775,7 @@ VIEWS.grn = {
         const tot = { inv: 0, rec: 0, rej: 0, short: 0, excess: 0, over: 0, grn: 0, total: 0 };
         const body = U.rows.map((r, n) => { const l = p.lines[r.i]; const mt = matBy(l.material) || {}; const pen = poLinePending(p, l, r.i); const c = grnCalc(r, pen); Object.keys(tot).forEach(k => { tot[k] += c[k]; });
           return '<tr data-gr="' + n + '"><td class="num">' + (n + 1) + '</td><td><b>' + esc(l.material) + '</b></td><td>' + esc(mt.name || '') + '</td><td>' + esc(l.uom || mt.uom || '') + '</td><td class="num">' + qtyFmt(pen) + '</td><td class="num">' + qtyFmt(c.inv) + '</td><td class="num">' + qtyFmt(c.rec) + '</td><td class="num late-txt">' + (c.short ? qtyFmt(c.short) : '') + '</td>' +
-            '<td><input class="qty" type="number" min="0" step="any" data-grrej value="' + (r.rej || '') + '"></td><td class="num"><b>' + qtyFmt(c.grn) + '</b></td><td class="num">' + (c.excess ? qtyFmt(c.excess) : '') + '</td><td class="num late-txt">' + (c.over ? qtyFmt(c.over) : '') + '</td><td class="num">' + qtyFmt(c.total) + '</td><td><input data-grrack value="' + esc(r.rack || '') + '" style="width:80px"></td><td><button class="btn ghost sm danger" data-act="gr-del" data-n="' + n + '">×</button></td></tr>'; }).join('');
+            '<td><input class="qty" type="number" min="0" step="1" data-grrej value="' + (r.rej || '') + '"></td><td class="num"><b>' + qtyFmt(c.grn) + '</b></td><td class="num">' + (c.excess ? qtyFmt(c.excess) : '') + '</td><td class="num late-txt">' + (c.over ? qtyFmt(c.over) : '') + '</td><td class="num">' + qtyFmt(c.total) + '</td><td><input data-grrack value="' + esc(r.rack || '') + '" style="width:80px"></td><td><button class="btn ghost sm danger" data-act="gr-del" data-n="' + n + '">×</button></td></tr>'; }).join('');
         const match = U.rows.length && Math.abs(tot.total - num(iw.qty)) < 1e-6;
         const badRej = U.rows.some(r => { const c = grnCalc(r, poLinePending(p, p.lines[r.i], r.i)); return c.rej > c.avail + 1e-9; });
         h += '<div class="tbl-wrap" style="margin-top:12px"><table><tr><th class="num">Sr</th><th>Item Code</th><th>Item Name</th><th>UOM</th><th class="num">PO Pending</th><th class="num">Invoice Qty</th><th class="num">Received Qty</th><th class="num">Short</th><th class="num">Reject</th><th class="num">GRN Qty</th><th class="num">Excess</th><th class="num">No invoice</th><th class="num">Total</th><th>Rack</th><th></th></tr>' +
@@ -815,6 +816,7 @@ ACTIONS['grn-save'] = async el => {
   if (!p || (!smp && (p.cancelled || p.approval !== 'Approved' || norm(p.vendor) !== norm(iw.vendor)))) return bad('PO ' + (iw.po_no || '') + ' is not an open approved PO of ' + iw.vendor + '.');
   if (Store.all('grns').some(g => g.inward_id === iw.id)) return bad('This invoice already has a GRN.');
   if (U.rows.some(r => !p.lines[r.i] || num(r.inv) < 0 || num(r.recv) < 0 || num(r.rej) < 0)) return bad('A line is missing or has a negative qty — add the items again.');
+  if (U.rows.some(r => [r.inv, r.recv, r.rej].some(v => num(v) !== Math.floor(num(v))))) return bad('Quantities must be whole numbers — no decimals on a GRN.');
   const itemWise = !!(iw.lines || []).length;
   const calc = U.rows.map(r => { const l = p.lines[r.i]; const pen = poLinePending(p, l, r.i); const il = itemWise ? inwLineOf(iw, r.i, l.material) : null; if (il) r.inv = num(il.inv_qty); return Object.assign({ r, l, pen, il }, grnCalc(r, pen)); });
   if (itemWise && calc.some(c => !c.il)) return bad('An item is not on this gate entry.');
