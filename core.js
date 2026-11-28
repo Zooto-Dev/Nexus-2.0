@@ -525,8 +525,8 @@ function jcKeyOf(o, i) { const l = (o.lines || [])[i] || {}; return l.jc_no || (
 function jcInst(o, i) {
   const l = (o.lines || [])[i]; if (!l) return null;
   const k = jcKeyOf(o, i);
-  // an order saved before flows ran per job card keeps its order-level actuals for every line until a line is written
-  const bag = (o.jc || {})[k] || (o.actuals && Object.keys(o.actuals).length ? { actuals: o.actuals, done_by: o.done_by, notes: o.notes, proof: o.proof } : {});
+  // demo data only: an order seeded with order-level actuals shows them on every line. Live orders never inherit.
+  const bag = (o.jc || {})[k] || (DEMO && o.actuals && Object.keys(o.actuals).length ? { actuals: o.actuals, done_by: o.done_by, notes: o.notes, proof: o.proof } : {});
   return Object.assign({}, o, { id: o.id + JC_SEP + k, oid: o.id, kind: 'jc', jkey: k, li: i, no: k, order_no: o.no, line: l, lines: [l],
     actuals: Object.assign({}, bag.actuals || {}), done_by: Object.assign({}, bag.done_by || {}), notes: Object.assign({}, bag.notes || {}), proof: Object.assign({}, bag.proof || {}),
     extra: Object.assign({}, o.extra || {}, bag.extra || {}) });
