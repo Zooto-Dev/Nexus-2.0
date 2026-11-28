@@ -29,8 +29,8 @@ function allDoers() { return Array.from(new Set(Store.all('users').filter(u => u
 // { key, src, task, ref, party, doer, dept, planned, actual, done, late, delay, status, link, demo }
 let AT_CACHE = { t: 0, rows: null };
 // the PROCESS a checklist task belongs to, for the Slow processes table: an auto task names its process, not its reference
-const CL_PROC = { po_inw: 'Material Inward', ppt: 'Packaging PPT upload', mom: 'MOM action', decision: 'CEO decision', kit_plan: 'Kit planning', kit_build: 'Kit build', kit_approve: 'Kit approval', kit_return: 'Kit return', issue_balance: 'Issue balance', sample_approve: 'Sample approval', stock_adj: 'Stock adjustment approval', req: 'Requisition', debit_note: 'Debit note', sample: 'Sample approval' };
-function clProcOf(t, title) { if (t.src && CL_PROC[t.src]) return CL_PROC[t.src]; if (t.kind && CL_PROC[t.kind]) return CL_PROC[t.kind]; if (/^material inwarding/i.test(String(title || t.title || ''))) return 'Material Inward'; if (t.auto || t.src) return String(title || t.title || '').split(/ — | for | · |: /)[0].trim() || String(title || ''); return String(title || t.title || ''); }
+const CL_PROC = { po_inw: 'Material Inwarding', ppt: 'Packaging PPT upload', mom: 'MOM action', decision: 'CEO decision', kit_plan: 'Kit planning', kit_build: 'Kit build', kit_approve: 'Kit approval', kit_return: 'Kit return', issue_balance: 'Issue balance', sample_approve: 'Sample approval', stock_adj: 'Stock adjustment approval', req: 'Requisition', debit_note: 'Debit note', sample: 'Sample approval' };
+function clProcOf(t, title) { if (t.src && CL_PROC[t.src]) return CL_PROC[t.src]; if (t.kind && CL_PROC[t.kind]) return CL_PROC[t.kind]; if (/^material inwarding/i.test(String(title || t.title || ''))) return 'Material Inwarding'; if (t.auto || t.src) return String(title || t.title || '').split(/ — | for | · |: /)[0].trim() || String(title || ''); return String(title || t.title || ''); }
 function allTasks(force) {
   if (!force && AT_CACHE.rows && Date.now() - AT_CACHE.t < 15000) return AT_CACHE.rows;
   const now = new Date(); const cal = calInfo(); const out = [];

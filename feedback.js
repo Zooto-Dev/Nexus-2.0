@@ -28,6 +28,7 @@ ACTIONS['home-feedback'] = () => {
 ACTIONS['fb-status'] = el => {
   if (!isSuperAdmin()) return; const f = Store.get('feedback', el.dataset.id); if (!f) return;
   f.status = el.dataset.st; f.decided_by = ME.name; f.decided_at = nowIso(); Store.put('feedback', f);
+  if (curView().v === 'home') { route(); return; }
   audit('feedback.' + el.dataset.st.toLowerCase().replace(/\s+/g, '_'), f.no, f.screen_name + ' · ' + f.what.slice(0, 80)); VIEWS.feedback.render();
 };
 ACTIONS['fb-csv'] = () => downloadCsv('feedback-' + todayYmd() + '.csv', [['No', 'Date', 'By', 'Department', 'Screen', 'Kind', 'Feedback', 'Reference', 'Status', 'Decided by', 'Build']].concat(
@@ -49,3 +50,16 @@ VIEWS.feedback = {
     onSeg(e => { if (e.target.dataset.seg === 'fbf') { FB_UI.f = e.detail; VIEWS.feedback.render(); } });
   }
 };
+
+// Home: the person's feedback beside My requests (the Super Admin sees everyone's open feedback and decides it here)
+function feedbackCard(names) {
+  const sa = isSuperAdmin();
+  const mine = Store.all('feedback').filter(f => sa ? f.status === 'Open' : (f.by_id === ME.id || (names && names.has(f.by)) || norm(f.by) === norm(ME.name))).sort((a, b) => a.at < b.at ? 1 : -1);
+  const cls = { Open: 'Pending', Noted: 'Waiting', Done: 'Done', 'Not now': 'Cancelled' };
+  const head = '<div class="dh3 sa-h"><span class="sa-hi ' + (mine.some(f => f.status === 'Open') ? 'warn' : 'ok') + '">' + saIco('file') + '</span><b>' + (sa ? 'Feedback from everyone' : 'My feedback') + '</b>' + (mine.length ? '<span class="n">' + mine.length + '</span>' : '') + '<span class="grow"></span><button class="btn sm primary" data-act="home-feedback">+ Feedback</button> <a class="sa-open" href="#/feedback">All ›</a></div>';
+  if (!mine.length) return '<div class="sa-lbl">Feedback</div><div class="dcard sa-ok">' + head + '<div class="sa-clear">' + (sa ? 'No open feedback' : 'You have not sent any feedback yet') + '</div></div>';
+  return '<div class="sa-lbl">Feedback</div><div class="dcard">' + head +
+    '<div class="tbl-wrap"><table data-pg="home_feedback"><tr><th>No</th><th>Date</th>' + (sa ? '<th>By</th>' : '') + '<th>Screen</th><th>Kind</th><th>Feedback</th><th>Reference</th><th>Status</th>' + (sa ? '<th></th>' : '') + '</tr>' +
+    mine.slice(0, 30).map(f => '<tr><td><b>' + esc(f.no) + '</b></td><td class="nowrap">' + fmtDT(f.at) + '</td>' + (sa ? '<td>' + esc(f.by) + '</td>' : '') + '<td>' + esc(f.screen_name || '') + '</td><td>' + esc(f.kind || '') + '</td><td class="wrap">' + esc(f.what || '') + '</td><td>' + esc(f.ref || '') + '</td><td><span class="st ' + (cls[f.status] || 'Waiting') + '">' + esc(f.status) + '</span>' + (f.decided_by ? '<div class="small muted">' + esc(f.decided_by) + '</div>' : '') + '</td>' +
+      (sa ? '<td class="nowrap"><button class="btn sm" data-act="fb-status" data-st="Noted" data-id="' + esc(f.id) + '">Noted</button> <button class="btn sm primary" data-act="fb-status" data-st="Done" data-id="' + esc(f.id) + '">Done</button> <button class="btn sm" data-act="fb-status" data-st="Not now" data-id="' + esc(f.id) + '">Not now</button></td>' : '') + '</tr>').join('') + '</table></div></div>';
+}

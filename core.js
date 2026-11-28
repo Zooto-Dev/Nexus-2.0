@@ -813,7 +813,6 @@ const VIEWS = {};      // name -> { mod, render(param) }
 const ACTIONS = {};    // data-act handlers
 const NAV = [
   { v: 'home', l: 'Home', mod: 'dashboard' },
-  { v: 'feedback', l: 'Feedback', mod: 'dashboard' },
   { menu: 'Purchase', items: [
     { v: 'purchasedash', l: 'Purchase Dashboard', mod: 'purchase' },
     { v: 'poregister', l: 'PO Register', mod: 'purchase' },

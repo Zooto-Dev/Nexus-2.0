@@ -3,8 +3,8 @@
 // Each activity: start time → planned time (start + TAT in working time) → actual time. TATs live in Settings.
 const PA_DEFS = [
   { k: 'po_raise', l: 'PO Raise', tat: { value: 1, unit: 'days' }, grp: 'Purchase', next: 'PO Approval', can: () => can('purchase', 'edit') },
-  { k: 'po_approval', l: 'PO Approval', tat: { value: 4, unit: 'hours' }, grp: 'Approver', next: 'Material Inward', can: () => canApprove() },
-  { k: 'inward', l: 'Material Inward', tat: { value: 3, unit: 'days' }, grp: 'Store', next: 'Invoice Approval', can: () => can('store', 'edit') },
+  { k: 'po_approval', l: 'PO Approval', tat: { value: 4, unit: 'hours' }, grp: 'Approver', next: 'Material Inwarding', can: () => canApprove() },
+  { k: 'inward', l: 'Material Inwarding', tat: { value: 3, unit: 'days' }, grp: 'Store', next: 'Invoice Approval', can: () => can('store', 'edit') },
   { k: 'invoice', l: 'Invoice Approval', tat: { value: 4, unit: 'hours' }, grp: 'Purchase', next: 'QC Check / GRN', can: () => can('purchase', 'edit') },
   { k: 'qc', l: 'QC Check', tat: { value: 4, unit: 'hours' }, grp: 'Store', next: 'Swatch Approval / GRN', can: () => can('store', 'edit') },
   { k: 'swatch', l: 'Swatch Approval', tat: { value: 8, unit: 'hours' }, grp: 'Merchant', next: 'GRN', can: r => isSuperAdmin() || (r && (r.owners || []).some(isMyMerchant)) || (r && !(r.owners || []).length && canApprove()) },

@@ -205,6 +205,7 @@ VIEWS.home = {
     h += teamCard(who);
     // requests this person sent for approval
     h += myRequestsCard(names);
+    if (typeof feedbackCard === 'function') h += feedbackCard(names);
     // open activities (purchase / store / approvals)
     if (self || sa) h += '<div class="dcard"><div class="dh3">' + (sa ? 'Open activities (everyone)' : 'My open activities') + '<span class="n">' + D.open.length + '</span></div><div class="tbl-wrap"><table><tr><th>Activity</th><th>Reference</th><th>Party</th><th>Responsible</th><th>Planned</th><th>Status</th></tr>' +
       (D.open.length ? D.open.slice(0, 60).map(r => '<tr><td>' + esc(r.act) + '</td><td><b>' + esc(r.ref) + '</b></td><td>' + esc(r.party) + '</td><td>' + esc(paDef(r.k).grp) + '</td><td class="nowrap">' + fmtDT(r.planned) + '</td><td><span class="st Pending">Pending</span></td></tr>').join('') : '<tr><td colspan="6" class="empty">Nothing open</td></tr>') + '</table></div></div>';
