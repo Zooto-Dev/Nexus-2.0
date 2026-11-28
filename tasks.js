@@ -28,6 +28,9 @@ function allDoers() { return Array.from(new Set(Store.all('users').filter(u => u
 /* ================= all tasks, one row each ================= */
 // { key, src, task, ref, party, doer, dept, planned, actual, done, late, delay, status, link, demo }
 let AT_CACHE = { t: 0, rows: null };
+// the PROCESS a checklist task belongs to, for the Slow processes table: an auto task names its process, not its reference
+const CL_PROC = { po_inw: 'Material Inward', ppt: 'Packaging PPT upload', mom: 'MOM action', decision: 'CEO decision' };
+function clProcOf(t, title) { if (t.src && CL_PROC[t.src]) return CL_PROC[t.src]; if (t.auto || t.src) return String(title || t.title || '').split(/ — | for | · |: /)[0].trim() || String(title || ''); return String(title || t.title || ''); }
 function allTasks(force) {
   if (!force && AT_CACHE.rows && Date.now() - AT_CACHE.t < 15000) return AT_CACHE.rows;
   const now = new Date(); const cal = calInfo(); const out = [];
@@ -53,7 +56,7 @@ function allTasks(force) {
   // Checklist / Delegation (last 90 days up to next 7)
   clRows(ymdOf(new Date(Date.now() - 90 * 86400000)), ymdOf(new Date(Date.now() + 7 * 86400000))).forEach(r => {
     push({ key: 'cl|' + r.t.id + '|' + r.ymd, src: r.t.auto ? 'Auto' + (r.t.auto_from ? ' · ' + r.t.auto_from : '') : (r.t.src ? clSrcLabel(r.t) : r.type), task: r.task, ref: r.type === 'Delegation' ? '' : r.freq, party: r.t.party || '', doer: String(r.doer || '').toUpperCase(), owner: String(r.doer || '').toUpperCase(),
-      planned: r.planned, actual: r.actual, link: '#/checklist', demo: !!r.t.demo, tid: r.t.id });
+      planned: r.planned, actual: r.actual, link: '#/checklist', demo: !!r.t.demo, tid: r.t.id, proc: clProcOf(r.t, r.task), dup: r.t.src === 'po_inw' });   // dup: the Material Inward activity already tracks this PO
   });
   // Nexus activities
   paRows().forEach(r => {
@@ -380,7 +383,7 @@ function saHomeHtml(names) {
   const l2 = escs.filter(e => e.level === 2).sort((a, b) => a.planned < b.planned ? -1 : 1); const l1n = escs.length - l2.length;
   const me = (ME && ME.doer) || '';
   const l1mine = escs.filter(e => e.level === 1 && norm(e.l1 || '') === norm(me)).length;
-  const delayed = tasks.filter(t => !t.done && !t.demo && t.status === 'Delayed' && t.doer !== 'SYSTEM');
+  const delayed = tasks.filter(t => !t.done && !t.demo && !t.dup && t.status === 'Delayed' && t.doer !== 'SYSTEM');
   const tab = SA_TABS.some(t => t.v === SX_UI.tab) ? SX_UI.tab : 'apr';
   let exN = 0; try { exN = excessPurchaseRows().length + excessIssueRows().length; } catch (e) { }
   const h0 = saTabBar(tab, { apr: exc.length + poa.length + prq.length + smpN + adjN, esc: l2.length + l1mine, exc: exN, dly: delayed.length });
@@ -429,8 +432,8 @@ function saHomeHtml(names) {
   delayed.forEach(t => { const k = t.doer || 'NOT SET'; const x = byDoer[k] || (byDoer[k] = { doer: k, dept: t.dept, n: 0, sum: 0, max: 0, top: '' }); x.n++; x.sum += t.delay; if (t.delay > x.max) { x.max = t.delay; x.top = t.task + (t.ref ? ' · ' + t.ref : ''); } });
   const dRows = Object.values(byDoer).sort((a, b) => b.sum - a.sum);
   const f = new Date(SA_UI.from + 'T00:00:00'), tt = new Date(SA_UI.to + 'T23:59:59'); const byProc = {};
-  tasks.filter(t => !t.demo && t.doer !== 'SYSTEM' && t.planned && t.planned >= f && t.planned <= tt && (t.done || t.planned <= now)).forEach(t => {
-    const k = t.src + '|' + t.task; const x = byProc[k] || (byProc[k] = { src: t.src, task: t.task, total: 0, done: 0, late: 0, dsum: 0, open: 0, osum: 0 });
+  tasks.filter(t => !t.demo && !t.dup && t.doer !== 'SYSTEM' && t.planned && t.planned >= f && t.planned <= tt && (t.done || t.planned <= now)).forEach(t => {
+    const name = t.proc || t.task; const k = t.src + '|' + name; const x = byProc[k] || (byProc[k] = { src: t.src, task: name, total: 0, done: 0, late: 0, dsum: 0, open: 0, osum: 0 });
     x.total++; if (t.done) { x.done++; if (t.late) { x.late++; x.dsum += t.delay; } } else if (t.late) { x.open++; x.osum += t.delay; }
   });
   const pRows = Object.values(byProc).filter(x => x.late || x.open).sort((a, b) => (b.osum + b.dsum) - (a.osum + a.dsum));
