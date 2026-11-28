@@ -200,8 +200,14 @@ async function reauth(why) {
 const RETRY_Q = new Map();   // failed writes: key col|id -> {col, id, isDelete}
 function syncBadge() { const s = $('#syncState'); if (s) s.textContent = SANDBOX ? 'SANDBOX · nothing is saved' : DEMO_SHARED ? 'DEMO' : CLOUD ? (pendingWrites ? 'Saving…' : RETRY_Q.size ? RETRY_Q.size + ' change(s) retrying…' : 'Synced') : DEMO ? 'DEMO' : 'Local mode'; }
 // cloud writes go one after the other, in the order the app made them (a GRN is saved before the gate entry it closes)
-let WRITE_Q = Promise.resolve();
-function cloudWrite(col, doc, isDelete) { pendingWrites++; syncBadge(); const snap = isDelete ? doc : JSON.parse(JSON.stringify(doc)); const run = WRITE_Q.then(() => cloudWriteNow(col, snap, isDelete)); WRITE_Q = run.catch(() => {}); return run; }
+// writes to DIFFERENT documents go out together; writes to the same document stay in order
+const WRITE_CH = new Map();
+function cloudWrite(col, doc, isDelete) {
+  pendingWrites++; syncBadge(); const snap = isDelete ? doc : JSON.parse(JSON.stringify(doc)); const k = col + '|' + doc.id;
+  const run = (WRITE_CH.get(k) || Promise.resolve()).then(() => cloudWriteNow(col, snap, isDelete));
+  const chain = run.catch(() => {}); WRITE_CH.set(k, chain); chain.then(() => { if (WRITE_CH.get(k) === chain) WRITE_CH.delete(k); });
+  return run;
+}
 // log collections most people may write but not read back: an UPSERT needs to see the row it might
 // replace, so for them it is refused (42501) — a plain INSERT is not. Only a real duplicate is updated.
 const WRITE_ONLY = new Set(['audit', 'mail_queue', 'wa_log']);
@@ -278,9 +284,24 @@ function cloudApply(col, id, data, ver, del) {
 function cloudRefreshView() { RES_CACHE.clear(); if (cloudRefreshOk()) { renderNav(); route(); } }
 // safety net besides the live channel: every 90 s (and when the tab comes back) compare with the cloud and pull what changed
 let SYNC_BUSY = false;
-async function cloudSync() {
+/* Sync. Normally one small request: every row changed since the newest row this browser holds (minus a safety
+   margin for clock drift). A full scan of every row id, which also finds deletions, runs every 10 minutes
+   or on request — it used to run every time, nine paged requests of ~450 ms each. */
+let SYNC_FULL_AT = 0;
+async function cloudSync(full) {
   if (!CLOUD || !SB || !CLOUD_OK || SANDBOX || SYNC_BUSY || !ME || pendingWrites) return; SYNC_BUSY = true;
   try {
+    if (!full && Date.now() - SYNC_FULL_AT > 600000) full = true;
+    if (!full) {
+      let top = ''; CL_VER.forEach(v => { if (v && v > top) top = v; });
+      const since = top ? new Date(new Date(top).getTime() - 120000).toISOString() : '1970-01-01';
+      const { data, error } = await SB.from(LITE).select('collection,id,data,updated_at').gt('updated_at', since).order('updated_at').limit(1000);
+      if (error) throw error;
+      let n = 0; (data || []).forEach(r => { if ((r.collection === 'settings' || COLS.includes(r.collection)) && CL_VER.get(r.collection + '|' + r.id) !== r.updated_at && cloudApply(r.collection, r.id, r.data, r.updated_at)) n++; });
+      if (n) cloudRefreshView();
+      SYNC_BUSY = false; return;
+    }
+    SYNC_FULL_AT = Date.now();
     const seen = new Set(); const changed = {}; let from = 0; const page = 1000;
     for (;;) {
       const { data, error } = await SB.from(LITE).select('collection,id,updated_at').order('collection').order('id').range(from, from + page - 1);

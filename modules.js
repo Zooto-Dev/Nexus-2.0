@@ -595,8 +595,7 @@ document.addEventListener('change', e => {
 ACTIONS['po-save'] = async el => {
   if (!requirePerm('purchase', 'edit')) return;
   if (el && el.disabled) return; if (el) el.disabled = true;
-  try { await jcFresh(); } catch (e) { }   // latest cloud copy: another user may have ordered the same need seconds ago
-  if (el) el.disabled = false;
+  if (el) el.disabled = false;   // the live feed keeps the data fresh; the number is double-checked after the save
   if (!$('#npVen')) return;
   const ven = $('#npVen').value.trim(); const exp = $('#npExp').value;
   { const vv = vendorBy(ven); if (vv && vendorMissing(vv).length) { vendorDialog(vv); return; } }
