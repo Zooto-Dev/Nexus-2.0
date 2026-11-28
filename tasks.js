@@ -479,6 +479,38 @@ function myRequests(names) {
     push({ kind: 'Ticket', ref: t.no, party: t.dept, detail: t.subject, at: t.at, status: t.status === 'Closed' ? 'Approved' : '', by: t.closed_by || '', when: t.closed_at || '', remark: ((t.comments || []).slice(-1)[0] || {}).note || '', link: '#/tickets', closed: t.status === 'Closed' },
       [{ at: t.at, by: t.by, what: 'Raised' }].concat((t.comments || []).map(c => ({ at: c.at, by: c.by, what: c.note }))).concat(t.closed_at ? [{ at: t.closed_at, by: t.closed_by, what: 'Closed' }] : []));
   });
+  // every other thing a person sends for someone's decision
+  const mname = c => ((matBy(c) || {}).name || c);
+  Store.all('price_requests').filter(x => mine(x.by)).forEach(x => {
+    const done = x.status === 'Approved' || x.status === 'Rejected';
+    push({ kind: 'Price Approval', ref: x.no, party: x.source + (x.ref ? ' ' + x.ref : ''), detail: mname(x.material) + ' ₹' + money(x.old_price) + ' → ₹' + money(x.new_price), at: x.at, status: x.status, by: done ? x.approved_by : '', when: done ? x.approved_at : '', remark: '', link: '#/priceapproval' },
+      [{ at: x.at, by: x.by, what: 'Price sent for approval' }].concat(done ? [{ at: x.approved_at, by: x.approved_by, what: x.status }] : []));
+  });
+  Store.all('boms').filter(b => mine(b.by) && b.status !== 'Superseded').forEach(b => {
+    const done = b.status === 'Final' || b.status === 'Rejected';
+    push({ kind: 'BOM Approval', ref: b.article + ' v' + b.version, party: b.brand || '', detail: (b.colour ? b.colour + ' · ' : '') + (b.lines || []).length + ' items', at: b.at, status: b.status === 'Final' ? 'Approved' : b.status, by: done ? (b.approved_by || b.rejected_by || '') : '', when: done ? (b.approved_at || b.rejected_at || '') : '', remark: b.reject_why || '', link: '#/boms' },
+      [{ at: b.at, by: b.by, what: 'BOM sent for the Development Head\'s approval' }].concat(done ? [{ at: b.approved_at || b.rejected_at, by: b.approved_by || b.rejected_by, what: (b.status === 'Final' ? 'Approved' : 'Rejected') + (b.reject_why ? ' — ' + b.reject_why : '') }] : []));
+  });
+  Store.all('stock_adj').filter(a => mine(a.by)).forEach(a => {
+    const done = a.status === 'Approved' || a.status === 'Rejected';
+    push({ kind: 'Stock Adjustment', ref: a.no, party: a.src || '', detail: mname(a.material) + ' ' + (a.qty > 0 ? '+' : '') + qtyFmt(a.qty) + ' ' + (a.uom || '') + (a.reason ? ' · ' + a.reason : ''), at: a.at, status: a.status, by: done ? a.decided_by : '', when: done ? a.decided_at : '', remark: a.reject_reason || '', link: '#/stockadj' },
+      [{ at: a.at, by: a.by, what: 'Adjustment sent for approval' }].concat(done ? [{ at: a.decided_at, by: a.decided_by, what: a.status + (a.reject_reason ? ' — ' + a.reject_reason : '') }] : []));
+  });
+  Store.all('opening_stock').filter(x => mine(x.by)).forEach(x => {
+    const done = x.status === 'Approved' || x.status === 'Rejected';
+    push({ kind: 'Opening Stock', ref: x.no, party: x.rack || '', detail: mname(x.material) + ' × ' + qtyFmt(x.qty) + ' ' + (x.uom || ''), at: x.at, status: x.status, by: done ? x.approved_by : '', when: done ? x.approved_at : '', remark: '', link: '#/openstock' },
+      [{ at: x.at, by: x.by, what: 'Opening stock sent for approval' }].concat(done ? [{ at: x.approved_at, by: x.approved_by, what: x.status }] : []));
+  });
+  Store.all('kits').filter(k => mine(k.built_by) && ['Built', 'Approved', 'Issued', 'Planned'].includes(k.status) && k.built_at).forEach(k => {
+    const ok = k.status === 'Approved' || k.status === 'Issued'; const back = k.status === 'Planned' && k.sent_back;
+    push({ kind: 'Kit Approval', ref: k.no, party: k.jc_no, detail: k.process + ' · ' + (k.lines || []).length + ' items', at: k.built_at, status: ok ? 'Approved' : back ? 'Amend' : 'Pending', by: ok ? k.approved_by : '', when: ok ? k.approved_at : '', remark: back ? k.sent_back : '', link: '#/kits' },
+      [{ at: k.built_at, by: k.built_by, what: 'Kit built — sent to PPC for approval' }].concat(ok ? [{ at: k.approved_at, by: k.approved_by, what: 'Approved — kit locked' }] : []).concat(back ? [{ at: k.updated_at || k.built_at, by: '', what: 'Sent back — ' + k.sent_back }] : []));
+  });
+  Store.all('feedback').filter(f => mine(f.by)).forEach(f => {
+    const done = f.status && f.status !== 'Open';
+    push({ kind: 'Feedback', ref: f.no, party: f.screen_name || '', detail: f.kind + ' · ' + String(f.what || '').slice(0, 80), at: f.at, status: done ? (f.status === 'Done' ? 'Approved' : f.status === 'Not now' ? 'Rejected' : 'Hold') : 'Pending', by: done ? f.decided_by : '', when: done ? f.decided_at : '', remark: done ? f.status : '', link: '#/feedback' },
+      [{ at: f.at, by: f.by, what: 'Feedback sent' }].concat(done ? [{ at: f.decided_at, by: f.decided_by, what: f.status }] : []));
+  });
   out.forEach(x => { if (x.kind === 'Ticket' && x.closed) x.status = 'Closed'; });
   return out.sort((a, b) => (b.at || '') < (a.at || '') ? -1 : 1);
 }
