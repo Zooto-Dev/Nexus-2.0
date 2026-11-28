@@ -374,6 +374,7 @@ function saHomeHtml(names) {
   const invAmend = pa.filter(r => r.k === 'invoice' && !r.actual && r.amend).sort((a, b) => b.delay - a.delay);
   const prq = Store.all('price_requests').filter(x => x.status === 'Pending').sort((a, b) => a.at < b.at ? -1 : 1);
   const smpN = typeof mySampleInwards === 'function' ? Store.all('inwards').filter(x => inwWaiting(x) && inwIsSample(x)).length : 0;
+  const adjN = typeof sadjPendingList === 'function' ? sadjPendingList().length : 0;
   const escs = Store.all('escalations').filter(e => e.status === 'Open');
   const l2 = escs.filter(e => e.level === 2).sort((a, b) => a.planned < b.planned ? -1 : 1); const l1n = escs.length - l2.length;
   const me = (ME && ME.doer) || '';
@@ -381,7 +382,7 @@ function saHomeHtml(names) {
   const delayed = tasks.filter(t => !t.done && !t.demo && t.status === 'Delayed' && t.doer !== 'SYSTEM');
   const tab = SA_TABS.some(t => t.v === SX_UI.tab) ? SX_UI.tab : 'apr';
   let exN = 0; try { exN = excessPurchaseRows().length + excessIssueRows().length; } catch (e) { }
-  const h0 = saTabBar(tab, { apr: exc.length + poa.length + prq.length + smpN, esc: l2.length + l1mine, exc: exN, dly: delayed.length });
+  const h0 = saTabBar(tab, { apr: exc.length + poa.length + prq.length + smpN + adjN, esc: l2.length + l1mine, exc: exN, dly: delayed.length });
   let h = h0;
 
   const tbl = (pg, head, rows, cols) => '<div class="tbl-wrap"><table class="nofilter nopage sa-tb" data-pg="' + pg + '"><tr>' + head.map(x => '<th' + (/^#|Delay|Total|Done|Late|Open|Avg|Score|On|Overdue|Level|%/.test(x) ? ' class="num"' : '') + '>' + x + '</th>').join('') + '</tr>' + (rows.length ? rows.join('') : '<tr><td colspan="' + cols + '" class="empty">Nothing pending</td></tr>') + '</table></div>';
@@ -391,6 +392,7 @@ function saHomeHtml(names) {
   if (tab === 'apr') {
     h += '<div class="sa-lbl">Approvals waiting with you</div><div class="sa-stack">';
     if (smpN && typeof sampleApprCard === 'function') h += sampleApprCard(true);
+    if (adjN && typeof sadjHomeCard === 'function') h += sadjHomeCard();
     h += saCard({ title: 'Excess approvals', n: exc.length, tone: 'bad', ico: 'box', link: '#/excessapproval', empty: 'No excess material waiting', note: 'Material taken in above the purchase order.', body:
       tbl('sa_excess', ['GRN · Material', 'Vendor', 'Since', 'Planned', 'Delay'], exc.map(r => '<tr class="click" data-act="go" data-v="excessapproval"><td><b>' + esc(r.ref) + '</b></td><td>' + esc(r.party) + '</td><td class="nowrap">' + fmtDT(r.start) + '</td><td class="nowrap">' + fmtDT(r.planned) + '</td><td class="num">' + dl(r.delay) + '</td></tr>'), 5) });
     h += saCard({ title: 'PO approvals', n: poa.length, ico: 'file', link: '#/poapproval', empty: 'No purchase order waiting', note: 'Purchase orders waiting for your approval.', body:

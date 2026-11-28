@@ -55,7 +55,7 @@ function mtAll() {
   Object.keys(byMat).forEach(k => {
     const L = poByMat[k] || [];
     // 1. stock: a reservation holds only while the material is physically there; the earliest Plan date keeps it
-    let f = Math.max(0, stockOf(k) - (typeof reqHeld === 'function' ? reqHeld(k) : 0));
+    let f = Math.max(0, stockOf(k) - (typeof reqHeld === 'function' ? reqHeld(k) : 0) - (typeof adjPending === 'function' ? adjPending(k) : 0));
     byMat[k].forEach(r => { r.resEff = r3(Math.min(r.resLeft, f)); f = r3(f - r.resEff); r.borrowed = r3(r.resLeft - r.resEff); });
     free[k] = f;
     // 2. its own PO lines first, then what is left on any open line, in Plan-date order
@@ -108,6 +108,19 @@ function mtBookLines(lines) {
     const freeNow = Math.max(0, stockOf(k) - (typeof reqHeld === 'function' ? reqHeld(k) : 0) - held - (used[k] || 0));
     l.reserved = r3(Math.min(num(l.required), freeNow));
     used[k] = (used[k] || 0) + l.reserved;
+  });
+  return lines;
+}
+// Job card correction: each line keeps what it had (up to the new Required); any increase books from what is free now
+function mtRebookLines(j, lines) {
+  const A = mtAll(); const used = {};
+  lines.forEach(l => {
+    const k = norm(l.material);
+    const keep = Math.min(num(l.required), l.reserved != null ? num(l.reserved) : 0);
+    const held = (A.byMat[k] || []).filter(r => r.jc !== j.no).reduce((a, r) => a + r.resEff, 0);
+    const freeNow = Math.max(0, stockOf(k) - (typeof reqHeld === 'function' ? reqHeld(k) : 0) - (typeof adjPending === 'function' ? adjPending(k) : 0) - held - (used[k] || 0));
+    const extra = Math.min(Math.max(0, num(l.required) - keep), freeNow);
+    l.reserved = r3(keep + extra); used[k] = (used[k] || 0) + keep + extra;
   });
   return lines;
 }

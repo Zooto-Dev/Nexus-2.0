@@ -166,6 +166,7 @@ VIEWS.home = {
     // main grid: tasks | score, held up, escalations
     if (typeof escL1Card === 'function' && Store.all('escalations').some(e => e.status === 'Open' && e.level === 1 && norm(e.l1 || '') === norm(who))) h += escL1Card(who);
     if (self && typeof sampleApprCard === 'function') h += sampleApprCard(false);
+    if (self && typeof sadjHomeCard === 'function' && typeof sadjCanApprove === 'function' && sadjCanApprove()) h += sadjHomeCard();
     h += '<div class="dgrid hgrid"><div>' + homeTaskTable(T) + '</div><div>';
     h += myScoreCard(who);
     const heldShow = HT_UI.heldAll ? D.held : D.held.slice(0, 6);
