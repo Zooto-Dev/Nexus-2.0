@@ -137,6 +137,7 @@ ACTIONS['pa-approve'] = async el => {
   // the rate on the PO is the approved item price as of now
   const noPrice = p.lines.filter(l => !(matPrice(l.material) > 0)).map(l => l.material);
   if (noPrice.length) { flash(esc(noPrice.join(', ')) + ': no approved price — approve the price first (Purchase › Price Approval).', 'err'); return; }
+  if (p.expected && p.expected < todayYmd()) { flash('Expected delivery date ' + fmtD(p.expected) + ' is already past — send the PO back for amendment with the right date.', 'err'); return; }
   const repriced = []; p.lines.forEach(l => { const mp = matPrice(l.material); if (Math.abs(mp - num(l.rate)) > 1e-9) { repriced.push(l.material + ' ₹' + money(l.rate) + ' → ₹' + money(mp)); l.rate = mp; } });
   // the quantity must still be needed (another PO or stock may have covered it since it was raised)
   const net = {}; netReqRows(null, p.id).forEach(r => { net[norm(r.material)] = r.net; });

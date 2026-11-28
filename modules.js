@@ -621,6 +621,7 @@ ACTIONS['po-save'] = async el => {
   }
   const moqLog = mode === 'manual' ? [] : Object.keys(PO_UI.moq || {}).map(code => { const net = freshNet[norm(code)] || 0; return { material: code, net, moq: PO_UI.moq[code].qty, extra: r3(PO_UI.moq[code].qty - net), reason: PO_UI.moq[code].reason, by: ME.name, at: nowIso() }; });
   if (!ven || !exp || !lines.length) { $('#npMsg').innerHTML = '<span class="late-txt">Vendor, expected date and at least one material line are required.</span>'; return; }
+  if (exp < todayYmd()) { $('#npMsg').innerHTML = '<span class="late-txt">Expected delivery date ' + fmtD(exp) + ' is already past — enter the real delivery date.</span>'; return; }
   const vm = vendorBy(ven);
   if (!vm) { $('#npMsg').innerHTML = '<span class="late-txt">Vendor is not in the master — add it in Purchase → Vendors first (with GST/mobile).</span>'; return; }
   if (!vm.mobile && !vm.email) { $('#npMsg').innerHTML = '<span class="late-txt">Add the vendor mobile or email in the vendor master to create a PO.</span>'; return; }
