@@ -125,13 +125,17 @@ function netReqRows(vendor, excludePo) {
   const by = {};
   const row = code => { const k = norm(code); return by[k] || (by[k] = { material: (matBy(code) || {}).code || code, jcs: [], demand: 0, suppliers: new Set() }); };
   const frozen = new Set(Store.all('orders').filter(o => o.priority === 'Cancelled' || o.priority === 'On Hold').map(o => norm(o.no)));
+  const MT = typeof mtAll === 'function' ? mtAll() : null;
+  const toOrder = {};   // per item: what the job cards still have to order, after stock and open POs are shared out
   Store.all('job_cards').filter(j => j.status !== 'Closed' && !frozen.has(norm(j.order_no || ''))).forEach(j => {
     // the same item may sit on two sections of one job card: its requirement is the sum, issued is counted once
     const byMat = {}; (j.lines || []).forEach(l => { const k = norm(l.material); const g = byMat[k] || (byMat[k] = { material: l.material, required: 0, supplier: '' }); g.required += num(l.required); if (l.supplier && !g.supplier) g.supplier = l.supplier; });
     Object.values(byMat).forEach(l => {
       const bal = Math.max(0, l.required - issuedToJc(j.no, l.material));
       if (bal <= 0.0001) return;
-      const r = row(l.material); r.demand += bal; r.jcs.push({ jc: j.no, bal, supplier: l.supplier || '', brand: j.brand || '', article: j.article || '', colour: j.colour || '' }); if (l.supplier) r.suppliers.add(l.supplier);
+      const mr = MT ? MT.rows.find(x => x.jc === j.no && norm(x.material) === norm(l.material)) : null;
+      const r = row(l.material); r.demand += bal; r.jcs.push({ jc: j.no, bal, toOrder: mr ? mr.toOrder : 0, supplier: l.supplier || '', brand: j.brand || '', article: j.article || '', colour: j.colour || '' }); if (l.supplier) r.suppliers.add(l.supplier);
+      if (mr) toOrder[norm(l.material)] = (toOrder[norm(l.material)] || 0) + mr.toOrder;
     });
   });
   // manual requirements (Purchase › Requirements): demand until received; the vendor Purchase picked is the supplier
@@ -147,7 +151,12 @@ function netReqRows(vendor, excludePo) {
     src.filter(x => norm(x.material) === norm(r.material)).forEach(x => { if (!r.suppliers.size) r.suppliers.add(x.vendor); });
     r.name = m.name || r.material; r.uom = m.uom || ''; r.min = num(m.min_level);
     r.stock = Math.max(0, stockOf(r.material)); r.openPo = openPo(r.material);
-    r.net = r3(Math.max(0, r.demand + r.min - r.stock - r.openPo));
+    if (MT && toOrder[norm(r.material)] != null) {
+      // job cards: what the tracking engine says is still to order; requirements and min level: against what is left over
+      const k = norm(r.material); const extra = r.jcs.filter(x => x.req).reduce((a2, x) => a2 + x.bal, 0);
+      const leftover = Math.max(0, (MT.free[k] || 0) + (MT.poLeft[k] || 0));
+      r.net = r3(Math.max(0, toOrder[k] + Math.max(0, extra + r.min - leftover)));
+    } else r.net = r3(Math.max(0, r.demand + r.min - r.stock - r.openPo));
     const sc = vendor ? src.find(x => norm(x.material) === norm(r.material) && norm(x.vendor) === norm(vendor)) : null;
     r.rate = num(m.price) || ''; r.moq = sc ? num(sc.moq) : 0;   // price only from the item (set via price approval)
     r.jcs.sort((a, b) => String(a.jc).localeCompare(String(b.jc)));
@@ -1093,6 +1102,7 @@ ACTIONS['jc-save'] = () => {
   if (badNorm) { $('#njMsg').innerHTML = '<span class="late-txt">Norms must be greater than 0 for every item.</span>'; return; }
   if (!lines.length) { $('#njMsg').innerHTML = '<span class="late-txt">At least one BOM item (from the master) is required.</span>'; return; }
   const badSup = badSuppliers(lines); if (badSup.length) { $('#njMsg').innerHTML = '<span class="late-txt">Supplier not in Vendors master: ' + esc(badSup.join(', ')) + ' — select a vendor from the list.</span>'; return; }
+  if (typeof mtBookLines === 'function') mtBookLines(lines);   // Reserved: what is free now, after every earlier job card
   const wantNo = (($('#jfNo') || {}).value || l.jc_no || '').trim();
   const useNo = wantNo && !Store.all('job_cards').some(x => norm(x.no) === norm(wantNo)) ? wantNo : jcNo();
   const j = Store.put('job_cards', {

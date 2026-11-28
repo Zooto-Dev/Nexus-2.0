@@ -727,6 +727,7 @@ const NAV = [
     { v: 'punch', l: 'Punch Order', mod: 'orders', edit: true },
     { v: 'orders', l: 'Orders', mod: 'orders' },
     { v: 'jobcards', l: 'Job Card', mod: 'merchant' },
+    { v: 'mattrack', l: 'Material Tracking', mod: 'merchant' },
     { v: 'swatch', l: 'Swatch Approval', mod: 'merchant' },
     { v: 'jccorrection', l: 'Job Card Correction', mod: 'merchant' },
     { v: 'samplenew', l: 'Sample Entry', mod: 'merchant', edit: true },
