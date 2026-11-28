@@ -29,13 +29,14 @@ function allDoers() { return Array.from(new Set(Store.all('users').filter(u => u
 // { key, src, task, ref, party, doer, dept, planned, actual, done, late, delay, status, link, demo }
 let AT_CACHE = { t: 0, rows: null };
 // the PROCESS a checklist task belongs to, for the Slow processes table: an auto task names its process, not its reference
-const CL_PROC = { po_inw: 'Material Inward', ppt: 'Packaging PPT upload', mom: 'MOM action', decision: 'CEO decision' };
-function clProcOf(t, title) { if (t.src && CL_PROC[t.src]) return CL_PROC[t.src]; if (t.auto || t.src) return String(title || t.title || '').split(/ — | for | · |: /)[0].trim() || String(title || ''); return String(title || t.title || ''); }
+const CL_PROC = { po_inw: 'Material Inward', ppt: 'Packaging PPT upload', mom: 'MOM action', decision: 'CEO decision', kit_plan: 'Kit planning', kit_build: 'Kit build', kit_approve: 'Kit approval', kit_return: 'Kit return', issue_balance: 'Issue balance', sample_approve: 'Sample approval', stock_adj: 'Stock adjustment approval', req: 'Requisition', debit_note: 'Debit note', sample: 'Sample approval' };
+function clProcOf(t, title) { if (t.src && CL_PROC[t.src]) return CL_PROC[t.src]; if (t.kind && CL_PROC[t.kind]) return CL_PROC[t.kind]; if (/^material inwarding/i.test(String(title || t.title || ''))) return 'Material Inward'; if (t.auto || t.src) return String(title || t.title || '').split(/ — | for | · |: /)[0].trim() || String(title || ''); return String(title || t.title || ''); }
 function allTasks(force) {
   if (!force && AT_CACHE.rows && Date.now() - AT_CACHE.t < 15000) return AT_CACHE.rows;
   const now = new Date(); const cal = calInfo(); const out = [];
   const wm = (a, b) => { try { return cal.workMinutesBetween(a, b); } catch (e) { return Math.round((b - a) / 60000); } };
   const push = x => {
+    x.src0 = x.src; x.src = x.src === 'FMS' || x.src === 'Sample' ? 'FMS' : 'NEXUS'; x.proc = x.proc || x.task;
     x.done = !!x.actual; x.dept = deptOfDoer(x.doer);
     x.delay = x.planned ? (x.actual ? (x.actual > x.planned ? wm(x.planned, x.actual) : 0) : (now > x.planned ? wm(x.planned, now) : 0)) : 0;
     x.late = x.delay > 0;
@@ -49,7 +50,7 @@ function allTasks(force) {
     const label = o.kind === 'sample' ? 'Sample' : 'FMS';
     r.order.forEach(id => {
       const s = r.steps[id]; if (!s || !['Pending', 'Late', 'Done'].includes(s.status) || !stepShown(s)) return;
-      push({ key: 'fms|' + o.id + '|' + id, src: label, task: s.name, ref: s.per === 'order' ? (o.order_no || o.no) : o.no, party: o.customer_name || o.brand || '', doer: String(s.doer || (s.actual ? doerOfName((o.done_by || {})[id]) : '') || '').toUpperCase(), by: (o.done_by || {})[id] || '',
+      push({ key: 'fms|' + o.id + '|' + id, src: label, proc: s.name, task: s.name, ref: s.per === 'order' ? (o.order_no || o.no) : o.no, party: o.customer_name || o.brand || '', doer: String(s.doer || (s.actual ? doerOfName((o.done_by || {})[id]) : '') || '').toUpperCase(), by: (o.done_by || {})[id] || '',
         owner: String(s.doer || '').toUpperCase(), planned: s.planned ? new Date(s.planned) : null, actual: s.actual ? new Date(s.actual) : null, link: '#/order/' + o.id });
     });
   });
@@ -62,7 +63,7 @@ function allTasks(force) {
   paRows().forEach(r => {
     if (!r.planned || r.status === 'Waiting') return;
     const owner = actDoer(r);
-    push({ key: 'pa|' + r.k + '|' + r.ref, src: 'Nexus', task: r.act + (r.amend ? ' — correction' + (r.amend_with ? ' by ' + r.amend_with : '') : ''), ref: r.ref, party: r.party || '', doer: owner || (r.actual ? doerOfName(r.by) : ''), owner, by: r.by || '',
+    push({ key: 'pa|' + r.k + '|' + r.ref, src: 'Nexus', proc: r.act, task: r.act + (r.amend ? ' — correction' + (r.amend_with ? ' by ' + r.amend_with : '') : ''), ref: r.ref, party: r.party || '', doer: owner || (r.actual ? doerOfName(r.by) : ''), owner, by: r.by || '',
       planned: r.planned, actual: r.actual || null, link: '#/' + (ACT_LINK[r.k] || 'planactual'), grp: paDef(r.k).grp, k: r.k });
   });
   AT_CACHE = { t: Date.now(), rows: out };
@@ -196,18 +197,18 @@ VIEWS.alltasks = {
       const escBy = new Map(Store.all('escalations').map(e => [e.key, e]));
       const rows = allTasks().filter(x => (!x.planned || (x.planned >= f && x.planned <= t)) && (!AT_UI.src || x.src === AT_UI.src) && (!AT_UI.who || norm(x.doer) === norm(AT_UI.who) || norm(x.owner) === norm(AT_UI.who)) && (!AT_UI.dept || x.dept === AT_UI.dept) &&
         (AT_UI.st === 'all' || (AT_UI.st === 'open' ? !x.done && x.status !== 'Upcoming' : AT_UI.st === 'delayed' ? x.status === 'Delayed' : AT_UI.st === 'upcoming' ? x.status === 'Upcoming' : AT_UI.st === 'late' ? x.late : x.done)) &&
-        (!q || norm([x.task, x.ref, x.party, x.doer].join(' ')).includes(q))).sort((a, b) => (b.delay - a.delay) || ((a.planned || 0) - (b.planned || 0)));
+        (!q || norm([x.proc, x.task, x.ref, x.party, x.doer].join(' ')).includes(q))).sort((a, b) => (b.delay - a.delay) || ((a.planned || 0) - (b.planned || 0)));
       VIEWS.alltasks.rows = rows;
       const srcs = Array.from(new Set(allTasks().map(x => x.src))).sort(); const depts = Array.from(new Set(allTasks().map(x => x.dept).filter(Boolean))).sort();
       h += '<div class="toolbar">' + seg('atSt', [{ v: 'open', l: 'Open' }, { v: 'delayed', l: 'Delayed' }, { v: 'upcoming', l: 'Upcoming' }, { v: 'done', l: 'Done' }, { v: 'late', l: 'Late' }, { v: 'all', l: 'All' }], AT_UI.st) +
         '<select id="atSrc">' + selOpts(srcs, AT_UI.src, 'All sources') + '</select>' + (all ? '<select id="atWho">' + doerOpts(allDoers(), AT_UI.who, 'All doers') + '</select><select id="atDept">' + selOpts(depts, AT_UI.dept, 'All departments') + '</select>' : '') +
         '<input id="atFrom" type="date" value="' + esc(AT_UI.from) + '"><input id="atTo" type="date" value="' + esc(AT_UI.to) + '"><input id="atQ" placeholder="Search…" value="' + esc(AT_UI.q) + '"><span class="muted small">' + rows.length + ' task(s)</span><span class="grow"></span><button class="btn" data-act="at-csv">Export CSV</button></div>';
-      h += '<div class="tbl-wrap"><table class="bomflat"><tr><th>Source</th><th>Task</th><th>Reference</th><th>Party</th><th>Doer</th><th>Department</th><th>Planned</th><th>Actual</th><th>Status</th><th class="num">Delay</th><th>Escalation</th><th></th></tr>' +
+      h += '<div class="tbl-wrap"><table class="bomflat"><tr><th>Source</th><th>Process</th><th>Task</th><th>Reference</th><th>Party</th><th>Doer</th><th>Department</th><th>Planned</th><th>Actual</th><th>Status</th><th class="num">Delay</th><th>Escalation</th><th></th></tr>' +
         (rows.length ? rows.map(x => { const e = escBy.get(x.key);
-          return '<tr><td>' + esc(x.src) + '</td><td>' + esc(x.task) + taskExtraHtml(x.tid) + '</td><td><b>' + esc(x.ref) + '</b></td><td>' + esc(x.party) + '</td><td>' + (x.doer ? esc(x.doer) : '<span class="late-txt">Not set</span>') + '</td><td>' + esc(x.dept) + '</td>' +
+          return '<tr><td>' + esc(x.src) + '</td><td>' + esc(x.proc || '') + '</td><td>' + esc(x.task) + taskExtraHtml(x.tid) + '</td><td><b>' + esc(x.ref) + '</b></td><td>' + esc(x.party) + '</td><td>' + (x.doer ? esc(x.doer) : '<span class="late-txt">Not set</span>') + '</td><td>' + esc(x.dept) + '</td>' +
             '<td class="nowrap">' + (x.planned ? fmtDT(x.planned) : '') + '</td><td class="nowrap">' + (x.actual ? fmtDT(x.actual) : '') + '</td><td><span class="st ' + (x.status === 'Done on time' ? 'Done' : x.status === 'Done late' ? 'Pending' : x.status === 'Delayed' ? 'Late' : x.status === 'Pending' ? 'Pending' : 'Waiting') + '">' + x.status + '</span></td>' +
             '<td class="num' + (x.delay ? ' late-txt' : '') + '">' + (x.delay ? fmtDelay(x.delay) : '') + '</td><td>' + (e ? '<a href="#/escalations">' + esc(e.no) + ' · L' + e.level + (e.status === 'Open' ? '' : ' ✓') + '</a>' : '') + '</td><td><a href="' + esc(x.link) + '">Open</a></td></tr>'; }).join('')
-          : '<tr><td colspan="12" class="empty">No tasks</td></tr>') + '</table></div>';
+          : '<tr><td colspan="13" class="empty">No tasks</td></tr>') + '</table></div>';
     }
     setMain(h);
     onSeg(e => { const s = e.target.dataset.seg; if (s === 'atTab') AT_UI.tab = e.detail; if (s === 'atSt') AT_UI.st = e.detail; VIEWS.alltasks.render(); });
@@ -219,8 +220,8 @@ VIEWS.alltasks = {
     const qi = $('#atQ'); if (qi) qi.addEventListener('input', e => { AT_UI.q = e.target.value; clearTimeout(AT_UI.t); AT_UI.t = setTimeout(() => { VIEWS.alltasks.render(); const i = $('#atQ'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }, 300); });
   }
 };
-ACTIONS['at-csv'] = () => downloadCsv('all-tasks-' + todayYmd() + '.csv', [['Source', 'Task', 'Reference', 'Party', 'Doer', 'Department', 'Planned', 'Actual', 'Status', 'Delay (min)']]
-  .concat((VIEWS.alltasks.rows || []).map(x => [x.src, x.task, x.ref, x.party, x.doer, x.dept, x.planned ? fmtDT(x.planned) : '', x.actual ? fmtDT(x.actual) : '', x.status, x.delay || 0])));
+ACTIONS['at-csv'] = () => downloadCsv('all-tasks-' + todayYmd() + '.csv', [['Source', 'Process', 'Task', 'Reference', 'Party', 'Doer', 'Department', 'Planned', 'Actual', 'Status', 'Delay (min)']]
+  .concat((VIEWS.alltasks.rows || []).map(x => [x.src, x.proc || '', x.task, x.ref, x.party, x.doer, x.dept, x.planned ? fmtDT(x.planned) : '', x.actual ? fmtDT(x.actual) : '', x.status, x.delay || 0])));
 
 // Doer Setup: one doer per activity — simple on purpose
 function atSetupHtml() {
@@ -433,14 +434,14 @@ function saHomeHtml(names) {
   const dRows = Object.values(byDoer).sort((a, b) => b.sum - a.sum);
   const f = new Date(SA_UI.from + 'T00:00:00'), tt = new Date(SA_UI.to + 'T23:59:59'); const byProc = {};
   tasks.filter(t => !t.demo && !t.dup && t.doer !== 'SYSTEM' && t.planned && t.planned >= f && t.planned <= tt && (t.done || t.planned <= now)).forEach(t => {
-    const name = t.proc || t.task; const k = t.src + '|' + name; const x = byProc[k] || (byProc[k] = { src: t.src, task: name, total: 0, done: 0, late: 0, dsum: 0, open: 0, osum: 0 });
-    x.total++; if (t.done) { x.done++; if (t.late) { x.late++; x.dsum += t.delay; } } else if (t.late) { x.open++; x.osum += t.delay; }
+    const name = t.proc || t.task; const k = t.src + '|' + name; const x = byProc[k] || (byProc[k] = { src: t.src, task: name, total: 0, done: 0, late: 0, dsum: 0, open: 0, osum: 0, pend: 0 });
+    x.total++; if (t.done) { x.done++; if (t.late) { x.late++; x.dsum += t.delay; } } else { x.pend++; if (t.late) { x.open++; x.osum += t.delay; } }
   });
-  const pRows = Object.values(byProc).filter(x => x.late || x.open).sort((a, b) => (b.osum + b.dsum) - (a.osum + a.dsum));
+  const pRows = Object.values(byProc).sort((a, b) => (b.open + b.late) - (a.open + a.late) || b.pend - a.pend || b.total - a.total);
   h += '<div class="sa-lbl">Where the delay is</div><div class="sa-stack"><div>' + saCard({ title: 'Held up by person', n: dRows.length, tone: 'bad', ico: 'person', link: '#/alltasks', linkText: 'Tasks', empty: 'Nobody is holding work up', note: 'Open delayed tasks added up, longest first. Click a row for that person\'s full summary.', body:
     tbl('sa_doer', ['Doer', 'Department', 'Delayed', 'Total delay', 'Longest', 'Longest task'], dRows.map(x => '<tr class="click" data-act="sc-open" data-d="' + esc(x.doer === 'NOT SET' ? '' : x.doer) + '"><td><b>' + (x.doer === 'NOT SET' ? '<span class="late-txt">Not set</span>' : esc(x.doer)) + '</b></td><td>' + esc(x.dept || '') + '</td><td class="num">' + x.n + '</td><td class="num late-txt">' + fmtDelay(x.sum) + '</td><td class="num">' + fmtDelay(x.max) + '</td><td>' + esc(x.top) + '</td></tr>'), 6) }) + '</div>' +
-    '<div>' + saCard({ title: 'Slow processes', n: pRows.length, ico: 'flow', sub: fmtD(SA_UI.from) + ' – ' + fmtD(SA_UI.to), empty: 'No process ran late in this period', note: 'Which step of which flow runs late, not who runs it.', body:
-    tbl('sa_proc', ['Process', 'Source', 'Total', 'Late %', 'Avg delay (done)', 'Open late', 'Avg delay (open)'], pRows.map(x => '<tr><td><b>' + esc(x.task) + '</b></td><td>' + esc(x.src) + '</td><td class="num">' + x.total + '</td><td class="num">' + Math.round((x.late + x.open) * 100 / x.total) + '%</td><td class="num">' + (x.late ? fmtDelay(Math.round(x.dsum / x.late)) : '') + '</td><td class="num' + (x.open ? ' late-txt' : '') + '">' + x.open + '</td><td class="num">' + (x.open ? fmtDelay(Math.round(x.osum / x.open)) : '') + '</td></tr>'), 7) }) + '</div></div>';
+    '<div>' + saCard({ title: 'By process', n: pRows.filter(x => x.open || x.late).length, ico: 'flow', sub: fmtD(SA_UI.from) + ' – ' + fmtD(SA_UI.to), always: true, empty: 'No task in this period', note: 'Every process: how many tasks it had, how many got done, how many did not. Source FMS = flow steps, NEXUS = tasks the system raises.', body:
+    tbl('sa_proc', ['Process', 'Source', 'Total', 'Done', 'Not done', 'Late %', 'Avg delay (done late)', 'Open late', 'Avg delay (open)'], pRows.map(x => '<tr><td><b>' + esc(x.task) + '</b></td><td>' + esc(x.src) + '</td><td class="num">' + x.total + '</td><td class="num">' + x.done + '</td><td class="num' + (x.pend ? ' late-txt' : '') + '">' + x.pend + '</td><td class="num">' + Math.round((x.late + x.open) * 100 / x.total) + '%</td><td class="num">' + (x.late ? fmtDelay(Math.round(x.dsum / x.late)) : '') + '</td><td class="num' + (x.open ? ' late-txt' : '') + '">' + x.open + '</td><td class="num">' + (x.open ? fmtDelay(Math.round(x.osum / x.open)) : '') + '</td></tr>'), 9) }) + '</div></div>';
   return h;
 }
 
