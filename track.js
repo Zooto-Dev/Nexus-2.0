@@ -15,6 +15,16 @@ const PA_DEFS = [
   { k: 'rtv', l: 'RTV (Return to Vendor)', tat: { value: 7, unit: 'days' }, grp: 'Store', next: 'Debit note / vendor collection', can: () => can('store', 'edit') }
 ];
 const paDef = k => PA_DEFS.find(d => d.k === k);
+// TAT unit 'by': finish the same day by a clock time (value 17.5 = 17:30); started after that time → next working day
+function paPlanned(start, tat, cal) {
+  if (!tat || tat.unit !== 'by') return cal.addTat(start, tat);
+  const hh = Math.floor(num(tat.value)), mm = Math.round((num(tat.value) - hh) * 60);
+  let d = new Date(start); d.setHours(hh, mm, 0, 0);
+  if (d <= start) d.setDate(d.getDate() + 1);
+  for (let i = 0; i < 14 && cal.isWorkingDay && !cal.isWorkingDay(d); i++) d.setDate(d.getDate() + 1);
+  return d;
+}
+const paTatLabel = t => !t ? '' : t.unit === 'by' ? 'same day by ' + String(Math.floor(num(t.value))).padStart(2, '0') + ':' + String(Math.round((num(t.value) - Math.floor(num(t.value))) * 60)).padStart(2, '0') : t.value + ' ' + (t.unit === 'days' ? 'working day(s)' : 'working hour(s)');
 function paTat(k) { const t = (settings().act_tat || {})[k]; return t && t.value != null ? t : paDef(k).tat; }
 const ts = x => x ? new Date(x) : null;
 const latest = arr => arr.filter(Boolean).map(x => new Date(x)).sort((a, b) => b - a)[0] || null;
@@ -24,14 +34,21 @@ function paRows() {
   const R = [];
   const add = (k, o) => R.push(Object.assign({ k, act: paDef(k).l }, o));
   const jcs = Store.all('job_cards'); const pos = Store.all('purchase_orders').filter(p => !p.cancelled);
-  // PO Raise: from job card creation until the first PO that carries any of its materials
+  // PO Raise: from job card creation until EVERY item of the job card has its PO (TBO − POR = 0 on each line).
+  // One PO for some items does not close it; the actual is the PO that completed the cover.
   jcs.forEach(j => {
-    const at = ts(j.at || j.created_at); if (!at) return;
-    const mats = new Set((j.lines || []).map(l => norm(l.material)));
-    const po = pos.filter(p => new Date(p.at || p.created_at || p.date) >= at && (p.lines || []).some(l => mats.has(norm(l.material)))).sort((a, b) => (a.at || a.created_at || '') < (b.at || b.created_at || '') ? -1 : 1)[0];
-    const need = j.status !== 'Closed' && (j.lines || []).some(l => Math.max(0, num(l.required) - issuedToJc(j.no, l.material)) > stockOf(l.material) + 1e-9);
-    if (po) add('po_raise', { ref: j.no, party: j.brand || '', start: at, actual: ts(po.at || po.created_at), by: po.created_by || '', result: po.no });
-    else if (need) add('po_raise', { ref: j.no, party: j.brand || '', start: at });
+    const at = ts(j.at || j.created_at); if (!at || j.status === 'Closed') return;
+    const need = {}; (j.lines || []).forEach(l => { const k = norm(l.material); need[k] = (need[k] || 0) + Math.max(0, num(l.required) - num(l.reserved)); });
+    const mats = Object.keys(need).filter(k => need[k] > 1e-9); if (!mats.length) return;
+    const mine = pos.filter(p => p.approval !== 'Rejected' && (p.lines || []).some(l => norm(l.jc_no || '') === norm(j.no))).sort((a, b) => (a.at || a.created_at || '') < (b.at || b.created_at || '') ? -1 : 1);
+    const got = {}; let doneAt = null, doneBy = '', nos = [];
+    for (const p of mine) {
+      (p.lines || []).forEach(l => { if (norm(l.jc_no || '') === norm(j.no)) got[norm(l.material)] = (got[norm(l.material)] || 0) + num(l.qty); });
+      nos.push(p.no);
+      if (mats.every(k => (got[k] || 0) + 1e-9 >= need[k])) { doneAt = ts(p.at || p.created_at); doneBy = p.created_by || ''; break; }
+    }
+    const left = mats.filter(k => (got[k] || 0) + 1e-9 < need[k]).length;
+    add('po_raise', { ref: j.no, party: j.brand || '', start: at, actual: doneAt, by: doneAt ? doneBy : '', result: doneAt ? nos.join(', ') : (nos.length ? nos.join(', ') + ' · ' + left + ' item(s) still without PO' : mats.length + ' item(s) to order') });
   });
   pos.forEach(p => {
     const at = ts(p.at || p.created_at || p.date);
@@ -96,7 +113,7 @@ function paRows() {
   const cal = calInfo(); const now = new Date();
   R.forEach(r => {
     if (!r.start || isNaN(r.start)) { r.status = 'Waiting'; return; }
-    r.planned = r.plan || cal.addTat(r.start, paTat(r.k));
+    r.planned = r.plan || paPlanned(r.start, paTat(r.k), cal);
     if (r.actual) { r.delay = r.actual > r.planned ? cal.workMinutesBetween(r.planned, r.actual) : 0; r.status = r.delay > 0 ? 'Done late' : 'Done on time'; }
     else { r.delay = now > r.planned ? cal.workMinutesBetween(r.planned, now) : 0; r.status = r.delay > 0 ? 'Late' : 'Pending'; }
   });
@@ -130,7 +147,7 @@ VIEWS.planactual = {
     } else {
       const edit = can('settings', 'edit');
       h += '<div class="tbl-wrap"><table class="nopage"><tr><th>Activity</th><th>Starts when</th><th class="num">TAT</th><th>Unit</th></tr>' +
-        PA_DEFS.map(d => { const t = paTat(d.k); return '<tr><td>' + d.l + '</td><td>' + esc(PA_START[d.k]) + '</td><td><input class="qty right" type="number" min="0" step="any" data-pat="' + d.k + '" value="' + esc(t.value) + '"' + (edit ? '' : ' disabled') + '></td><td><select data-pau="' + d.k + '"' + (edit ? '' : ' disabled') + '><option value="hours">Working hours</option><option value="days"' + (t.unit === 'days' ? ' selected' : '') + '>Working days</option></select></td></tr>'; }).join('') + '</table></div>';
+        PA_DEFS.map(d => { const t = paTat(d.k); return '<tr><td>' + d.l + '</td><td>' + esc(PA_START[d.k]) + '</td><td><input class="qty right" type="number" min="0" step="any" data-pat="' + d.k + '" value="' + esc(t.value) + '"' + (edit ? '' : ' disabled') + '></td><td><select data-pau="' + d.k + '"' + (edit ? '' : ' disabled') + '><option value="hours">Working hours</option><option value="days"' + (t.unit === 'days' ? ' selected' : '') + '>Working days</option><option value="by"' + (t.unit === 'by' ? ' selected' : '') + '>Same day, by this time (17.5 = 17:30)</option></select> <span class="muted small">' + esc(paTatLabel(t)) + '</span></td></tr>'; }).join('') + '</table></div>';
     }
     const m = setMain(h);
     m.addEventListener('change', e => {

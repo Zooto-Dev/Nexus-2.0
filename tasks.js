@@ -225,7 +225,7 @@ function atSetupHtml() {
   const cur = k => ((cfg[k] || []).find(r => !r.field) || {}).doer || '';
   const row = (l, start, tat, k, cell) => '<tr><td><b>' + esc(l) + '</b></td><td class="small">' + esc(start || '') + '</td><td class="nowrap">' + esc(tat || '') + '</td><td>' + cell + '</td></tr>';
   return '<div class="tbl-wrap"><table class="nopage"><tr><th>Activity</th><th>Starts when</th><th>TAT</th><th>Doer</th></tr>' +
-    PA_DEFS.map(d => { const t = paTat(d.k); const tat = t ? t.value + ' ' + t.unit : '';
+    PA_DEFS.map(d => { const t = paTat(d.k); const tat = t ? paTatLabel(t) : '';
       return row(d.l, PA_START[d.k], tat, d.k, d.k === 'swatch' ? '<span class="small">Merchant of the brand — <a href="#/customers">CDB → Merchandiser</a></span>'
         : '<select data-adr="' + d.k + '" data-i="def">' + doerOpts(doers, cur(d.k), 'Not set') + '</select>'); }).join('') +
     AUTO_ACTS.map(a => row(a.l, 'GRN saved', '1 day', a.k, '<select data-adr="' + a.k + '" data-i="def">' + doerOpts(doers, cur(a.k), 'Not set') + '</select>')).join('') +
