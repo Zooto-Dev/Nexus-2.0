@@ -779,8 +779,9 @@ function jcBomFor(article, colour, brand, style) {
   return all.sort((p, q) => rank(q) - rank(p) || (q.version || 0) - (p.version || 0))[0] || null;
 }
 VIEWS.jobcards = {
-  mod: 'merchant', render() {
+  mod: 'merchant', render(param) {
     const edit = can('merchant', 'edit');
+    if (param && edit && JC_UI.pick !== param) { JC_UI.pick = param; JC_UI.form = true; }
     const bs = brandScope(); const rows = Store.all('job_cards').filter(j => brandOk(j.brand, bs)).sort((a2, b2) => b2.no < a2.no ? -1 : 1).filter(j => JC_UI.f === 'all' || (JC_UI.f === 'open' ? j.status !== 'Closed' : j.status === 'Closed'));
     let h = subTitle('Job Card', 'format: ZF-0001') + '<div class="toolbar">' + seg('f', [{ v: 'open', l: 'Open' }, { v: 'closed', l: 'Closed' }, { v: 'all', l: 'All' }], JC_UI.f) + '<span class="grow"></span>' + (edit ? newBtn('New job card', 'jc-new') : '') + '</div>';
     if (JC_UI.form && edit) h += jcForm();
@@ -802,6 +803,7 @@ VIEWS.jobcards = {
       if (e.target.dataset.seg === 'f') { JC_UI.f = e.detail; VIEWS.jobcards.render(); return; }
     });
     if (JC_UI.form) jcFormWire();
+    if (param && JC_UI.form && $('#jfJc') && !$('#jfJc').value) { const i2 = $('#jfJc'); i2.value = String(param).toUpperCase(); i2.dispatchEvent(new Event('change', { bubbles: true })); }
   }
 };
 function jcDetail(j) {
@@ -1580,7 +1582,7 @@ ACTIONS['bom-draft-restore'] = () => {
   flash('Draft restored — ' + (d.rows || []).length + ' row(s). Check it and Save BOM.');
 };
 VIEWS.bom = {
-  mod: 'development', render() {
+  mod: 'development', render(param) {
     const edit = can('development', 'edit');
     if (!edit) { go('boms'); return; }
     const brands = Store.all('customers').map(c => c.name);
@@ -1662,6 +1664,12 @@ VIEWS.bom = {
     excelGrid($('#nbTable'), { rowSel: 'tr[data-bline]', addRow: () => $('#nbTable').insertAdjacentHTML('beforeend', bomRow()), importText: bomImportText });
     bomRecalc();
     $('#nbBrand').focus();
+    // #/bom/<brand>|<article>: the form opens on that article (from a flow step or a job card)
+    if (param && param.includes('|')) {
+      const [b, a] = param.split('|'); const br = $('#nbBrand');
+      if (b && Array.from(br.options).some(x => x.value === b)) { br.value = b; br.dispatchEvent(new Event('change', { bubbles: true })); const ar = $('#nbArt'); const opt = Array.from(ar.options).find(x => norm(x.value) === norm(a)); if (opt) { ar.value = opt.value; ar.dispatchEvent(new Event('change', { bubbles: true })); } else flash('A BOM for ' + esc(a) + ' is already made — pick the article by hand if a new version is wanted.'); }
+      else flash('No pending article for ' + esc(b) + ' — every BOM is made.');
+    }
   }
 };
 // the processes and sections already written on earlier BOMs, so the same words keep being used

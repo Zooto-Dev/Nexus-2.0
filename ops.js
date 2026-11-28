@@ -1,8 +1,23 @@
 /* Nexus 2.0 — daily work screens: Home, My Tasks, Punch, Orders, Order, Dispatch, Tracker. */
 'use strict';
 
+// a step that "finishes by itself" (job card made, BOM made, material in, dispatched) is never closed by a click:
+// its button opens the screen where the work is done, with this job card already picked
+function autoStepLink(def, o) {
+  const rule = def && def.status && def.status.type === 'auto' ? def.status.rule : '';
+  const jc = o && o.kind === 'jc' ? o.no : '';
+  if (rule === 'job_card_created') return jc ? '#/jobcards/' + encodeURIComponent(jc) : '#/jobcards';
+  if (rule === 'bom_created') return o && o.kind === 'jc' ? '#/bom/' + encodeURIComponent((o.customer_name || '') + '|' + (o.line.article || '')) : '#/bom';
+  if (rule === 'order_dispatched') return '#/dispatch';
+  if (rule === 'material_received') return '#/mattrack';
+  return '';
+}
 function stepDoneBtn(o, s, def, spec) {
   if (isDispatchStep(def, spec)) return can('dispatch', 'edit') ? '<a href="#/dispatch">Dispatch →</a>' : '<span class="muted small">via Dispatch</span>';
+  if (def && def.status && def.status.type === 'auto') {
+    const l = autoStepLink(def, o);
+    return l ? '<a class="btn sm primary" href="' + l + '">' + (def.status.rule === 'job_card_created' ? 'Make job card' : def.status.rule === 'bom_created' ? 'Make BOM' : 'Open') + '</a>' : '<span class="muted small">closes by itself</span>';
+  }
   if (!canMarkStep(def, s, spec)) return '';
   return '<button class="btn sm primary" data-act="step-done" data-o="' + esc(o.id) + '" data-s="' + esc(s.id) + '">Done</button>';
 }
