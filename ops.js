@@ -134,6 +134,7 @@ VIEWS.home = {
     // header
     let h = '<div class="dhd"><div><h1>Good ' + (new Date().getHours() < 12 ? 'morning' : new Date().getHours() < 17 ? 'afternoon' : 'evening') + ', ' + esc(ME.name.split(' ')[0]) + '</h1><div class="muted small">' + new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) + ' · ' + esc(settings().company || '') + '</div></div><span class="grow"></span>' +
       (pick ? '<label class="small muted">Showing <select id="htWho">' + doers.map(d => '<option' + (norm(d) === norm(who) ? ' selected' : '') + '>' + esc(d) + '</option>').join('') + '</select></label>' + (who && !self ? '<button class="btn sm primary" data-act="sx-open" data-t="doer" data-k="' + esc(who) + '">Full summary</button>' : '') : '') +
+      '<button class="btn sm" data-act="home-feedback">Feedback</button>' +
       '<button class="btn sm primary" data-act="home-ticket">+ Raise Ticket</button>' +
       (sa && Store.all('checklist').some(t => t.demo) ? '<button class="btn sm danger" data-act="ht-demo-del" data-confirm="Remove all demo tasks?">Remove demo tasks</button>' : '') + '</div>';
 
