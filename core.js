@@ -60,7 +60,7 @@ function saveLocal() {
     localStorage.setItem(DB_KEY, JSON.stringify(DB));
   } catch (e) { flash('Browser storage full — export a backup from Settings.', 'err'); }
 }
-const COLS = ['users', 'roles', 'customers', 'items', 'materials', 'processes', 'orders', 'samples', 'dispatches', 'purchase_orders', 'sourcing', 'grns', 'inwards', 'vendors', 'issues', 'rsjw', 'rtvs', 'boms', 'job_cards', 'requisitions', 'tickets', 'checklist', 'checklist_log', 'escalations', 'attributes', 'item_types', 'mail_queue', 'requirements', 'prod_reports', 'prod_plans', 'wa_log', 'opening_stock', 'stock_adj', 'price_requests', 'moms', 'decisions', 'meetings', 'followups', 'travels', 'contacts', 'leads', 'vendor_requests', 'task_proof', 'art_ppt', 'todos', 'bom_sections', 'org_chart', 'prod_lines', 'line_plans', 'line_actuals', 'line_days', 'audit'];
+const COLS = ['users', 'roles', 'customers', 'items', 'materials', 'processes', 'orders', 'samples', 'dispatches', 'purchase_orders', 'sourcing', 'grns', 'inwards', 'vendors', 'issues', 'rsjw', 'rtvs', 'boms', 'job_cards', 'requisitions', 'tickets', 'checklist', 'checklist_log', 'escalations', 'attributes', 'item_types', 'mail_queue', 'requirements', 'prod_reports', 'prod_plans', 'wa_log', 'opening_stock', 'stock_adj', 'kits', 'price_requests', 'moms', 'decisions', 'meetings', 'followups', 'travels', 'contacts', 'leads', 'vendor_requests', 'task_proof', 'art_ppt', 'todos', 'bom_sections', 'org_chart', 'prod_lines', 'line_plans', 'line_actuals', 'line_days', 'audit'];
 let DB = null;
 const CFG = window.NEXUS_CONFIG || {};
 // demo shares one demo table (nx_demo) between all demo users; it can never reach the real table
@@ -459,6 +459,8 @@ function accessFor(u, v, mod, skipPerson) {
 function canScreen(v, level) {
   // a sample is approved by the person who asked for it, so that screen opens for him without Purchase access
   if (v === 'invapproval' && typeof mySampleInwards === 'function' && mySampleInwards().length) return true;
+  // the Store builds and issues kits, so the Kits screen opens for it without Production access
+  if (v === 'kits' && (can('store', level || 'view') || can('production', level || 'view'))) return true;
   const mod = screenMod(v); if (!mod) return false;
   const r = myRole(); if (!r) return false;
   if (mod === 'users') return !!r.system;
@@ -755,6 +757,7 @@ const NAV = [
     { v: 'lineplan', l: 'Line Plan', mod: 'production' },
     { v: 'planning', l: 'Planning & DPR', mod: 'production' },
     { v: 'requisition', l: 'Requisition Slip', mod: 'production' },
+    { v: 'kits', l: 'Kits', mod: 'production' },
     { v: 'prodreport', l: 'Production Report', mod: 'production' },
     { v: 'mrs', l: 'MRS', mod: 'production' }] },
   { menu: 'Accounts', items: [

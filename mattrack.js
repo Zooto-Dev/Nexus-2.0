@@ -47,7 +47,9 @@ function mtAll() {
     Object.values(g).forEach(r => {
       r.issued = issuedToJc(j.no, r.material);
       r.need = r3(Math.max(0, r.required - r.issued));
-      r.resLeft = r3(Math.max(0, Math.min(r.reserved - r.issued, r.need)));
+      r.kit = typeof kitHeldFor === 'function' ? r3(Math.min(kitHeldFor(j.no, r.material), r.need)) : 0;   // approved kit: physically set aside for this job card
+      r.needRest = r3(Math.max(0, r.need - r.kit));
+      r.resLeft = r3(Math.max(0, Math.min(r.reserved - r.issued - r.kit, r.needRest)));
       rows.push(r); (byMat[norm(r.material)] = byMat[norm(r.material)] || []).push(r);
     });
   });
@@ -55,7 +57,7 @@ function mtAll() {
   Object.keys(byMat).forEach(k => {
     const L = poByMat[k] || [];
     // 1. stock: a reservation holds only while the material is physically there; the earliest Plan date keeps it
-    let f = Math.max(0, stockOf(k) - (typeof reqHeld === 'function' ? reqHeld(k) : 0) - (typeof adjPending === 'function' ? adjPending(k) : 0));
+    let f = Math.max(0, stockOf(k) - (typeof reqHeld === 'function' ? reqHeld(k) : 0) - (typeof adjPending === 'function' ? adjPending(k) : 0) - (typeof kitHeld === 'function' ? kitHeld(k) : 0));
     byMat[k].forEach(r => { r.resEff = r3(Math.min(r.resLeft, f)); f = r3(f - r.resEff); r.borrowed = r3(r.resLeft - r.resEff); });
     free[k] = f;
     // 2. its own PO lines first, then what is left on any open line, in Plan-date order
@@ -65,14 +67,14 @@ function mtAll() {
         if (norm(l.material) !== k || norm(l.jc_no || '') !== norm(r.jc)) return;
         r.poOrdered += num(l.qty); r.poReceived += recvOf(p, l, i); if (!r.poNos.includes(p.no)) r.poNos.push(p.no);
       }));
-      let gap = r3(Math.max(0, r.need - r.resEff));
+      let gap = r3(Math.max(0, r.needRest - r.resEff));
       L.filter(x => x.jc === norm(r.jc)).forEach(x => { const t = Math.min(x.left, gap); if (t > 1e-9) { x.left = r3(x.left - t); gap = r3(gap - t); r.transit += t; if (!r.transitDue || (x.exp && x.exp < r.transitDue)) r.transitDue = x.exp; } });
       r.gap = gap;
     });
     byMat[k].forEach(r => {
       let gap = r.gap;
       L.forEach(x => { if (gap <= 1e-9 || x.left <= 1e-9) return; const t = Math.min(x.left, gap); x.left = r3(x.left - t); gap = r3(gap - t); r.transit += t; if (!r.transitDue || (x.exp && x.exp < r.transitDue)) r.transitDue = x.exp; });
-      r.toOrder = r3(gap); r.transit = r3(r.transit); r.short = r3(Math.max(0, r.need - r.resEff));
+      r.toOrder = r3(gap); r.transit = r3(r.transit); r.short = r3(Math.max(0, r.needRest - r.resEff));
       r.poOrdered = r3(r.poOrdered); r.poReceived = r3(r.poReceived);
     });
     poLeft[k] = r3(L.reduce((a, x) => a + x.left, 0));
@@ -81,6 +83,7 @@ function mtAll() {
   rows.forEach(r => {
     const ageH = (now - new Date(r.j.at || r.j.created_at || now).getTime()) / 36e5;
     if (r.need <= 1e-9) { r.st = 'Complete'; r.tone = 'ok'; }
+    else if (r.needRest <= 1e-9) { r.st = 'In kit · locked'; r.tone = 'ok'; }
     else if (r.transit > 1e-9 && r.transitDue && r.transitDue < today) { r.st = 'Vendor late · due ' + fmtD(r.transitDue); r.tone = 'bad'; }
     else if (r.toOrder > 1e-9 && r.transit <= 1e-9) { r.st = ageH > MTK_TAT_H ? 'No PO yet · ' + Math.floor(ageH) + ' h past' : 'To order'; r.tone = ageH > MTK_TAT_H ? 'bad' : 'warn'; }
     else if (r.toOrder > 1e-9) { r.st = 'Transit ' + qtyFmt(r.transit) + ' · ' + qtyFmt(r.toOrder) + ' to order'; r.tone = ageH > MTK_TAT_H ? 'bad' : 'warn'; }
@@ -91,7 +94,8 @@ function mtAll() {
   const cards = jcs.map(x => {
     const L = rows.filter(r => r.jc === x.j.no);
     const bad = L.filter(r => r.tone === 'bad').length, warn = L.filter(r => r.tone === 'warn').length, done = L.filter(r => r.need <= 1e-9).length;
-    return { j: x.j, plan: x.plan, rows: L, items: L.length, bad, warn, done, tone: bad ? 'bad' : warn ? 'warn' : 'ok', noRes: L.some(r => !r.hasRes) };
+    const kits = typeof kitAll === 'function' ? kitAll().filter(k => norm(k.jc_no) === norm(x.j.no) && k.status !== 'Broken' && k.status !== 'Released') : [];
+    return { j: x.j, plan: x.plan, rows: L, items: L.length, bad, warn, done, tone: bad ? 'bad' : warn ? 'warn' : 'ok', noRes: L.some(r => !r.hasRes), kits };
   });
   const out = { rows, cards, byMat, free, poLeft, poByMat };
   RES_CACHE.set('mtAll', out);
@@ -147,14 +151,14 @@ function mtBookAll() {
 const mtChip = r => '<span class="st ' + (r.tone === 'bad' ? 'Late' : r.tone === 'warn' ? 'Pending' : 'Done') + '">' + esc(r.st) + '</span>';
 function mtJcTable(c) {
   const rows = c.rows.slice().sort((a, b) => ({ bad: 0, warn: 1, ok: 2 })[a.tone] - ({ bad: 0, warn: 1, ok: 2 })[b.tone] || String(a.material).localeCompare(String(b.material)));
-  return '<div class="tbl-wrap"><table class="nofilter"><tr><th>Item</th><th>Name</th><th>UOM</th><th class="num">Required</th><th class="num">Reserved</th><th>PO</th><th class="num">Received</th><th class="num">Issued</th><th class="num">Short</th><th class="num">Transit</th><th class="num">To order</th><th>Status</th></tr>' +
+  return '<div class="tbl-wrap"><table class="nofilter"><tr><th>Item</th><th>Name</th><th>UOM</th><th class="num">Required</th><th class="num">Reserved</th><th class="num">In kit</th><th>PO</th><th class="num">Received</th><th class="num">Issued</th><th class="num">Short</th><th class="num">Transit</th><th class="num">To order</th><th>Status</th></tr>' +
     (rows.length ? rows.map(r => { const m = matBy(r.material) || {};
       return '<tr><td><b>' + esc(r.material) + '</b></td><td>' + esc(m.name || '') + '</td><td>' + esc(r.uom) + '</td><td class="num">' + qtyFmt(r.required) + '</td>' +
-        '<td class="num">' + qtyFmt(r.resEff) + (r.borrowed > 1e-9 ? '<div class="small late-txt">' + qtyFmt(r.borrowed) + ' went to another job card</div>' : '') + '</td>' +
+        '<td class="num">' + qtyFmt(r.resEff) + (r.borrowed > 1e-9 ? '<div class="small late-txt">' + qtyFmt(r.borrowed) + ' went to another job card</div>' : '') + '</td><td class="num">' + (r.kit > 1e-9 ? qtyFmt(r.kit) : '') + '</td>' +
         '<td>' + (r.poOrdered > 0 ? qtyFmt(r.poOrdered) + ' <span class="muted small">' + esc(r.poNos.join(', ')) + '</span>' : '<span class="muted">—</span>') + '</td>' +
         '<td class="num">' + (r.poOrdered > 0 ? qtyFmt(r.poReceived) : '') + '</td><td class="num">' + qtyFmt(r.issued) + '</td>' +
         '<td class="num' + (r.short > 1e-9 ? ' late-txt' : '') + '">' + (r.short > 1e-9 ? qtyFmt(r.short) : '') + '</td><td class="num">' + (r.transit > 1e-9 ? qtyFmt(r.transit) : '') + '</td><td class="num' + (r.toOrder > 1e-9 ? ' late-txt' : '') + '">' + (r.toOrder > 1e-9 ? qtyFmt(r.toOrder) : '') + '</td>' +
-        '<td>' + mtChip(r) + '</td></tr>'; }).join('') : '<tr><td colspan="12" class="empty">No material lines</td></tr>') + '</table></div>';
+        '<td>' + mtChip(r) + '</td></tr>'; }).join('') : '<tr><td colspan="13" class="empty">No material lines</td></tr>') + '</table></div>';
 }
 VIEWS.mattrack = {
   mod: 'merchant', render() {
@@ -169,10 +173,10 @@ VIEWS.mattrack = {
       '<input id="mtQ" placeholder="Search job card, order, article" value="' + esc(MTK_UI.q) + '" style="max-width:260px"><span class="grow"></span>' +
       (noRes && isSuperAdmin() ? '<button class="btn sm primary" data-act="mt-book" data-confirm="Book reservations for ' + noRes + ' job card(s) made before this screen existed? Each takes what is free now, in the order the job cards were made.">Book reservations · ' + noRes + '</button>' : '') +
       '<span class="muted small">' + A.cards.filter(c => c.bad).length + ' stuck · ' + A.cards.filter(c => !c.bad && c.warn).length + ' waiting · ' + A.cards.length + ' open</span></div>';
-    h += '<div class="tbl-wrap"><table><tr><th>Job Card</th><th>Order</th><th>Brand</th><th>Article</th><th>Colour</th><th class="num">Qty</th><th>Plan date</th><th class="num">Items</th><th class="num">Stuck</th><th class="num">Waiting</th><th class="num">Ready</th><th>Worst</th></tr>' +
+    h += '<div class="tbl-wrap"><table><tr><th>Job Card</th><th>Order</th><th>Brand</th><th>Article</th><th>Colour</th><th class="num">Qty</th><th>Plan date</th><th class="num">Items</th><th class="num">Stuck</th><th class="num">Waiting</th><th class="num">Ready</th><th>Worst</th><th>Kits</th></tr>' +
       (cards.length ? cards.map(c => { const worst = c.rows.slice().sort((a, b) => ({ bad: 0, warn: 1, ok: 2 })[a.tone] - ({ bad: 0, warn: 1, ok: 2 })[b.tone])[0];
-        return '<tr class="click' + (MTK_UI.open === c.j.no ? ' lp-sel' : '') + '" data-act="mt-open" data-jc="' + esc(c.j.no) + '"><td><b>' + esc(c.j.no) + '</b></td><td>' + esc(c.j.order_no || '') + '</td><td>' + esc(c.j.brand || '') + '</td><td>' + esc(c.j.article || '') + '</td><td>' + esc(c.j.colour || '') + '</td><td class="num">' + qtyFmt(c.j.qty) + '</td><td class="nowrap">' + (c.plan ? fmtD(c.plan) : '<span class="muted">not planned</span>') + '</td><td class="num">' + c.items + '</td><td class="num' + (c.bad ? ' late-txt' : '') + '"><b>' + (c.bad || '') + '</b></td><td class="num">' + (c.warn || '') + '</td><td class="num">' + (c.done || '') + '</td><td>' + (worst ? mtChip(worst) : '') + '</td></tr>'; }).join('')
-        : '<tr><td colspan="12" class="empty">' + (MTK_UI.f === 'stuck' ? 'Nothing is stuck' : 'No open job cards') + '</td></tr>') + '</table></div>';
+        return '<tr class="click' + (MTK_UI.open === c.j.no ? ' lp-sel' : '') + '" data-act="mt-open" data-jc="' + esc(c.j.no) + '"><td><b>' + esc(c.j.no) + '</b></td><td>' + esc(c.j.order_no || '') + '</td><td>' + esc(c.j.brand || '') + '</td><td>' + esc(c.j.article || '') + '</td><td>' + esc(c.j.colour || '') + '</td><td class="num">' + qtyFmt(c.j.qty) + '</td><td class="nowrap">' + (c.plan ? fmtD(c.plan) : '<span class="muted">not planned</span>') + '</td><td class="num">' + c.items + '</td><td class="num' + (c.bad ? ' late-txt' : '') + '"><b>' + (c.bad || '') + '</b></td><td class="num">' + (c.warn || '') + '</td><td class="num">' + (c.done || '') + '</td><td>' + (worst ? mtChip(worst) : '') + '</td><td class="small">' + (c.kits.length ? c.kits.map(k => esc(k.process) + ' <span class="st ' + ({ Planned: 'Pending', Built: 'Pending', Approved: 'Done', Issued: 'Done' })[k.status] + '">' + esc(k.status) + '</span>').join('<br>') : '<span class="muted">—</span>') + '</td></tr>'; }).join('')
+        : '<tr><td colspan="13" class="empty">' + (MTK_UI.f === 'stuck' ? 'Nothing is stuck' : 'No open job cards') + '</td></tr>') + '</table></div>';
     const o = MTK_UI.open ? A.cards.find(c => c.j.no === MTK_UI.open) : null;
     if (o) h += '<div class="card" style="margin-top:14px"><div class="card-b"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><h2 style="margin:0">' + esc(o.j.no) + ' · ' + esc(o.j.brand || '') + ' · ' + esc(o.j.article || '') + (o.j.colour ? ' ' + esc(o.j.colour) : '') + '</h2>' +
       '<span class="muted small">Order ' + esc(o.j.order_no || '') + ' · Qty ' + qtyFmt(o.j.qty) + ' · Plan date ' + (o.plan ? fmtD(o.plan) : 'not planned') + ' · made ' + fmtDT(o.j.at) + '</span><span class="grow"></span><a class="btn sm" href="#/jobcards">Job card</a><button class="btn sm" data-act="mt-close">Close</button></div>' + mtJcTable(o) + '</div></div>';

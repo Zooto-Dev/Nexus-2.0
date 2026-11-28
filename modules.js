@@ -1804,7 +1804,7 @@ function reqHeld(code) {
 }
 function lineOpen(r, l) { return l.closed ? 0 : Math.max(0, num(l.qty) - reqIssued(r.no, l.material)); }
 function lineLeft(r, l) { return l.closed ? 0 : Math.max(0, num(l.qty) - reqSent(r.no, l.material)); }
-function freeStock(code) { return Math.max(0, stockOf(code) - reqHeld(code) - (typeof adjPending === 'function' ? adjPending(code) : 0)); }
+function freeStock(code) { return Math.max(0, stockOf(code) - reqHeld(code) - (typeof adjPending === 'function' ? adjPending(code) : 0) - (typeof kitHeld === 'function' ? kitHeld(code) : 0)); }
 // JC qty still to be asked for: required − issued − already on an open slip
 function jcOpenReqQty(jc, code) { return Store.all('requisitions').filter(r => reqIsOpen(r) && norm(r.jc_no) === norm(jc)).reduce((s2, r) => s2 + (r.lines || []).filter(l => norm(l.material) === norm(code)).reduce((a, l) => a + lineOpen(r, l), 0), 0); }
 function reqJcRows(jc, proc) {
@@ -1877,6 +1877,7 @@ ACTIONS['req-save'] = () => {
   if (!U.line || !U.picker) { msg('Select Line and Picker Name.'); return; }
   if (U.method === 'jc') {
     if (!jcBy(U.jc)) { msg('Select a Job Card.'); return; }
+    if (typeof kitOf === 'function' && U.process && kitOf(U.jc, U.process)) { msg('This process has kit ' + esc(kitOf(U.jc, U.process).no) + ' — BOM items go out with the kit, not on a requisition slip.'); return; }
     const fresh = Object.fromEntries(reqJcRows(U.jc, U.process).map(x => [norm(x.material), x]));
     $$('#nrTable tr[data-rrow]').forEach(tr => {
       const q = num(($('[data-rq]', tr) || {}).value); if (q <= 0) return;

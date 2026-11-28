@@ -364,6 +364,7 @@ function saHomeHtml(names) {
   if (!SA_UI.from) { const d = new Date(); SA_UI.from = ymdOf(new Date(d.getFullYear(), d.getMonth(), 1)); SA_UI.to = todayYmd(); }
   try { escRun(); } catch (e) { console.error(e); }
   try { if (typeof poInwSyncAll === 'function') poInwSyncAll(); } catch (e) { console.error(e); }
+  try { if (typeof kitRun === 'function') kitRun(); } catch (e) { console.error(e); }
   const pa = paRows(); const tasks = allTasks(); const now = new Date();
   const excAll = pa.filter(r => r.k === 'excess' && !r.actual);
   const exc = excAll.filter(r => !r.amend).sort((a, b) => b.delay - a.delay);
