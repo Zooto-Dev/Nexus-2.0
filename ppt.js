@@ -22,7 +22,10 @@ ACTIONS['ppt-map'] = el => {
   lpDialog('Map PPT to more articles', body, 'Save mapping', d => {
     const picked = $$('[data-pm]', d).filter(x => x.checked).map(x => x.dataset.pm);
     p.also = picked; Store.put('art_ppt', p);
-    audit('ppt.map', p.brand + ' · ' + p.article, picked.length ? 'also used for ' + picked.join(', ') : 'no other article');
+    // the mapped articles have their PPT now: their upload tasks close themselves
+    let closed = 0;
+    picked.forEach(a => { const t = pptTaskFor(p.brand, a); if (t) { t.done = t.done || {}; t.done[clDoneKey(t, t.start)] = { at: nowIso(), by: ME.name, remark: 'Uses the PPT of ' + p.article, photos: 0, files: 0, log: '' }; t.done_at = nowIso(); clPin(t); Store.put('checklist', t); closed++; } });
+    audit('ppt.map', p.brand + ' · ' + p.article, (picked.length ? 'also used for ' + picked.join(', ') : 'no other article') + (closed ? ' · ' + closed + ' upload task(s) closed' : ''));
     flash('PPT mapped to ' + picked.length + ' more article(s).'); VIEWS.packaging.render(); return '';
   });
 };
