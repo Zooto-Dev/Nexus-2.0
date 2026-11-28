@@ -92,7 +92,7 @@ function excessPurchaseRows() {
   Store.all('purchase_orders').filter(p => !p.cancelled && p.approval !== 'Rejected').forEach(p => (p.lines || []).forEach(l => {
     const moq = (p.moq_log || []).find(x => norm(x.material) === norm(l.material));
     const net = moq ? num(moq.net) : (l.net != null ? num(l.net) : null); if (net == null) return;
-    const extra = r3(num(l.qty) - net); if (extra <= 1e-6) return;
+    const extra = r3(num(l.qty) - Math.ceil(net - 1e-9)); if (extra <= 1e-6) return;   // rounding a need up to a whole unit is not excess
     out.push({ p, l, net, extra, value: extra * num(l.rate) * (1 + num(l.gst) / 100), why: moq ? 'MOQ · ' + (moq.reason || '') : 'above requirement', m: matBy(l.material) || {} });
   }));
   return out.sort((a, b) => b.value - a.value);
